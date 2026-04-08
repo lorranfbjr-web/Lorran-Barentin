@@ -92,7 +92,7 @@ input[type="file"]::file-selector-button {
   border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s;
 }
 .btn-download-all:hover { background: #0050d4; }
-.stories-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.stories-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 .story-card { background: #16213e; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.3); }
 .story-card .preview { cursor: pointer; position: relative; overflow: hidden; }
 .story-card .preview img { width: 100%; display: block; }
@@ -119,6 +119,9 @@ input[type="file"]::file-selector-button {
 .lightbox.active { display: flex; }
 .lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; border-radius: 8px; }
 .footer { text-align: center; padding: 20px; font-size: 0.75rem; color: #555; font-weight: 800; }
+@media (max-width: 1024px) {
+  .stories-grid { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-width: 768px) {
   .form-grid { grid-template-columns: 1fr; }
   .stories-grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
@@ -183,10 +186,10 @@ input[type="file"]::file-selector-button {
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <img id="lightboxImg" alt="Story ampliado">
 </div>
-<div class="footer">Jornal Razão &copy; 2026 — Ferramenta interna &mdash; v3</div>
+<div class="footer">Jornal Razão &copy; 2026 — Ferramenta interna &mdash; v4</div>
 <script>
 // ─── VERSION ───────────────────────────────────────────────────
-console.log('[JR Stories] v3 - logos base64, sem alpha extraction, font preload');
+console.log('[JR Stories] v4 - adicionado modelo Capa de Video');
 
 // ─── roundRect polyfill ────────────────────────────────────────
 if (!CanvasRenderingContext2D.prototype.roundRect) {
@@ -349,8 +352,10 @@ async function loadAndProcessLogos() {
   const footWhite50 = recolorCanvas(resizeCanvas(footCropped, null, 50), 255, 255, 255);
   const footWhite40 = recolorCanvas(resizeCanvas(footCropped, null, 40), 255, 255, 255);
   const footBlue50 = resizeCanvas(footCropped, null, 50);
+  const footBlueCapa = resizeCanvas(footCropped, null, 60); // larger for capa video
   console.log(`[JR] Footer white50: ${footWhite50.width}x${footWhite50.height}`);
   console.log(`[JR] Footer blue50: ${footBlue50.width}x${footBlue50.height}`);
+  console.log(`[JR] Footer blueCapa: ${footBlueCapa.width}x${footBlueCapa.height}`);
 
   // Watermark: create sized versions
   const wmCanvas = imgToCanvas(wmImg);
@@ -361,7 +366,7 @@ async function loadAndProcessLogos() {
 
   processedLogos = {
     circular: circResized,
-    footWhite: footWhite50, footWhiteSmall: footWhite40, footBlue: footBlue50,
+    footWhite: footWhite50, footWhiteSmall: footWhite40, footBlue: footBlue50, footBlueCapa,
     wmWhite480, wmWhite400, wmBlue480
   };
   console.log('[JR] Logos processed OK');
@@ -641,6 +646,80 @@ function renderModel3(photo, title, tag, logos) {
   return canvas;
 }
 
+// ─── MODEL 4: Capa de Vídeo ────────────────────────────────────
+function renderModelCapa(title, logos) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Solid orange/amber background
+  ctx.fillStyle = '#FF9F00';
+  ctx.fillRect(0, 0, W, H);
+
+  // Font settings matching Canva: size ~40px, weight 900, letter-spacing
+  const fontSize = 40;
+  const lineGap = 8;
+  const lineHeight = fontSize + lineGap;
+  const maxTextWidth = W - 240; // ~840px max for wrapping
+  const hlPadH = 20; // horizontal padding on highlight
+  const hlPadV = 10; // vertical padding on highlight
+  const hlRadius = 4;
+
+  ctx.font = '900 ' + fontSize + 'px Montserrat, Arial, sans-serif';
+  try { ctx.letterSpacing = '2px'; } catch(e) {}
+
+  // Word wrap centered
+  const lines = wrapText(ctx, title, maxTextWidth);
+
+  // Calculate highlight block sizes for each line
+  const lineMetrics = lines.map(function(line) {
+    return { text: line, width: ctx.measureText(line).width };
+  });
+
+  // Logo
+  const logo = logos.footBlueCapa;
+  const logoH = logo.height;
+  const gapLogoTitle = 24;
+
+  // Total content height
+  const totalTitleH = lines.length * (fontSize + hlPadV * 2) + (lines.length - 1) * lineGap;
+  const totalContentH = logoH + gapLogoTitle + totalTitleH;
+
+  // Center content at ~55% vertical
+  var contentStartY = Math.round(H * 0.55 - totalContentH / 2);
+
+  // Draw logo centered
+  ctx.drawImage(logo, Math.round((W - logo.width) / 2), contentStartY);
+
+  // Draw title lines with blue highlight
+  var titleY = contentStartY + logoH + gapLogoTitle;
+  ctx.textBaseline = 'top';
+
+  for (var i = 0; i < lines.length; i++) {
+    var lm = lineMetrics[i];
+    var hlW = lm.width + hlPadH * 2;
+    var hlH = fontSize + hlPadV * 2;
+    var hlX = (W - hlW) / 2;
+    var hlY = titleY;
+
+    // Blue highlight rectangle
+    ctx.fillStyle = '#0061FF';
+    ctx.beginPath();
+    ctx.roundRect(hlX, hlY, hlW, hlH, hlRadius);
+    ctx.fill();
+
+    // White text centered
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 ' + fontSize + 'px Montserrat, Arial, sans-serif';
+    try { ctx.letterSpacing = '2px'; } catch(e) {}
+    ctx.fillText(lm.text, (W - lm.width) / 2, hlY + hlPadV);
+
+    titleY += hlH + lineGap;
+  }
+
+  return canvas;
+}
+
 // ─── Canvas to Blob ─────────────────────────────────────────────
 function canvasToBlob(canvas) {
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
@@ -653,7 +732,7 @@ async function generateStories() {
   const fileInput = document.getElementById('foto');
 
   if (!title) { alert('Digite o título da notícia.'); return; }
-  if (!fileInput.files[0]) { alert('Faça upload de uma foto.'); return; }
+  const hasPhoto = !!fileInput.files[0];
 
   const btn = document.getElementById('btnGenerate');
   const loading = document.getElementById('loading');
@@ -672,44 +751,51 @@ async function generateStories() {
     ]);
     console.log('[JR] Fonts loaded');
 
-    // Load user photo
-    const photoDataUrl = await new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = e => resolve(e.target.result);
-      reader.readAsDataURL(fileInput.files[0]);
-    });
-    const photoImg = await loadImage(photoDataUrl);
-    console.log('[JR] Photo loaded: ' + photoImg.naturalWidth + 'x' + photoImg.naturalHeight);
-
-    // Crop black bars
-    const photo = cropBlackBars(photoImg);
-    console.log('[JR] Photo after crop: ' + photo.width + 'x' + photo.height);
-
     // Load logos (from cache)
     const logos = await loadAndProcessLogos();
 
-    // Generate all 3 models
+    // Load user photo (if provided)
+    var photo = null;
+    if (hasPhoto) {
+      const photoDataUrl = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(fileInput.files[0]);
+      });
+      const photoImg = await loadImage(photoDataUrl);
+      console.log('[JR] Photo loaded: ' + photoImg.naturalWidth + 'x' + photoImg.naturalHeight);
+      photo = cropBlackBars(photoImg);
+      console.log('[JR] Photo after crop: ' + photo.width + 'x' + photo.height);
+    }
+
+    // Generate models
     console.log('[JR] Rendering models...');
-    const canvas1 = renderModel1(photo, title, tag, logos);
-    const canvas2 = renderModel2(photo, title, tag, logos);
-    const canvas3 = renderModel3(photo, title, tag, logos);
-    console.log('[JR] Models rendered');
+    var models = [];
 
-    const [blob1, blob2, blob3] = await Promise.all([
-      canvasToBlob(canvas1), canvasToBlob(canvas2), canvasToBlob(canvas3)
-    ]);
+    // Story models only if photo was provided
+    if (photo) {
+      var canvas1 = renderModel1(photo, title, tag, logos);
+      var canvas2 = renderModel2(photo, title, tag, logos);
+      var canvas3 = renderModel3(photo, title, tag, logos);
+      var blob1 = await canvasToBlob(canvas1);
+      var blob2 = await canvasToBlob(canvas2);
+      var blob3 = await canvasToBlob(canvas3);
+      models.push({ name: 'Diagonal Azul', file: 'story_diagonal_azul.png', blob: blob1 });
+      models.push({ name: 'Diagonal Branco', file: 'story_diagonal_branco.png', blob: blob2 });
+      models.push({ name: 'Foto Total', file: 'story_foto_total.png', blob: blob3 });
+    }
 
-    generatedBlobs = {
-      'story_diagonal_azul.png': blob1,
-      'story_diagonal_branco.png': blob2,
-      'story_foto_total.png': blob3
-    };
+    // Capa de Video always generates (no photo needed)
+    var canvas4 = renderModelCapa(title, logos);
+    var blob4 = await canvasToBlob(canvas4);
+    models.push({ name: 'Capa de Vídeo', file: 'story_capa_video.png', blob: blob4 });
 
-    const models = [
-      { name: 'Diagonal Azul', file: 'story_diagonal_azul.png', blob: blob1 },
-      { name: 'Diagonal Branco', file: 'story_diagonal_branco.png', blob: blob2 },
-      { name: 'Foto Total', file: 'story_foto_total.png', blob: blob3 }
-    ];
+    console.log('[JR] Models rendered: ' + models.length);
+
+    generatedBlobs = {};
+    for (var i = 0; i < models.length; i++) {
+      generatedBlobs[models[i].file] = models[i].blob;
+    }
 
     const grid = document.getElementById('storiesGrid');
     grid.innerHTML = '';
