@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jornal Razão — Gerador de Stories</title>
+<link rel="icon" href="https://jornalrazao.com/wp-content/uploads/2026/04/IMG_2544-logo-jr-1.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@800;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Montserrat', Arial, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+a { color: #18ADFE; }
+
+/* Header */
+.header {
+  background: linear-gradient(135deg, #0D2481 0%, #0061FF 100%);
+  padding: 24px 32px;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.header h1 {
+  font-weight: 900;
+  font-size: 1.5rem;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.header p {
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: #D9F8FF;
+  margin-top: 4px;
+}
+
+/* Main */
+.main {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+/* Form */
+.form-section {
+  background: #16213e;
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 32px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+.form-group.full { grid-column: 1 / -1; }
+.form-group label {
+  font-weight: 800;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #18ADFE;
+  margin-bottom: 8px;
+}
+textarea, select, input[type="file"] {
+  background: #0f3460;
+  border: 2px solid #1a1a4e;
+  border-radius: 10px;
+  color: #fff;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 1rem;
+  padding: 14px 16px;
+  transition: border-color 0.2s;
+}
+textarea:focus, select:focus {
+  outline: none;
+  border-color: #0061FF;
+}
+textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2318ADFE' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+}
+input[type="file"] {
+  cursor: pointer;
+  padding: 12px 16px;
+}
+input[type="file"]::file-selector-button {
+  background: #0061FF;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-right: 12px;
+}
+
+/* Photo preview */
+.photo-preview {
+  margin-top: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: none;
+  max-height: 200px;
+}
+.photo-preview img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  display: block;
+}
+
+/* Generate button */
+.btn-generate {
+  display: block;
+  width: 100%;
+  margin-top: 24px;
+  padding: 18px;
+  background: linear-gradient(135deg, #0061FF 0%, #18ADFE 100%);
+  color: #fff;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 900;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 4px 15px rgba(0,97,255,0.4);
+}
+.btn-generate:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(0,97,255,0.6);
+}
+.btn-generate:active {
+  transform: translateY(0);
+}
+.btn-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Loading */
+.loading {
+  text-align: center;
+  padding: 40px;
+  display: none;
+}
+.loading.active { display: block; }
+.spinner {
+  width: 48px; height: 48px;
+  border: 4px solid #1a1a4e;
+  border-top-color: #0061FF;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Results */
+.results-section {
+  display: none;
+}
+.results-section.active { display: block; }
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.results-header h2 {
+  font-weight: 900;
+  font-size: 1.2rem;
+  color: #fff;
+}
+.btn-download-all {
+  background: #0061FF;
+  color: #fff;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-download-all:hover { background: #0050d4; }
+
+.stories-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.story-card {
+  background: #16213e;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+}
+.story-card .preview {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.story-card .preview img {
+  width: 100%;
+  display: block;
+}
+.story-card .preview::after {
+  content: 'Clique para ampliar';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  text-align: center;
+  padding: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.story-card .preview:hover::after { opacity: 1; }
+.story-card .card-footer {
+  padding: 14px;
+  text-align: center;
+}
+.story-card .card-footer h3 {
+  font-size: 0.85rem;
+  font-weight: 900;
+  margin-bottom: 10px;
+  color: #D9F8FF;
+}
+.btn-download {
+  background: linear-gradient(135deg, #0061FF, #18ADFE);
+  color: #fff;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 0.8rem;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s;
+  width: 100%;
+}
+.btn-download:hover { transform: translateY(-1px); }
+
+/* Lightbox */
+.lightbox {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.92);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+.lightbox.active { display: flex; }
+.lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding: 20px;
+  font-size: 0.75rem;
+  color: #555;
+  font-weight: 800;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .stories-grid {
+    grid-template-columns: 1fr;
+    max-width: 400px;
+    margin: 0 auto;
+  }
+  .header h1 { font-size: 1.2rem; }
+  .main { padding: 20px 12px; }
+  .form-section { padding: 20px; }
+}
+@media (max-width: 480px) {
+  .stories-grid { max-width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>JORNAL RAZÃO</h1>
+  <p>Gerador de Stories</p>
+</div>
+
+<div class="main">
+  <div class="form-section">
+    <div class="form-grid">
+      <div class="form-group full">
+        <label for="titulo">Título da notícia</label>
+        <textarea id="titulo" placeholder="Digite o título da notícia..." required></textarea>
+      </div>
+      <div class="form-group">
+        <label for="tag">Tag / Editoria</label>
+        <select id="tag">
+          <option value="SEGURANÇA">SEGURANÇA</option>
+          <option value="TRÂNSITO">TRÂNSITO</option>
+          <option value="POLÍTICA">POLÍTICA</option>
+          <option value="ECONOMIA">ECONOMIA</option>
+          <option value="ACIDENTE">ACIDENTE</option>
+          <option value="ESPORTE">ESPORTE</option>
+          <option value="MEIO AMBIENTE">MEIO AMBIENTE</option>
+          <option value="GERAL">GERAL</option>
+          <option value="INCÊNDIO">INCÊNDIO</option>
+          <option value="JUSTIÇA">JUSTIÇA</option>
+          <option value="EDUCAÇÃO">EDUCAÇÃO</option>
+          <option value="OBITUÁRIO">OBITUÁRIO</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="foto">Upload de foto</label>
+        <input type="file" id="foto" accept=".jpg,.jpeg,.png,.webp">
+        <div class="photo-preview" id="photoPreview">
+          <img id="previewImg" alt="Preview">
+        </div>
+      </div>
+    </div>
+    <button class="btn-generate" id="btnGenerate" onclick="generateStories()">Gerar Stories</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p>Gerando stories...</p>
+  </div>
+
+  <div class="results-section" id="results">
+    <div class="results-header">
+      <h2>Stories gerados</h2>
+      <button class="btn-download-all" onclick="downloadAll()">Baixar todos (ZIP)</button>
+    </div>
+    <div class="stories-grid" id="storiesGrid"></div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" alt="Story ampliado">
+</div>
+
+<div class="footer">Jornal Razão &copy; 2026 — Ferramenta interna</div>
+
+<script>
+// ─── Globals ────────────────────────────────────────────────────
+const W = 1080, H = 1920;
+let logoCircularImg = null;
+let logoFooterImg = null;
+let logoWatermarkImg = null;
+let generatedBlobs = {};
+
+const LOGO_CIRCULAR_URL = 'https://jornalrazao.com/wp-content/uploads/2026/04/IMG_2544-logo-jr-1.png';
+const LOGO_FOOTER_URL = 'https://jornalrazao.com/wp-content/uploads/2026/04/IMG_2547-logo-jr-1.png';
+const LOGO_WATERMARK_URL = 'https://jornalrazao.com/wp-content/uploads/2026/04/IMG_2542-logo-jr-1.png';
+
+// ─── Photo preview ──────────────────────────────────────────────
+document.getElementById('foto').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  const preview = document.getElementById('photoPreview');
+  const img = document.getElementById('previewImg');
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      img.src = ev.target.result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  } else {
+    preview.style.display = 'none';
+  }
+});
+
+// ─── Load image (with CORS proxy fallback) ──────────────────────
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => {
+      // Fallback: try without crossOrigin (will taint canvas but at least loads)
+      const img2 = new Image();
+      img2.crossOrigin = 'anonymous';
+      const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+      img2.onload = () => resolve(img2);
+      img2.onerror = () => reject(new Error('Falha ao carregar logo: ' + url));
+      img2.src = proxy;
+    };
+    img.src = url;
+  });
+}
+
+// ─── Extract alpha from RGB-only logo ───────────────────────────
+function extractAlpha(img, multiplier) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i+1], b = d[i+2];
+    const dist = Math.sqrt((255-r)**2 + (255-g)**2 + (255-b)**2);
+    const alpha = Math.min(Math.round(dist * multiplier), 255);
+    d[i+3] = alpha;
+  }
+  ctx.putImageData(data, 0, 0);
+  return c;
+}
+
+// ─── Auto-crop content area (for footer logo) ──────────────────
+function autoCropCanvas(canvas, threshold) {
+  const ctx = canvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = data.data;
+  const w = canvas.width, h = canvas.height;
+  let top = h, bottom = 0, left = w, right = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const r = d[i], g = d[i+1], b = d[i+2];
+      const dist = Math.sqrt((255-r)**2 + (255-g)**2 + (255-b)**2);
+      if (dist > threshold) {
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  if (top >= bottom || left >= right) return canvas;
+  const cw = right - left + 1;
+  const ch = bottom - top + 1;
+  const cropped = document.createElement('canvas');
+  cropped.width = cw; cropped.height = ch;
+  const cCtx = cropped.getContext('2d');
+  cCtx.drawImage(canvas, left, top, cw, ch, 0, 0, cw, ch);
+  return cropped;
+}
+
+// ─── Make white version (keep alpha, set RGB to white) ──────────
+function makeWhiteVersion(canvas) {
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvas, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255; d[i+1] = 255; d[i+2] = 255;
+  }
+  ctx.putImageData(data, 0, 0);
+  return c;
+}
+
+// ─── Make blue (#0061FF) version ────────────────────────────────
+function makeBlueVersion(canvas) {
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvas, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 0; d[i+1] = 97; d[i+2] = 255;
+  }
+  ctx.putImageData(data, 0, 0);
+  return c;
+}
+
+// ─── Resize canvas helper ───────────────────────────────────────
+function resizeCanvas(src, maxW, maxH) {
+  const ratio = Math.min(maxW ? maxW / src.width : Infinity, maxH ? maxH / src.height : Infinity, 1);
+  const nw = Math.round(src.width * ratio);
+  const nh = Math.round(src.height * ratio);
+  const c = document.createElement('canvas');
+  c.width = nw; c.height = nh;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(src, 0, 0, nw, nh);
+  return c;
+}
+
+// ─── Processed logo caches ──────────────────────────────────────
+let processedLogos = null;
+
+async function loadAndProcessLogos() {
+  if (processedLogos) return processedLogos;
+
+  const [circImg, footImg, wmImg] = await Promise.all([
+    loadImage(LOGO_CIRCULAR_URL),
+    loadImage(LOGO_FOOTER_URL),
+    loadImage(LOGO_WATERMARK_URL)
+  ]);
+
+  // Circular logo: extract alpha, resize to 75x75
+  const circAlpha = extractAlpha(circImg, 3);
+  const circResized = resizeCanvas(circAlpha, 75, 75);
+
+  // Footer logo: crop content, extract alpha, make white and blue versions
+  const footRaw = document.createElement('canvas');
+  footRaw.width = footImg.width; footRaw.height = footImg.height;
+  footRaw.getContext('2d').drawImage(footImg, 0, 0);
+  const footCropped = autoCropCanvas(footRaw, 30);
+  const footAlpha = extractAlpha(
+    (() => { const img2 = new Image(); const c = document.createElement('canvas');
+      c.width = footCropped.width; c.height = footCropped.height;
+      c.getContext('2d').drawImage(footCropped, 0, 0); return c; })(),
+    0 // we'll apply mult manually below
+  );
+  // Re-do: extract alpha from the cropped content
+  const footCtx = footCropped.getContext('2d');
+  const footData = footCtx.getImageData(0, 0, footCropped.width, footCropped.height);
+  const fd = footData.data;
+  for (let i = 0; i < fd.length; i += 4) {
+    const r = fd[i], g = fd[i+1], b = fd[i+2];
+    const dist = Math.sqrt((255-r)**2 + (255-g)**2 + (255-b)**2);
+    fd[i+3] = Math.min(Math.round(dist * 10), 255);
+  }
+  footCtx.putImageData(footData, 0, 0);
+
+  const footWhite32 = makeWhiteVersion(resizeCanvas(footCropped, null, 32));
+  const footWhite28 = makeWhiteVersion(resizeCanvas(footCropped, null, 28));
+  const footBlue32 = makeBlueVersion(resizeCanvas(footCropped, null, 32));
+
+  // Watermark: extract alpha, make white and blue versions
+  const wmAlpha = extractAlpha(wmImg, 3);
+  const wmWhite480 = makeWhiteVersion(resizeCanvas(wmAlpha, 480, null));
+  const wmWhite400 = makeWhiteVersion(resizeCanvas(wmAlpha, 400, null));
+  const wmBlue480 = makeBlueVersion(resizeCanvas(wmAlpha, 480, null));
+
+  processedLogos = {
+    circular: circResized,
+    footWhite32, footWhite28, footBlue32,
+    wmWhite480, wmWhite400, wmBlue480
+  };
+  return processedLogos;
+}
+
+// ─── Crop black bars from photo ─────────────────────────────────
+function cropBlackBars(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  const w = c.width, h = c.height;
+
+  function isRowDark(y) {
+    let sum = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      sum += (d[i] + d[i+1] + d[i+2]) / 3;
+    }
+    return (sum / w) < 25;
+  }
+
+  let top = 0, bottom = h - 1;
+  while (top < h && isRowDark(top)) top++;
+  while (bottom > top && isRowDark(bottom)) bottom--;
+
+  if (top === 0 && bottom === h - 1) return img;
+
+  const nh = bottom - top + 1;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = nh;
+  out.getContext('2d').drawImage(c, 0, top, w, nh, 0, 0, w, nh);
+  return out;
+}
+
+// ─── Fill+crop photo into area ──────────────────────────────────
+function drawPhotoCropped(ctx, photo, dx, dy, dw, dh) {
+  const sw = photo.width || photo.naturalWidth;
+  const sh = photo.height || photo.naturalHeight;
+  const scale = Math.max(dw / sw, dh / sh);
+  const scaledW = sw * scale;
+  const scaledH = sh * scale;
+  const ox = (scaledW - dw) / 2;
+  const oy = (scaledH - dh) * 0.55; // bias 55% down
+  ctx.drawImage(photo, -ox / scale, -oy / scale, dw / scale, dh / scale, dx, dy, dw, dh);
+}
+
+// ─── Draw circular logo with pill ───────────────────────────────
+function drawCircularLogo(ctx, logo, x, y, pillAlpha) {
+  const size = 75;
+  const padding = 12;
+  const pillX = x - padding;
+  const pillY = y - padding;
+  const pillW = size + padding * 2;
+  const pillH = size + padding * 2;
+  const pillR = pillH / 2;
+
+  // Draw pill background
+  ctx.save();
+  ctx.fillStyle = `rgba(0,0,0,${pillAlpha / 255})`;
+  ctx.beginPath();
+  ctx.roundRect(pillX, pillY, pillW, pillH, pillR);
+  ctx.fill();
+  ctx.restore();
+
+  // Draw circular logo
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(logo, x, y, size, size);
+  ctx.restore();
+}
+
+// ─── Word wrap title ────────────────────────────────────────────
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// ─── Draw tag pill ──────────────────────────────────────────────
+function drawTag(ctx, text, x, y, bgColor, textColor) {
+  ctx.font = '900 22px Montserrat';
+  const tw = ctx.measureText(text).width;
+  const ph = 18, pv = 10;
+  const pillW = tw + ph * 2;
+  const pillH = 22 + pv * 2;
+  const pillR = 6;
+
+  ctx.fillStyle = bgColor;
+  ctx.beginPath();
+  ctx.roundRect(x, y, pillW, pillH, pillR);
+  ctx.fill();
+
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + ph, y + pillH / 2);
+  return { w: pillW, h: pillH };
+}
+
+// ─── Draw title lines ───────────────────────────────────────────
+function drawTitle(ctx, text, x, y, maxWidth, fontSize, lineHeight, color, shadow) {
+  ctx.font = `800 ${fontSize}px Montserrat`;
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'top';
+  if (shadow) {
+    ctx.shadowColor = `rgba(0,0,0,${shadow.alpha / 255})`;
+    ctx.shadowOffsetX = shadow.ox;
+    ctx.shadowOffsetY = shadow.oy;
+    ctx.shadowBlur = 4;
+  }
+  const lines = wrapText(ctx, text, maxWidth);
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x, y + i * lineHeight);
+  }
+  ctx.shadowColor = 'transparent';
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.shadowBlur = 0;
+  return lines.length * lineHeight;
+}
+
+// ─── MODEL 1: Diagonal Azul ────────────────────────────────────
+function renderModel1(photo, title, tag, logos) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#0061FF';
+  ctx.fillRect(0, 0, W, H);
+
+  // Photo (top 55% + 100px)
+  const photoH = Math.round(H * 0.55) + 100;
+  drawPhotoCropped(ctx, photo, 0, 0, W, photoH);
+
+  // Diagonal polygon
+  const dTopLeft = H * 0.48;
+  const dTopRight = H * 0.58;
+  ctx.fillStyle = '#0061FF';
+  ctx.beginPath();
+  ctx.moveTo(0, dTopLeft);
+  ctx.lineTo(W, dTopRight);
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  // Tag
+  const tagY = dTopRight + 40;
+  const tagDims = drawTag(ctx, tag, 70, tagY, 'rgba(255,255,255,0.12)', '#18ADFE');
+
+  // Title
+  drawTitle(ctx, title, 70, tagY + tagDims.h + 30, W - 140, 64, 80, '#FFFFFF', null);
+
+  // Watermark
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  ctx.drawImage(logos.wmWhite480, W - 500, H - 480);
+  ctx.restore();
+
+  // Circular logo
+  drawCircularLogo(ctx, logos.circular, 50, 65, 75);
+
+  // Footer logo
+  const fl = logos.footWhite32;
+  ctx.drawImage(fl, Math.round((W - fl.width) / 2), H - 85);
+
+  return canvas;
+}
+
+// ─── MODEL 2: Diagonal Branco ──────────────────────────────────
+function renderModel2(photo, title, tag, logos) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background white
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+
+  // Photo
+  const photoH = Math.round(H * 0.55) + 100;
+  drawPhotoCropped(ctx, photo, 0, 0, W, photoH);
+
+  // Diagonal polygon white
+  const dTopLeft = H * 0.48;
+  const dTopRight = H * 0.58;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.moveTo(0, dTopLeft);
+  ctx.lineTo(W, dTopRight);
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  // Blue decorative line on diagonal
+  ctx.strokeStyle = `rgba(0, 97, 255, ${200/255})`;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, dTopLeft);
+  ctx.lineTo(W, dTopRight);
+  ctx.stroke();
+
+  // Tag
+  const tagY = dTopRight + 40;
+  const tagDims = drawTag(ctx, tag, 70, tagY, '#0061FF', '#FFFFFF');
+
+  // Title
+  drawTitle(ctx, title, 70, tagY + tagDims.h + 30, W - 140, 64, 80, '#0061FF', null);
+
+  // Watermark (blue/original)
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  ctx.drawImage(logos.wmBlue480, W - 500, H - 480);
+  ctx.restore();
+
+  // Circular logo
+  drawCircularLogo(ctx, logos.circular, 50, 65, 75);
+
+  // Footer logo (blue)
+  const fl = logos.footBlue32;
+  ctx.drawImage(fl, Math.round((W - fl.width) / 2), H - 85);
+
+  return canvas;
+}
+
+// ─── MODEL 3: Foto Total ───────────────────────────────────────
+function renderModel3(photo, title, tag, logos) {
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Full bleed photo
+  drawPhotoCropped(ctx, photo, 0, 0, W, H);
+
+  // Dark overlay 25%
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Aggressive gradient bottom 55%
+  const gradStart = Math.round(H * 0.45);
+  const grad = ctx.createLinearGradient(0, gradStart, 0, H);
+  const steps = 32;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const curved = Math.pow(t, 1.8);
+    const alpha = curved * (245 / 255);
+    grad.addColorStop(t, `rgba(0,0,0,${alpha})`);
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, gradStart, W, H - gradStart);
+
+  // Tag
+  const tagY = H - 480;
+  const tagDims = drawTag(ctx, tag, 70, tagY, `rgba(0,97,255,${200/255})`, '#FFFFFF');
+
+  // Title with shadow
+  drawTitle(ctx, title, 70, tagY + tagDims.h + 20, W - 140, 56, 72, '#FFFFFF', { ox: 2, oy: 2, alpha: 150 });
+
+  // Watermark
+  ctx.save();
+  ctx.globalAlpha = 0.07;
+  ctx.drawImage(logos.wmWhite400, W - 430, H - 430);
+  ctx.restore();
+
+  // Circular logo
+  drawCircularLogo(ctx, logos.circular, 48, 65, 80);
+
+  // Footer logo
+  const fl = logos.footWhite28;
+  ctx.drawImage(fl, Math.round((W - fl.width) / 2), H - 75);
+
+  return canvas;
+}
+
+// ─── Canvas to Blob ─────────────────────────────────────────────
+function canvasToBlob(canvas) {
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+// ─── Main generate ──────────────────────────────────────────────
+async function generateStories() {
+  const title = document.getElementById('titulo').value.trim();
+  const tag = document.getElementById('tag').value;
+  const fileInput = document.getElementById('foto');
+
+  if (!title) { alert('Digite o título da notícia.'); return; }
+  if (!fileInput.files[0]) { alert('Faça upload de uma foto.'); return; }
+
+  const btn = document.getElementById('btnGenerate');
+  const loading = document.getElementById('loading');
+  const results = document.getElementById('results');
+
+  btn.disabled = true;
+  loading.classList.add('active');
+  results.classList.remove('active');
+
+  try {
+    // Load photo
+    const photoFile = fileInput.files[0];
+    const photoDataUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(photoFile);
+    });
+    const photoImg = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = photoDataUrl;
+    });
+
+    // Crop black bars
+    const photo = cropBlackBars(photoImg);
+
+    // Load logos
+    const logos = await loadAndProcessLogos();
+
+    // Generate 3 models
+    const canvas1 = renderModel1(photo, title, tag, logos);
+    const canvas2 = renderModel2(photo, title, tag, logos);
+    const canvas3 = renderModel3(photo, title, tag, logos);
+
+    // Convert to blobs
+    const [blob1, blob2, blob3] = await Promise.all([
+      canvasToBlob(canvas1),
+      canvasToBlob(canvas2),
+      canvasToBlob(canvas3)
+    ]);
+
+    generatedBlobs = {
+      'story_diagonal_azul.png': blob1,
+      'story_diagonal_branco.png': blob2,
+      'story_foto_total.png': blob3
+    };
+
+    // Build result cards
+    const models = [
+      { name: 'Diagonal Azul', file: 'story_diagonal_azul.png', blob: blob1 },
+      { name: 'Diagonal Branco', file: 'story_diagonal_branco.png', blob: blob2 },
+      { name: 'Foto Total', file: 'story_foto_total.png', blob: blob3 }
+    ];
+
+    const grid = document.getElementById('storiesGrid');
+    grid.innerHTML = '';
+
+    for (const m of models) {
+      const url = URL.createObjectURL(m.blob);
+      const card = document.createElement('div');
+      card.className = 'story-card';
+      card.innerHTML = `
+        <div class="preview" onclick="openLightbox('${url}')">
+          <img src="${url}" alt="${m.name}">
+        </div>
+        <div class="card-footer">
+          <h3>${m.name}</h3>
+          <button class="btn-download" onclick="downloadFile('${url}', '${m.file}')">Baixar</button>
+        </div>
+      `;
+      grid.appendChild(card);
+    }
+
+    results.classList.add('active');
+  } catch (err) {
+    console.error(err);
+    alert('Erro ao gerar stories: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('active');
+  }
+}
+
+// ─── Download helpers ───────────────────────────────────────────
+function downloadFile(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function downloadAll() {
+  const zip = new JSZip();
+  for (const [name, blob] of Object.entries(generatedBlobs)) {
+    zip.file(name, blob);
+  }
+  const content = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(content);
+  downloadFile(url, 'stories_jornal_razao.zip');
+  URL.revokeObjectURL(url);
+}
+
+// ─── Lightbox ───────────────────────────────────────────────────
+function openLightbox(url) {
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightbox').classList.add('active');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('active');
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
+</script>
+</body>
+</html>
