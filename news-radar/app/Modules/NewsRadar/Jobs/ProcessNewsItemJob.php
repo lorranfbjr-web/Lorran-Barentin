@@ -133,7 +133,11 @@ class ProcessNewsItemJob implements ShouldQueue
 
         } catch (\Throwable $e) {
             $rawItem->update(['processing_status' => RawItemStatus::Failed]);
-            Log::error("[NewsRadar] Process failed for {$rawItem->normalized_url}: {$e->getMessage()}");
+            Log::error('ProcessNewsItemJob falhou', [
+                'exception' => $e,
+                'raw_item_id' => $rawItem->id ?? null,
+                'source' => $rawItem->source->name ?? 'unknown',
+            ]);
         }
     }
 
