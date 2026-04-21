@@ -15,11 +15,11 @@ class ListingItem
 
     public function toRawPayload(): array
     {
-        return array_filter([
+        return [
             'title' => $this->title,
             'image_url' => $this->imageUrl,
             'excerpt' => $this->excerpt,
-        ], fn ($v) => $v !== null);
+        ];
     }
 }
 

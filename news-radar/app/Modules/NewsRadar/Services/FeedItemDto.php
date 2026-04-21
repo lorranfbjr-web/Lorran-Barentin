@@ -18,7 +18,7 @@ class FeedItemDto
 
     public function toRawPayload(): array
     {
-        return array_filter([
+        return [
             'title' => $this->title,
             'author' => $this->author,
             'content_html' => $this->contentHtml,
@@ -27,7 +27,7 @@ class FeedItemDto
             'published_at' => $this->publishedAt,
             'guid' => $this->guid,
             'categories' => $this->categories ?: null,
-        ], fn ($v) => $v !== null);
+        ];
     }
 
     public function hasFullContent(): bool
