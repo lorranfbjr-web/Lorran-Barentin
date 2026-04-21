@@ -126,8 +126,8 @@ class ProcessNewsItemJob implements ShouldQueue
 
             $rawItem->update(['processing_status' => RawItemStatus::Promoted]);
 
-            // Dispatch AI classification
-            ClassifyNewsItemJob::dispatch($newsItem->id)->onQueue('news-radar-ai');
+            // TODO: reativar quando habilitar IA
+            // ClassifyNewsItemJob::dispatch($newsItem->id)->onQueue('news-radar-ai');
 
             Log::debug("[NewsRadar] Processed: {$resolved->title} (score: {$resolved->extractionCompleteness})");
 
