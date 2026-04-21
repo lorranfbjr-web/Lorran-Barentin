@@ -41,11 +41,11 @@ class FieldResolverService
 
         // Subtitle
         $resolved->subtitle = $htmlExtracted['subtitle'] ?? $rawPayload['excerpt'] ?? null;
-        $resolved->fieldSources['subtitle'] = $htmlExtracted['field_sources']['subtitle'] ?? ($rawPayload['excerpt'] ? 'raw_payload' : null);
+        $resolved->fieldSources['subtitle'] = $htmlExtracted['field_sources']['subtitle'] ?? (!empty($rawPayload['excerpt']) ? 'raw_payload' : null);
 
         // Author
         $resolved->authorRaw = $htmlExtracted['author_raw'] ?? $rawPayload['author'] ?? null;
-        $resolved->fieldSources['author'] = $htmlExtracted['field_sources']['author'] ?? ($rawPayload['author'] ? 'raw_payload' : null);
+        $resolved->fieldSources['author'] = $htmlExtracted['field_sources']['author'] ?? (!empty($rawPayload['author']) ? 'raw_payload' : null);
 
         // Body: prefer HTML-extracted body over feed content
         if (!empty($htmlExtracted['body_html'])) {
@@ -65,11 +65,11 @@ class FieldResolverService
         } else {
             $resolved->heroImageUrl = $htmlExtracted['hero_image_url'] ?? $rawPayload['image_url'] ?? null;
         }
-        $resolved->fieldSources['hero_image_url'] = $htmlExtracted['field_sources']['hero_image_url'] ?? ($rawPayload['image_url'] ? 'raw_payload' : null);
+        $resolved->fieldSources['hero_image_url'] = $htmlExtracted['field_sources']['hero_image_url'] ?? (!empty($rawPayload['image_url']) ? 'raw_payload' : null);
 
         // Published date
         $resolved->publishedAtRaw = $htmlExtracted['published_at_raw'] ?? $rawPayload['published_at'] ?? null;
-        $resolved->publishedAtSource = $htmlExtracted['field_sources']['published_at'] ?? ($rawPayload['published_at'] ? 'rss' : null);
+        $resolved->publishedAtSource = $htmlExtracted['field_sources']['published_at'] ?? (!empty($rawPayload['published_at']) ? 'rss' : null);
 
         // Categories
         $resolved->categories = array_unique(array_merge(
