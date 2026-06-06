@@ -479,9 +479,32 @@ class JrTituloIngest extends Command
             'gancho_pts' => $ganchoPts,
         ];
 
+        // Regra CONDICIONAL aspas × registro (interação detectada nos dados).
+        $la = $a['leveAspas'];
+        $delta = fn ($com, $sem) => $sem ? (int) round((($com / $sem) - 1) * 40) : 0;
+        $leveCom = $la['leve+aspasInicio']['avgViews'] ?? 0;
+        $leveSem = $la['leve+semAspas']['avgViews'] ?? 0;
+        $pesCom  = $la['pesado+aspasInicio']['avgViews'] ?? 0;
+        $pesSem  = $la['pesado+semAspas']['avgViews'] ?? 0;
+        $regraCondicional = [
+            'feature' => 'aspas_inicio',
+            'descricao' => 'Aspas no início do título interage com o registro do tema. Em pauta LEVE, abrir com aspas reduz o clique; em pauta de PESO, ajuda levemente.',
+            'tema_leve' => [
+                'acao' => 'penalizar',
+                'pts' => min(0, $delta($leveCom, $leveSem)),
+                'evidencia' => sprintf('leve sem aspas %d views vs com aspas %d', (int) $leveSem, (int) $leveCom),
+            ],
+            'tema_pesado' => [
+                'acao' => 'neutro_ou_bonus',
+                'pts' => max(0, $delta($pesCom, $pesSem)),
+                'evidencia' => sprintf('pesado com aspas %d views vs sem %d', (int) $pesCom, (int) $pesSem),
+            ],
+        ];
+
         return [
             'gerado_em' => Carbon::now()->toIso8601String(),
             'fonte' => 'GA4 jr_titulo_sinal (2025+2026)',
+            'regra_condicional_aspas' => $regraCondicional,
             'baseline' => ['avg_views' => round($a['baseViews'], 1), 'avg_engaj_por_view' => round($a['baseEpv'], 2), 'n' => $a['n']],
             'observacao' => 'lift_views = clique (alcance); lift_engajamento = atenção/retenção. Use os dois: alcance pra feed, atenção pra qualidade.',
             'pesos_feature' => $pesosFeature,
