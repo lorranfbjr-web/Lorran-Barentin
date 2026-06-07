@@ -107,6 +107,7 @@ class JrLinkExtract extends Command
                 'url_norm' => $this->clf->normalizeUrl($url),
                 'host' => $host,
                 'fonte_tipo' => $row['fonte_tipo'],
+                'origem' => 'whatsapp',
                 'categoria' => $categoria,
                 'eixo' => $eixo,
                 'temperatura' => $temperatura,
@@ -120,7 +121,7 @@ class JrLinkExtract extends Command
                 'markdown' => $markdown,
                 'created_at' => Carbon::now(),
             ]], ['url_hash'], [
-                'url', 'url_norm', 'host', 'fonte_tipo', 'categoria', 'eixo', 'temperatura',
+                'url', 'url_norm', 'host', 'fonte_tipo', 'origem', 'categoria', 'eixo', 'temperatura',
                 'score', 'metodo', 'titulo', 'data_pub', 'autor', 'char_len', 'status',
                 'markdown', 'created_at',
             ]);
@@ -266,6 +267,7 @@ class JrLinkExtract extends Command
             ->where('temperatura', 'quente')
             ->where('duplicada', false)
             ->orderByDesc('score')->orderByDesc('id')
+            ->limit(self::REPORT_CAP)
             ->get();
 
         if ($quentes->isEmpty()) {
@@ -332,89 +334,94 @@ class JrLinkExtract extends Command
 
     // ───────────────────────── relatório ─────────────────────────
 
+    private const REPORT_CAP = 50;
+
     private function relatorioTexto(): string
     {
-        // Ordena: quentes primeiro, depois maior score, depois id. Duplicadas afundam.
-        $rows = DB::table('jr_link_extracao')
-            ->orderByRaw("CASE WHEN duplicada = 1 THEN 1 ELSE 0 END asc")
-            ->orderByRaw("CASE WHEN temperatura = 'quente' THEN 0 ELSE 1 END asc")
-            ->orderByDesc('score')
-            ->orderBy('id')
+        // Resumo é sobre TODO o conjunto; o detalhe lista só os QUENTES não-dup (cap).
+        $total = DB::table('jr_link_extracao')->count();
+        $nDup = DB::table('jr_link_extracao')->where('duplicada', true)->count();
+
+        $porCat = $this->contagem('categoria');
+        $porStatus = $this->contagem('status');
+        $porOrigem = $this->contagem('origem');
+
+        $quentes = DB::table('jr_link_extracao')
+            ->where('temperatura', 'quente')->where('duplicada', false)
+            ->orderByDesc('score')->orderByDesc('id')
             ->get();
-        $total = $rows->count();
+        $qPrim = $quentes->where('eixo', 'primaria');
+        $qConc = $quentes->where('eixo', 'concorrente');
+
         $L = [];
         $L[] = '################################################################';
-        $L[] = '   JR LINK — EXTRAÇÃO + CLASSIFICAÇÃO + QUENTE/FRIO';
-        $L[] = '   ' . $total . ' links  ·  categoria por HOST RESOLVIDO  ·  pauta por 2 eixos';
+        $L[] = '   JR LINK — PAUTAS QUENTES (WhatsApp + feeds NewsRadar)';
         $L[] = '   gerado: ' . Carbon::now()->format('d/m/Y H:i');
         $L[] = '################################################################';
-
-        $porMetodo = [];
-        $porCat = [];
-        $porStatus = [];
-        $nDup = 0;
-        $quentes = $rows->where('temperatura', 'quente')->where('duplicada', false);
-        $qPrim = $quentes->where('eixo', 'primaria')->count();
-        $qConc = $quentes->where('eixo', 'concorrente')->count();
-        foreach ($rows as $r) {
-            $porMetodo[$r->metodo] = ($porMetodo[$r->metodo] ?? 0) + 1;
-            $porCat[$r->categoria] = ($porCat[$r->categoria] ?? 0) + 1;
-            $porStatus[$r->status] = ($porStatus[$r->status] ?? 0) + 1;
-            if ($r->duplicada) {
-                $nDup++;
-            }
-        }
         $L[] = '';
-        $L[] = '🔥 QUENTES: ' . $quentes->count()
-            . '   (✍️ primária pronta=' . $qPrim . '  ·  📡 radar apurar=' . $qConc . ')';
+        $L[] = sprintf('CONTAGEM:  processados=%d   ·   🔥 quentes(não-dup)=%d   ·   ⟂ duplicadas=%d',
+            $total, $quentes->count(), $nDup);
+        $L[] = sprintf('           ✍️ primária pronta=%d   ·   📡 radar apurar=%d', $qPrim->count(), $qConc->count());
         $L[] = '';
-        $L[] = 'RESUMO:';
+        $L[] = 'RESUMO (todo o conjunto):';
         $L[] = '  por categoria: ' . $this->kv($porCat);
         $L[] = '  por status...: ' . $this->kv($porStatus);
-        $L[] = '  por método...: ' . $this->kv($porMetodo);
-        $L[] = '  duplicadas...: ' . $nDup;
+        $L[] = '  por origem...: ' . $this->kv($porOrigem);
         $L[] = '';
-        $L[] = 'LEGENDA categoria: ✅ primária (pode reescrever) · 🚫 concorrente (RADAR, não reescreve)';
-        $L[] = '                   🟦 próprio (jornalrazao, já publicado) · 📱 social · ◽ outro (revisar)';
-        $L[] = 'LEGENDA status...: ok (corpo real) · parcial (só título/metadado) · vazio (muro/sem conteúdo)';
-        $L[] = 'EIXO pauta.......: ✍️ primária = vira pauta direto · 📡 concorrente = só apurar, NUNCA reescrever';
+        $L[] = 'LEGENDA: ✅ primária pode reescrever · 🚫 concorrente RADAR (NUNCA reescreve) · status ok/parcial/vazio';
+        if ($quentes->count() > self::REPORT_CAP) {
+            $L[] = '';
+            $L[] = sprintf('⚠️  Exibindo top %d quentes por score (de %d).', self::REPORT_CAP, $quentes->count());
+        }
 
         $i = 0;
-        foreach ($rows as $r) {
+        $L[] = '';
+        $L[] = '████ ✍️ PRIMÁRIA — pronta pra escrever ████';
+        foreach ($qPrim->take(self::REPORT_CAP) as $r) {
             $i++;
-            [$marca] = $this->marcador($r->categoria);
-            $dup = $r->duplicada ? 'SIM ⟂ (duplicada de outra URL normalizada)' : 'não';
-            $temp = $this->temperaturaLabel($r->eixo, $r->temperatura, (int) $r->score);
-            $L[] = '';
-            $L[] = '================================================================';
-            $L[] = sprintf('LINK %02d/%02d   %s', $i, $total, $temp);
-            $L[] = sprintf('  categoria: %s   |   status: [%s]   |   dup: %s',
-                $marca, strtoupper($r->status), $dup);
-            $L[] = 'URL......: ' . $r->url;
-            $L[] = 'host.....: ' . ($r->host ?? '?') . '   (norm: ' . ($r->url_norm ?? '-') . ')';
-            $L[] = 'captura..: fonte_tipo=' . ($r->fonte_tipo ?? '-') . '  |  método=' . $r->metodo . '  |  chars=' . $r->char_len;
-            $L[] = 'título...: ' . ($r->titulo ?? '(não extraído)');
-            $L[] = 'data.....: ' . ($r->data_pub ?? '-') . '  |  autor: ' . ($r->autor ?? '-');
-            $L[] = '';
-            $L[] = 'MARKDOWN (primeiros ~500 chars):';
-            $md = trim((string) $r->markdown);
-            $L[] = $md === '' ? '   (vazio)' : '   ' . str_replace("\n", "\n   ", mb_strimwidth($md, 0, 500, '…'));
+            $this->blocoQuente($L, $i, $r);
         }
+        if ($qPrim->isEmpty()) {
+            $L[] = '   (nenhuma)';
+        }
+
+        $L[] = '';
+        $L[] = '████ 📡 RADAR — apurar por conta (NÃO reescrever) ████';
+        foreach ($qConc->take(self::REPORT_CAP) as $r) {
+            $i++;
+            $this->blocoQuente($L, $i, $r);
+        }
+        if ($qConc->isEmpty()) {
+            $L[] = '   (nenhuma)';
+        }
+
         $L[] = '';
         $L[] = '================================================================';
 
         return implode("\n", $L);
     }
 
-    private function temperaturaLabel(?string $eixo, ?string $temperatura, int $score): string
+    private function blocoQuente(array &$L, int $i, object $r): void
     {
-        if (! in_array($eixo, ['primaria', 'concorrente'], true)) {
-            return 'pauta: — (não pontua)';
-        }
-        $icone = $temperatura === 'quente' ? '🔥 QUENTE' : '❄️ frio';
-        $eixoLabel = $eixo === 'primaria' ? '✍️ PRIMÁRIA (escrever)' : '📡 RADAR (apurar)';
+        [$marca] = $this->marcador($r->categoria);
+        $L[] = '';
+        $L[] = '----------------------------------------------------------------';
+        $L[] = sprintf('#%02d  🔥 score=%d  ·  %s  ·  [%s]', $i, (int) $r->score, $marca, strtoupper($r->status));
+        $L[] = 'título: ' . ($r->titulo ?? '(não extraído)');
+        $L[] = 'URL...: ' . $r->url;
+        $L[] = 'host..: ' . ($r->host ?? '?') . '  ·  origem=' . ($r->origem ?? '-')
+            . '  ·  fonte=' . ($r->fonte_tipo ?? '-') . '  ·  data=' . ($r->data_pub ?? '-');
+    }
 
-        return sprintf('pauta: %s  ·  %s  ·  score=%d', $icone, $eixoLabel, $score);
+    /** Contagem agrupada por coluna sobre todo o conjunto. */
+    private function contagem(string $col): array
+    {
+        $out = [];
+        foreach (DB::table('jr_link_extracao')->select($col, DB::raw('count(*) c'))->groupBy($col)->get() as $g) {
+            $out[$g->$col ?? '-'] = $g->c;
+        }
+
+        return $out;
     }
 
     /** @return array{0:string} marcador visível da categoria */
