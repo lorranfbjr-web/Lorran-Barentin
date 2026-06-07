@@ -128,10 +128,19 @@ class JrLinkExtract extends Command
         }
     }
 
-    /** Reaplica categoria/status/host/url_norm a partir do que já está salvo. */
+    /**
+     * Reaplica categoria/status/host/url_norm a partir do que já está salvo.
+     * SÓ rows do WhatsApp — feed (news_items) usa o adaptador da ponte (categoria
+     * default=concorrente, régua concorrente_feed); reclassificar feed aqui aplicaria
+     * a semântica errada. Reclass de feed = re-rodar `jrlink:bridge-news` (sem fetch).
+     */
     private function reclassPass(): void
     {
-        $rows = DB::table('jr_link_extracao')->orderBy('id')->get();
+        $rows = DB::table('jr_link_extracao')
+            ->where(function ($q) {
+                $q->where('origem', 'whatsapp')->orWhereNull('origem');
+            })
+            ->orderBy('id')->get();
         foreach ($rows as $r) {
             $host = $this->clf->resolveHost($r->url, $r->markdown);
             $categoria = $this->clf->categoria($host);

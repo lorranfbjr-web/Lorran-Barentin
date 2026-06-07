@@ -210,6 +210,15 @@ class PautaClassifier
         $regua = $this->cfg['reguas'][$reguaKey ?? $categoria] ?? ($this->cfg['reguas'][$categoria] ?? []);
         $texto = mb_strtolower(trim(($titulo ?? '') . ' ' . $corpo));
         $cats = array_map('mb_strtolower', $categories);
+        $tituloTxt = mb_strtolower(trim((string) $titulo));
+
+        // Colunismo / horóscopo / opinião = NÃO-PAUTA. Sinal principal = categories;
+        // complemento = título. Nunca por palavra solta no corpo.
+        $col = $this->cfg['colunismo'] ?? [];
+        if ((bool) array_intersect($cats, array_map('mb_strtolower', $col['categories'] ?? []))
+            || $this->contemAlgum($tituloTxt, $col['termos_titulo'] ?? [])) {
+            return ['-', null, 0];
+        }
 
         $cidadeHit = $this->contemAlgum($texto, $this->cfg['regiao']['cidades'] ?? []);
         $estadoHit = $this->contemAlgum($texto, $this->cfg['regiao']['estado'] ?? []);
@@ -238,7 +247,6 @@ class PautaClassifier
         // Rotina/clima decidida pelo TÍTULO (+ categories); previsão pura morre,
         // matéria com gancho/utilidade no título escapa.
         $rotina = $this->cfg['rotina_penalty'] ?? [];
-        $tituloTxt = mb_strtolower(trim((string) $titulo));
         $rotinaTitulo = $this->contemAlgum($tituloTxt, $rotina['termos'] ?? [])
             || (bool) array_intersect($cats, array_map('mb_strtolower', $rotina['categories'] ?? []));
         $hookTitulo = $this->contemAlgum($tituloTxt, $this->cfg['temas']['gancho_top']['termos'] ?? [])

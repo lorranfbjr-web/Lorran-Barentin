@@ -227,6 +227,21 @@ return [
     // Páginas institucionais / home (sem matéria) — não pontuam (não-pauta).
     'home_paths' => ['', '/', '/home', '/inicio', '/início', '/index.html', '/index.php', '/pt', '/pt-br'],
 
+    // Colunismo / horóscopo / opinião = NÃO-PAUTA. Sinal PRINCIPAL = categories da
+    // fonte (pega coluna sem keyword no título). Complemento = poucos termos no
+    // TÍTULO. Nunca mata por palavra solta no corpo.
+    'colunismo' => [
+        'categories' => [
+            'coluna', 'colunas', 'colunista', 'colunistas', 'opinião', 'opiniao',
+            'horóscopo', 'horoscopo', 'signos', 'astrologia', 'astros',
+            'crônica', 'cronica', 'cronistas',
+        ],
+        'termos_titulo' => [
+            'horóscopo', 'horoscopo', 'signos', 'astros', 'previsão dos astros',
+            'previsao dos astros',
+        ],
+    ],
+
     // Réguas DIFERENTES por eixo. Score = base + bônus região + pesos de tema.
     'reguas' => [
         // EIXO 1 — primária (gov/oficial): "vira pauta direto".
