@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Process;
 class JrLinkExtract extends Command
 {
     protected $signature = 'jrlink:extract '
-        . '{--limit=20 : Quantas URLs recentes processar} '
+        . '{--limit=500 : Quantas URLs recentes processar} '
         . '{--print-only : Só regenera o relatório do que já está no banco} '
         . '{--reclass : Reclassifica os registros existentes (categoria/status/dedup) SEM re-fetch}';
 
