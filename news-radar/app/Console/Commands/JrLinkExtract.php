@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Jr\PautaClassifier;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -31,9 +32,12 @@ class JrLinkExtract extends Command
 
     private array $cfg = [];
 
+    private PautaClassifier $clf;
+
     public function handle(): int
     {
         $this->cfg = config('jrlink');
+        $this->clf = new PautaClassifier($this->cfg);
 
         if ($this->option('reclass')) {
             $this->info('Reclassificando registros existentes (sem re-fetch)…');
@@ -90,15 +94,17 @@ class JrLinkExtract extends Command
 
             $markdown = $res['text'] ?? null;
             $titulo = $res['title'] ?? null;
-            $host = $this->resolveHost($url, $markdown);
-            $categoria = $this->categoria($host);
-            $status = $this->gateStatus($categoria, $titulo, $markdown);
-            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $titulo, $markdown, $url);
+            $host = $this->clf->resolveHost($url, $markdown);
+            $categoria = $this->clf->categoria($host);
+            $corpo = $this->clf->corpoFromMarkdown($markdown);
+            $cats = $this->clf->categoriesFromMarkdown($markdown);
+            $status = $this->clf->gateStatus($categoria, $titulo, $corpo);
+            [$eixo, $temperatura, $score] = $this->clf->temperatura($categoria, $titulo, $corpo, $cats, $url);
 
             DB::table('jr_link_extracao')->upsert([[
                 'url' => $url,
                 'url_hash' => hash('sha256', $url),
-                'url_norm' => $this->normalizeUrl($url),
+                'url_norm' => $this->clf->normalizeUrl($url),
                 'host' => $host,
                 'fonte_tipo' => $row['fonte_tipo'],
                 'categoria' => $categoria,
@@ -126,13 +132,15 @@ class JrLinkExtract extends Command
     {
         $rows = DB::table('jr_link_extracao')->orderBy('id')->get();
         foreach ($rows as $r) {
-            $host = $this->resolveHost($r->url, $r->markdown);
-            $categoria = $this->categoria($host);
-            $status = $this->gateStatus($categoria, $r->titulo, $r->markdown);
-            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $r->titulo, $r->markdown, $r->url);
+            $host = $this->clf->resolveHost($r->url, $r->markdown);
+            $categoria = $this->clf->categoria($host);
+            $corpo = $this->clf->corpoFromMarkdown($r->markdown);
+            $cats = $this->clf->categoriesFromMarkdown($r->markdown);
+            $status = $this->clf->gateStatus($categoria, $r->titulo, $corpo);
+            [$eixo, $temperatura, $score] = $this->clf->temperatura($categoria, $r->titulo, $corpo, $cats, $r->url);
             DB::table('jr_link_extracao')->where('id', $r->id)->update([
                 'host' => $host,
-                'url_norm' => $this->normalizeUrl($r->url),
+                'url_norm' => $this->clf->normalizeUrl($r->url),
                 'categoria' => $categoria,
                 'status' => $status,
                 'eixo' => $eixo,
@@ -225,211 +233,7 @@ class JrLinkExtract extends Command
         return null;
     }
 
-    // ───────────────────────── classificador ─────────────────────────
-
-    /**
-     * Host resolvido (final): prioriza o `url:`/`hostname:` do frontmatter do
-     * trafilatura ou o `URL Source:` do Jina (que já são o destino do encurtador);
-     * cai pro host da URL original. Sempre sem "www.".
-     */
-    private function resolveHost(string $url, ?string $markdown): ?string
-    {
-        $md = (string) $markdown;
-
-        // trafilatura: frontmatter YAML "url:" (URL final resolvida)
-        if (preg_match('/^url:\s*(\S+)/mi', $md, $m)) {
-            if ($h = $this->hostDe($m[1])) {
-                return $h;
-            }
-        }
-        // trafilatura: frontmatter "hostname:"
-        if (preg_match('/^hostname:\s*(\S+)/mi', $md, $m)) {
-            $h = $this->limpaHost($m[1]);
-            if ($h !== '') {
-                return $h;
-            }
-        }
-        // Jina: "URL Source: https://..."
-        if (preg_match('/^URL Source:\s*(\S+)/mi', $md, $m)) {
-            if ($h = $this->hostDe($m[1])) {
-                return $h;
-            }
-        }
-
-        return $this->hostDe($url);
-    }
-
-    private function hostDe(string $url): ?string
-    {
-        $h = parse_url($url, PHP_URL_HOST);
-        if (! $h) {
-            return null;
-        }
-
-        return $this->limpaHost($h);
-    }
-
-    private function limpaHost(string $h): string
-    {
-        $h = mb_strtolower(trim($h));
-        $h = preg_replace('/^www\d*\./', '', $h);
-
-        return rtrim($h, '.');
-    }
-
-    /** host casa o domínio D se host == D ou termina em ".D". */
-    private function hostCasa(string $host, array $dominios): bool
-    {
-        foreach ($dominios as $d) {
-            $d = mb_strtolower($d);
-            if ($host === $d || str_ends_with($host, '.' . $d)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /** Categoria pelo host resolvido: proprio -> social -> primaria -> concorrente -> outro. */
-    private function categoria(?string $host): string
-    {
-        if (! $host) {
-            return 'outro';
-        }
-        if ($this->hostCasa($host, $this->cfg['proprio'] ?? [])) {
-            return 'proprio';
-        }
-        if ($this->hostCasa($host, $this->cfg['social'] ?? [])) {
-            return 'social';
-        }
-        foreach (($this->cfg['gov_suffixes'] ?? []) as $suf) {
-            if (str_ends_with($host, mb_strtolower($suf))) {
-                return 'primaria';
-            }
-        }
-        foreach (($this->cfg['gov_signals'] ?? []) as $sig) {
-            if (str_contains($host, mb_strtolower($sig))) {
-                return 'primaria';
-            }
-        }
-        if ($this->hostCasa($host, $this->cfg['concorrente'] ?? [])) {
-            return 'concorrente';
-        }
-
-        return 'outro';
-    }
-
-    /**
-     * Gate de qualidade honesto, recalculado do markdown salvo (sem re-fetch).
-     *  - social: nunca "ok" — título com conteúdo (legenda) = "parcial"; senão "vazio".
-     *  - muro de login / boilerplate detectado: "parcial" (tem título) ou "vazio".
-     *  - corpo real de matéria (>= min_corpo_ok): "ok".
-     */
-    private function gateStatus(string $categoria, ?string $titulo, ?string $markdown): string
-    {
-        $corpo = $this->corpoLimpo($markdown);
-        $temTitulo = $this->tituloUtil($titulo);
-
-        if ($categoria === 'social') {
-            return $temTitulo ? 'parcial' : 'vazio';
-        }
-        if ($this->ehMuro($corpo)) {
-            return $temTitulo ? 'parcial' : 'vazio';
-        }
-        if (mb_strlen(trim($corpo)) >= (int) ($this->cfg['min_corpo_ok'] ?? 300)) {
-            return 'ok';
-        }
-
-        return $temTitulo ? 'parcial' : 'vazio';
-    }
-
-    /** Remove frontmatter YAML (trafilatura) e cabeçalho do Jina, deixa só o corpo. */
-    private function corpoLimpo(?string $markdown): string
-    {
-        $md = trim((string) $markdown);
-        if ($md === '') {
-            return '';
-        }
-        // frontmatter YAML --- ... ---
-        if (str_starts_with($md, '---')) {
-            $parts = preg_split('/^---\s*$/m', $md, 3);
-            if (is_array($parts) && count($parts) >= 3) {
-                $md = trim($parts[2]);
-            }
-        }
-        // Jina: "Markdown Content:" marca o início do corpo
-        if (preg_match('/Markdown Content:\s*(.*)$/s', $md, $m)) {
-            $md = trim($m[1]);
-        }
-        // tira o cabeçalho Title:/URL Source: do Jina, se sobrou
-        $md = preg_replace('/^(Title|URL Source|Published Time|Markdown Content):.*$/mi', '', $md);
-
-        return trim((string) $md);
-    }
-
-    private function ehMuro(string $corpo): bool
-    {
-        $c = mb_strtolower($corpo);
-        foreach (($this->cfg['walls'] ?? []) as $w) {
-            if (str_contains($c, mb_strtolower($w))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function tituloUtil(?string $titulo): bool
-    {
-        $t = mb_strtolower(trim((string) $titulo));
-        if (mb_strlen($t) <= 3) {
-            return false;
-        }
-
-        return ! in_array($t, $this->cfg['generic_titles'] ?? [], true);
-    }
-
     // ───────────────────────── dedup ─────────────────────────
-
-    /**
-     * Normaliza a URL p/ dedup: minúsculo no esquema+host, http->https, tira barra
-     * final, remove tracking (utm_*, igsh, fbclid, mode, …) e fragmento.
-     */
-    private function normalizeUrl(string $url): string
-    {
-        $p = parse_url(trim($url));
-        if ($p === false || empty($p['host'])) {
-            return mb_strtolower(rtrim(trim($url), '/'));
-        }
-
-        $scheme = mb_strtolower($p['scheme'] ?? 'https');
-        if ($scheme === 'http') {
-            $scheme = 'https';
-        }
-        $host = $this->limpaHost($p['host']);
-        $port = isset($p['port']) && ! in_array((int) $p['port'], [80, 443], true) ? ':' . $p['port'] : '';
-        $path = rtrim($p['path'] ?? '', '/');
-
-        $query = '';
-        if (! empty($p['query'])) {
-            parse_str($p['query'], $q);
-            $drop = array_map('mb_strtolower', $this->cfg['tracking_params'] ?? []);
-            $kept = [];
-            foreach ($q as $k => $v) {
-                $lk = mb_strtolower($k);
-                if (str_starts_with($lk, 'utm_') || in_array($lk, $drop, true)) {
-                    continue;
-                }
-                $kept[$k] = $v;
-            }
-            if ($kept) {
-                ksort($kept);
-                $query = '?' . http_build_query($kept);
-            }
-        }
-
-        return $scheme . '://' . $host . $port . $path . $query;
-    }
 
     /** Marca como duplicada toda URL normalizada repetida, preservando a mais antiga. */
     private function dedupPass(): void
@@ -437,7 +241,7 @@ class JrLinkExtract extends Command
         $rows = DB::table('jr_link_extracao')->orderBy('id')->get(['id', 'url', 'url_norm']);
         $canonico = [];
         foreach ($rows as $r) {
-            $norm = $r->url_norm ?: $this->normalizeUrl($r->url);
+            $norm = $r->url_norm ?: $this->clf->normalizeUrl($r->url);
             $dup = isset($canonico[$norm]);
             if (! $dup) {
                 $canonico[$norm] = $r->id;
@@ -447,133 +251,6 @@ class JrLinkExtract extends Command
                 'duplicada' => $dup,
             ]);
         }
-    }
-
-    // ───────────────────────── quente / frio ─────────────────────────
-
-    /**
-     * Classifica a pauta em dois eixos independentes (config/jrlink.php > reguas).
-     * Região é detectada pelo CONTEÚDO (título + markdown), nunca por fonte_cidade.
-     *
-     * @return array{0:?string,1:?string,2:int} [eixo, temperatura, score]
-     */
-    private function temperatura(string $categoria, ?string $titulo, ?string $markdown, ?string $url = null): array
-    {
-        // Só primária e concorrente viram pauta; os demais não pontuam.
-        if (! in_array($categoria, ['primaria', 'concorrente'], true)) {
-            return ['-', null, 0];
-        }
-
-        // Guard: home/portal institucional (URL raiz) ou título genérico = não-pauta.
-        // Matéria real de .gov.br tem path de notícia (não cai aqui).
-        if ($this->ehHomeOuGenerico($url, $titulo)) {
-            return ['-', null, 0];
-        }
-
-        $regua = $this->cfg['reguas'][$categoria] ?? [];
-        $texto = mb_strtolower(trim(($titulo ?? '') . ' ' . $this->corpoLimpo($markdown)));
-        $cats = $this->frontmatterCategories($markdown);
-
-        $cidadeHit = $this->contemAlgum($texto, $this->cfg['regiao']['cidades'] ?? []);
-        $estadoHit = $this->contemAlgum($texto, $this->cfg['regiao']['estado'] ?? []);
-        $ganchoHit = $this->contemAlgum($texto, $this->cfg['temas']['gancho_top']['termos'] ?? []);
-        $utilHit = $this->contemAlgum($texto, $this->cfg['temas']['utilidade']['termos'] ?? []);
-        $temaHit = $this->contemAlgum($texto, $this->cfg['temas']['tema_leve']['termos'] ?? []);
-
-        $score = (int) ($regua['base'] ?? 0);
-        if ($cidadeHit) {
-            $score += (int) ($regua['peso_regiao_cidade'] ?? 0);
-        } elseif ($estadoHit) {
-            $score += (int) ($regua['peso_regiao_estado'] ?? 0);
-        }
-        if ($ganchoHit) {
-            $score += (int) ($this->cfg['temas']['gancho_top']['peso'] ?? 0);
-        }
-        if ($utilHit) {
-            $score += (int) ($this->cfg['temas']['utilidade']['peso'] ?? 0);
-        }
-        if ($temaHit) {
-            $score += (int) ($this->cfg['temas']['tema_leve']['peso'] ?? 0);
-        }
-
-        // Gancho conta como gancho_top OU utilidade (serviço/indignação forte).
-        $ganchoForte = $ganchoHit || $utilHit;
-
-        // Rotina/clima: penalidade forte + NUNCA esquenta. Decidido pelo TÍTULO
-        // (+ categories do frontmatter), não pelo corpo — assim previsão PURA morre,
-        // mas matéria cujo ângulo real é gancho/utilidade no título (ex.: "supersafra
-        // da tainha") escapa, mesmo citando o clima no corpo.
-        $rotina = $this->cfg['rotina_penalty'] ?? [];
-        $tituloTxt = mb_strtolower(trim((string) $titulo));
-        $rotinaTitulo = $this->contemAlgum($tituloTxt, $rotina['termos'] ?? [])
-            || (bool) array_intersect($cats, array_map('mb_strtolower', $rotina['categories'] ?? []));
-        $hookTitulo = $this->contemAlgum($tituloTxt, $this->cfg['temas']['gancho_top']['termos'] ?? [])
-            || $this->contemAlgum($tituloTxt, $this->cfg['temas']['utilidade']['termos'] ?? []);
-        if ($rotinaTitulo && ! $hookTitulo) {
-            $score = max(0, $score - (int) ($rotina['peso'] ?? 10));
-
-            return [$categoria, 'frio', $score];
-        }
-
-        // Requisitos duros (eixo concorrente mata ruído nacional).
-        $okRequisitos = true;
-        if (($regua['exige_regiao'] ?? false) && ! ($cidadeHit || $estadoHit)) {
-            $okRequisitos = false;
-        }
-        if (($regua['exige_gancho'] ?? false) && ! $ganchoForte) {
-            $okRequisitos = false;
-        }
-
-        $quente = $okRequisitos && $score >= (int) ($regua['corte_quente'] ?? 999);
-
-        return [$categoria, $quente ? 'quente' : 'frio', $score];
-    }
-
-    /** URL raiz/home (path "/" ou quase) ou título genérico => não é pauta. */
-    private function ehHomeOuGenerico(?string $url, ?string $titulo): bool
-    {
-        if ($url) {
-            $path = rtrim(mb_strtolower((string) parse_url($url, PHP_URL_PATH)), '/');
-            $homes = array_map(fn ($p) => rtrim(mb_strtolower($p), '/'), $this->cfg['home_paths'] ?? ['', '/']);
-            if (in_array($path, $homes, true)) {
-                return true;
-            }
-        }
-        $t = mb_strtolower(trim((string) $titulo));
-        if ($t !== '' && in_array($t, $this->cfg['generic_titles'] ?? [], true)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /** Categorias do frontmatter trafilatura (linha "categories: [...]"), minúsculas. */
-    private function frontmatterCategories(?string $markdown): array
-    {
-        if (! preg_match('/^categories:\s*(.+)$/mi', (string) $markdown, $m)) {
-            return [];
-        }
-        preg_match_all("/'([^']+)'|\"([^\"]+)\"|([^\[\],\s][^,\]]*)/u", $m[1], $mm);
-        $out = [];
-        foreach (array_merge($mm[1], $mm[2], $mm[3]) as $c) {
-            $c = mb_strtolower(trim($c));
-            if ($c !== '') {
-                $out[] = $c;
-            }
-        }
-
-        return $out;
-    }
-
-    private function contemAlgum(string $texto, array $termos): bool
-    {
-        foreach ($termos as $t) {
-            if ($t !== '' && str_contains($texto, mb_strtolower($t))) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     // ───────────────────────── notificação isolada ─────────────────────────

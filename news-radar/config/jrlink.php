@@ -120,11 +120,17 @@ return [
     'min_corpo_ok' => 300,
 
     // Parâmetros de tracking removidos na normalização da URL (dedup).
-    // utm_* é tratado por prefixo separadamente.
+    // UMA verdade só — união das listas WhatsApp + NewsRadar. utm_* por prefixo.
     'tracking_params' => [
-        'igsh', 'igshid', 'fbclid', 'gclid', 'mode', 'utm_source', 'utm_medium',
-        'utm_campaign', 'utm_term', 'utm_content', 'utm_id', 's', 'ref', 'rdid',
-        'share_url',
+        // social / share
+        'igsh', 'igshid', 'fbclid', 'gclid', 'mode', 'rdid', 'share_url',
+        '__twitter_impression', 'guccounter', 'guce_referrer', 'guce_referrer_sig',
+        // utm explícitos (além do prefixo utm_*)
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+        // mailchimp / analytics
+        'mc_cid', 'mc_eid', '_ga',
+        // genéricos
+        's', 'ref',
     ],
 
     /*
