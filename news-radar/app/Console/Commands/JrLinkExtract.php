@@ -93,7 +93,7 @@ class JrLinkExtract extends Command
             $host = $this->resolveHost($url, $markdown);
             $categoria = $this->categoria($host);
             $status = $this->gateStatus($categoria, $titulo, $markdown);
-            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $titulo, $markdown);
+            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $titulo, $markdown, $url);
 
             DB::table('jr_link_extracao')->upsert([[
                 'url' => $url,
@@ -129,7 +129,7 @@ class JrLinkExtract extends Command
             $host = $this->resolveHost($r->url, $r->markdown);
             $categoria = $this->categoria($host);
             $status = $this->gateStatus($categoria, $r->titulo, $r->markdown);
-            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $r->titulo, $r->markdown);
+            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $r->titulo, $r->markdown, $r->url);
             DB::table('jr_link_extracao')->where('id', $r->id)->update([
                 'host' => $host,
                 'url_norm' => $this->normalizeUrl($r->url),
@@ -457,19 +457,27 @@ class JrLinkExtract extends Command
      *
      * @return array{0:?string,1:?string,2:int} [eixo, temperatura, score]
      */
-    private function temperatura(string $categoria, ?string $titulo, ?string $markdown): array
+    private function temperatura(string $categoria, ?string $titulo, ?string $markdown, ?string $url = null): array
     {
         // Só primária e concorrente viram pauta; os demais não pontuam.
         if (! in_array($categoria, ['primaria', 'concorrente'], true)) {
             return ['-', null, 0];
         }
 
+        // Guard: home/portal institucional (URL raiz) ou título genérico = não-pauta.
+        // Matéria real de .gov.br tem path de notícia (não cai aqui).
+        if ($this->ehHomeOuGenerico($url, $titulo)) {
+            return ['-', null, 0];
+        }
+
         $regua = $this->cfg['reguas'][$categoria] ?? [];
         $texto = mb_strtolower(trim(($titulo ?? '') . ' ' . $this->corpoLimpo($markdown)));
+        $cats = $this->frontmatterCategories($markdown);
 
         $cidadeHit = $this->contemAlgum($texto, $this->cfg['regiao']['cidades'] ?? []);
         $estadoHit = $this->contemAlgum($texto, $this->cfg['regiao']['estado'] ?? []);
         $ganchoHit = $this->contemAlgum($texto, $this->cfg['temas']['gancho_top']['termos'] ?? []);
+        $utilHit = $this->contemAlgum($texto, $this->cfg['temas']['utilidade']['termos'] ?? []);
         $temaHit = $this->contemAlgum($texto, $this->cfg['temas']['tema_leve']['termos'] ?? []);
 
         $score = (int) ($regua['base'] ?? 0);
@@ -481,8 +489,30 @@ class JrLinkExtract extends Command
         if ($ganchoHit) {
             $score += (int) ($this->cfg['temas']['gancho_top']['peso'] ?? 0);
         }
+        if ($utilHit) {
+            $score += (int) ($this->cfg['temas']['utilidade']['peso'] ?? 0);
+        }
         if ($temaHit) {
             $score += (int) ($this->cfg['temas']['tema_leve']['peso'] ?? 0);
+        }
+
+        // Gancho conta como gancho_top OU utilidade (serviço/indignação forte).
+        $ganchoForte = $ganchoHit || $utilHit;
+
+        // Rotina/clima: penalidade forte + NUNCA esquenta. Decidido pelo TÍTULO
+        // (+ categories do frontmatter), não pelo corpo — assim previsão PURA morre,
+        // mas matéria cujo ângulo real é gancho/utilidade no título (ex.: "supersafra
+        // da tainha") escapa, mesmo citando o clima no corpo.
+        $rotina = $this->cfg['rotina_penalty'] ?? [];
+        $tituloTxt = mb_strtolower(trim((string) $titulo));
+        $rotinaTitulo = $this->contemAlgum($tituloTxt, $rotina['termos'] ?? [])
+            || (bool) array_intersect($cats, array_map('mb_strtolower', $rotina['categories'] ?? []));
+        $hookTitulo = $this->contemAlgum($tituloTxt, $this->cfg['temas']['gancho_top']['termos'] ?? [])
+            || $this->contemAlgum($tituloTxt, $this->cfg['temas']['utilidade']['termos'] ?? []);
+        if ($rotinaTitulo && ! $hookTitulo) {
+            $score = max(0, $score - (int) ($rotina['peso'] ?? 10));
+
+            return [$categoria, 'frio', $score];
         }
 
         // Requisitos duros (eixo concorrente mata ruído nacional).
@@ -490,13 +520,49 @@ class JrLinkExtract extends Command
         if (($regua['exige_regiao'] ?? false) && ! ($cidadeHit || $estadoHit)) {
             $okRequisitos = false;
         }
-        if (($regua['exige_gancho'] ?? false) && ! $ganchoHit) {
+        if (($regua['exige_gancho'] ?? false) && ! $ganchoForte) {
             $okRequisitos = false;
         }
 
         $quente = $okRequisitos && $score >= (int) ($regua['corte_quente'] ?? 999);
 
         return [$categoria, $quente ? 'quente' : 'frio', $score];
+    }
+
+    /** URL raiz/home (path "/" ou quase) ou título genérico => não é pauta. */
+    private function ehHomeOuGenerico(?string $url, ?string $titulo): bool
+    {
+        if ($url) {
+            $path = rtrim(mb_strtolower((string) parse_url($url, PHP_URL_PATH)), '/');
+            $homes = array_map(fn ($p) => rtrim(mb_strtolower($p), '/'), $this->cfg['home_paths'] ?? ['', '/']);
+            if (in_array($path, $homes, true)) {
+                return true;
+            }
+        }
+        $t = mb_strtolower(trim((string) $titulo));
+        if ($t !== '' && in_array($t, $this->cfg['generic_titles'] ?? [], true)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /** Categorias do frontmatter trafilatura (linha "categories: [...]"), minúsculas. */
+    private function frontmatterCategories(?string $markdown): array
+    {
+        if (! preg_match('/^categories:\s*(.+)$/mi', (string) $markdown, $m)) {
+            return [];
+        }
+        preg_match_all("/'([^']+)'|\"([^\"]+)\"|([^\[\],\s][^,\]]*)/u", $m[1], $mm);
+        $out = [];
+        foreach (array_merge($mm[1], $mm[2], $mm[3]) as $c) {
+            $c = mb_strtolower(trim($c));
+            if ($c !== '') {
+                $out[] = $c;
+            }
+        }
+
+        return $out;
     }
 
     private function contemAlgum(string $texto, array $termos): bool

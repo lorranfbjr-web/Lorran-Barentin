@@ -161,7 +161,7 @@ return [
 
     // Temas/ganchos com peso (somados ao score).
     'temas' => [
-        // Topo: conquista-superação + indignação (o que mais performou no GA).
+        // Topo: conquista-superação + indignação/polêmica (o que mais performou no GA).
         'gancho_top' => [
             'peso' => 5,
             'termos' => [
@@ -172,6 +172,22 @@ return [
                 'denuncia', 'escândalo', 'escandalo', 'abandonado', 'descaso', 'golpe',
                 'fraude', 'preso', 'prisão', 'prisao', 'morto', 'morre', 'morreu',
                 'acidente', 'resgate', 'resgatado', 'desaparecido',
+                // indignação / polêmica (reforço)
+                'polêmica', 'polemica', 'revoga', 'revogou', 'revogada', 'revogação',
+                'após pressão', 'apos pressao', 'sob pressão', 'irregular', 'irregularidade',
+                'critica', 'crítica', 'criticado', 'se nega', 'recua', 'recuou', 'protesto',
+            ],
+        ],
+        // Utilidade / gente / economia-regional: serviço que afeta a vida do leitor.
+        'utilidade' => [
+            'peso' => 4,
+            'termos' => [
+                'creche', 'vaga', 'programa', 'benefício', 'beneficio', 'gratuito',
+                'gratuita', 'apoio', 'auxílio', 'auxilio', 'mutirão', 'mutirao',
+                'inscrição', 'inscricao', 'concurso', 'aprovado',
+                // economia-regional (pesca/safra/produção que movimenta a região)
+                'safra', 'supersafra', 'tainha', 'pescador', 'pesca', 'fartura',
+                'colheita', 'produção recorde', 'movimenta',
             ],
         ],
         // Tema leve: feel-good / economia / bicho / meio-ambiente.
@@ -180,12 +196,30 @@ return [
             'termos' => [
                 'cachorro', 'cão', 'cao', 'gato', 'animal', 'adoção', 'adocao', 'pet',
                 'meio ambiente', 'natureza', 'praia', 'sustentável', 'sustentavel',
-                'economia', 'emprego', 'vaga', 'renda', 'preço', 'preco', 'custo',
+                'economia', 'emprego', 'renda', 'preço', 'preco', 'custo',
                 'festival', 'festa', 'show', 'solidári', 'doação', 'doacao',
                 'voluntári', 'criança', 'crianca', 'idoso', 'saúde', 'saude',
             ],
         ],
     ],
+
+    // Rotina/clima: NUNCA esquenta (mesmo regional). Penalidade forte + força frio.
+    // Casado no título+markdown e nas categories do frontmatter.
+    'rotina_penalty' => [
+        'peso' => 10,
+        'termos' => [
+            'previsao', 'previsão', 'previsão do tempo', 'previsao do tempo',
+            'sol predomina', 'risco de chuva', 'temperaturas', 'máximas', 'maximas',
+            'mínimas', 'minimas', 'pancadas de chuva', 'frente fria', 'tempo instável',
+            'tempo instavel', 'sol entre nuvens', 'céu nublado', 'ceu nublado',
+            'fim de semana traz', 'chuva no fim de semana', 'sol e calor',
+        ],
+        // frontmatter categories (trafilatura) que indicam rotina.
+        'categories' => ['clima', 'previsão', 'previsao', 'tempo', 'meteorologia'],
+    ],
+
+    // Páginas institucionais / home (sem matéria) — não pontuam (não-pauta).
+    'home_paths' => ['', '/', '/home', '/inicio', '/início', '/index.html', '/index.php', '/pt', '/pt-br'],
 
     // Réguas DIFERENTES por eixo. Score = base + bônus região + pesos de tema.
     'reguas' => [
