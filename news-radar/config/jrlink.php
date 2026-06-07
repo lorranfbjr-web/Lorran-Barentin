@@ -241,6 +241,7 @@ return [
         ],
         // EIXO 2 — concorrente: "vale eu apurar por conta?". Régua DURA.
         // NUNCA reescrevível — só radar. Exige regional + gancho forte (mata ruído nacional).
+        // Usada pelo caminho WhatsApp (corpus misto nacional/regional).
         'concorrente' => [
             'base' => 0,
             'peso_regiao_cidade' => 3,
@@ -248,6 +249,22 @@ return [
             'exige_regiao' => true,
             'exige_gancho' => true, // gancho_top obrigatório (tema leve não basta)
             'corte_quente' => 7,
+        ],
+        // EIXO 2 (FEED) — ponte news_items. Corpus é TODO regional-SC, então
+        // "regional + gancho" sozinho seleciona quase tudo. Aqui a barra sobe:
+        // exige CIDADE específica (SC genérico não basta) + gancho_top + um 2º sinal
+        // (tema/utilidade) via corte alto. Não afeta a régua do WhatsApp.
+        'concorrente_feed' => [
+            'base' => 0,
+            'peso_regiao_cidade' => 3,
+            'peso_regiao_estado' => 0,  // estado-SC não pontua (todo o corpus é SC)
+            'exige_regiao' => true,
+            'exige_cidade' => true,     // precisa bater cidade da cobertura
+            'exige_gancho' => true,     // gancho_top obrigatório
+            // corte calibrado no corpus 48h (sweep): 11->107q, 12->81q, 13->63q.
+            // 13 = exige cidade + gancho + utilidade + tema (sinal forte e múltiplo).
+            // Suba/baixe aqui pra afrouxar/apertar o radar de feeds.
+            'corte_quente' => 13,
         ],
     ],
 ];

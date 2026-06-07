@@ -195,7 +195,7 @@ class PautaClassifier
      * @param  array  $categories  categorias da fonte (frontmatter ou coluna), minúsculas
      * @return array{0:?string,1:?string,2:int} [eixo, temperatura, score]
      */
-    public function temperatura(string $categoria, ?string $titulo, string $corpo, array $categories = [], ?string $url = null): array
+    public function temperatura(string $categoria, ?string $titulo, string $corpo, array $categories = [], ?string $url = null, ?string $reguaKey = null): array
     {
         if (! in_array($categoria, ['primaria', 'concorrente'], true)) {
             return ['-', null, 0];
@@ -205,7 +205,9 @@ class PautaClassifier
             return ['-', null, 0];
         }
 
-        $regua = $this->cfg['reguas'][$categoria] ?? [];
+        // reguaKey permite régua específica por origem (ex.: 'concorrente_feed' p/ a
+        // ponte) sem alterar a régua do WhatsApp. Default = a própria categoria.
+        $regua = $this->cfg['reguas'][$reguaKey ?? $categoria] ?? ($this->cfg['reguas'][$categoria] ?? []);
         $texto = mb_strtolower(trim(($titulo ?? '') . ' ' . $corpo));
         $cats = array_map('mb_strtolower', $categories);
 
@@ -250,6 +252,9 @@ class PautaClassifier
         $okRequisitos = true;
         if (($regua['exige_regiao'] ?? false) && ! ($cidadeHit || $estadoHit)) {
             $okRequisitos = false;
+        }
+        if (($regua['exige_cidade'] ?? false) && ! $cidadeHit) {
+            $okRequisitos = false; // feed: só CIDADE conta (SC genérico não basta)
         }
         if (($regua['exige_gancho'] ?? false) && ! $ganchoForte) {
             $okRequisitos = false;
