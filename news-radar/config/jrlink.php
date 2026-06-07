@@ -147,6 +147,9 @@ return [
             'canelinha', 'porto belo', 'bombinhas', 'governador celso ramos',
             'biguaçu', 'biguacu', 'palhoça', 'palhoca', 'lages', 'são joaquim',
             'sao joaquim', 'joaçaba', 'joacaba', 'nova trento', 'major gercino',
+            'guabiruba', 'gaspar', 'indaial', 'timbó', 'timbo', 'pomerode', 'ilhota',
+            'luiz alves', 'botuverá', 'botuvera', 'são francisco do sul',
+            'sao francisco do sul', 'garopaba', 'imbituba', 'laguna', 'tubarão', 'tubarao',
         ],
         // Sinais de Santa Catarina (estado) — bônus menor que cidade.
         'estado' => [
