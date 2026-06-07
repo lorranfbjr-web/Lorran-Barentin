@@ -126,4 +126,85 @@ return [
         'utm_campaign', 'utm_term', 'utm_content', 'utm_id', 's', 'ref', 'rdid',
         'share_url',
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | QUENTE / FRIO — dois eixos, por palavra-chave (zero custo, edite à vontade)
+    |---------------------------------------------------------------------------
+    | Região é detectada pelo CONTEÚDO (título + markdown), NUNCA por fonte_cidade
+    | (que é majoritariamente nulo). Pesos calibrados pelo que validamos no GA:
+    | gancho conquista-superação e indignação no topo; tema leve (feel-good /
+    | economia / bicho / meio-ambiente) abaixo; cidade da região é piso/bônus.
+    */
+
+    // Sinais de região na cobertura — casados em minúsculo no título+markdown.
+    'regiao' => [
+        'cidades' => [
+            'balneário camboriú', 'balneario camboriu', 'camboriú', 'camboriu',
+            'itajaí', 'itajai', 'são josé', 'sao jose', 'florianópolis', 'florianopolis',
+            'tijucas', 'itapema', 'navegantes', 'penha', 'piçarras', 'picarras',
+            'barra velha', 'brusque', 'blumenau', 'joinville', 'são joão batista',
+            'canelinha', 'porto belo', 'bombinhas', 'governador celso ramos',
+            'biguaçu', 'biguacu', 'palhoça', 'palhoca', 'lages', 'são joaquim',
+            'sao joaquim', 'joaçaba', 'joacaba', 'nova trento', 'major gercino',
+        ],
+        // Sinais de Santa Catarina (estado) — bônus menor que cidade.
+        'estado' => [
+            'santa catarina', ' sc ', ' sc.', ' sc,', '/sc', 'sc-', '-sc',
+            'em sc', 'de sc', 'no estado', 'litoral catarinense', 'vale do itajaí',
+            'grande florianópolis',
+        ],
+    ],
+
+    // Temas/ganchos com peso (somados ao score).
+    'temas' => [
+        // Topo: conquista-superação + indignação (o que mais performou no GA).
+        'gancho_top' => [
+            'peso' => 5,
+            'termos' => [
+                'recorde', 'inédito', 'inedito', 'primeiro', 'pioneiro', 'conquista',
+                'conquistou', 'superação', 'superacao', 'superou', 'venceu', 'medalha',
+                'campeão', 'campea', 'campeã', 'prêmio', 'premio', 'premiado', 'homenagem',
+                'revolta', 'indignação', 'indignacao', 'absurdo', 'flagrante', 'denúncia',
+                'denuncia', 'escândalo', 'escandalo', 'abandonado', 'descaso', 'golpe',
+                'fraude', 'preso', 'prisão', 'prisao', 'morto', 'morre', 'morreu',
+                'acidente', 'resgate', 'resgatado', 'desaparecido',
+            ],
+        ],
+        // Tema leve: feel-good / economia / bicho / meio-ambiente.
+        'tema_leve' => [
+            'peso' => 3,
+            'termos' => [
+                'cachorro', 'cão', 'cao', 'gato', 'animal', 'adoção', 'adocao', 'pet',
+                'meio ambiente', 'natureza', 'praia', 'sustentável', 'sustentavel',
+                'economia', 'emprego', 'vaga', 'renda', 'preço', 'preco', 'custo',
+                'festival', 'festa', 'show', 'solidári', 'doação', 'doacao',
+                'voluntári', 'criança', 'crianca', 'idoso', 'saúde', 'saude',
+            ],
+        ],
+    ],
+
+    // Réguas DIFERENTES por eixo. Score = base + bônus região + pesos de tema.
+    'reguas' => [
+        // EIXO 1 — primária (gov/oficial): "vira pauta direto".
+        // Release de gov/PMSC de SC já é regional pela fonte -> regional é PESO, não trava.
+        'primaria' => [
+            'base' => 2,
+            'peso_regiao_cidade' => 3,
+            'peso_regiao_estado' => 1,
+            'exige_regiao' => false,
+            'exige_gancho' => false,
+            'corte_quente' => 5, // frouxo: gancho OU tema OU cidade já esquenta
+        ],
+        // EIXO 2 — concorrente: "vale eu apurar por conta?". Régua DURA.
+        // NUNCA reescrevível — só radar. Exige regional + gancho forte (mata ruído nacional).
+        'concorrente' => [
+            'base' => 0,
+            'peso_regiao_cidade' => 3,
+            'peso_regiao_estado' => 2,
+            'exige_regiao' => true,
+            'exige_gancho' => true, // gancho_top obrigatório (tema leve não basta)
+            'corte_quente' => 7,
+        ],
+    ],
 ];

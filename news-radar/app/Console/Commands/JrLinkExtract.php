@@ -45,6 +45,9 @@ class JrLinkExtract extends Command
         // Dedup sempre roda (idempotente) sobre o conjunto atual.
         $this->dedupPass();
 
+        // Notificação isolada (sempre tenta; DRY-RUN se JRLINK_ALERT_WEBHOOK vazia).
+        $this->notificar();
+
         $txt = $this->relatorioTexto();
         $this->line($txt);
         $htmlPath = public_path('_tmp_jrlink/extract.html');
@@ -86,9 +89,11 @@ class JrLinkExtract extends Command
             }
 
             $markdown = $res['text'] ?? null;
+            $titulo = $res['title'] ?? null;
             $host = $this->resolveHost($url, $markdown);
             $categoria = $this->categoria($host);
-            $status = $this->gateStatus($categoria, $res['title'] ?? null, $markdown);
+            $status = $this->gateStatus($categoria, $titulo, $markdown);
+            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $titulo, $markdown);
 
             DB::table('jr_link_extracao')->upsert([[
                 'url' => $url,
@@ -97,8 +102,11 @@ class JrLinkExtract extends Command
                 'host' => $host,
                 'fonte_tipo' => $row['fonte_tipo'],
                 'categoria' => $categoria,
+                'eixo' => $eixo,
+                'temperatura' => $temperatura,
+                'score' => $score,
                 'metodo' => $metodo,
-                'titulo' => $res['title'] ?? null,
+                'titulo' => $titulo,
                 'data_pub' => $res['date'] ?? null,
                 'autor' => $res['author'] ?? null,
                 'char_len' => (int) ($res['char_len'] ?? 0),
@@ -106,8 +114,9 @@ class JrLinkExtract extends Command
                 'markdown' => $markdown,
                 'created_at' => Carbon::now(),
             ]], ['url_hash'], [
-                'url', 'url_norm', 'host', 'fonte_tipo', 'categoria', 'metodo', 'titulo',
-                'data_pub', 'autor', 'char_len', 'status', 'markdown', 'created_at',
+                'url', 'url_norm', 'host', 'fonte_tipo', 'categoria', 'eixo', 'temperatura',
+                'score', 'metodo', 'titulo', 'data_pub', 'autor', 'char_len', 'status',
+                'markdown', 'created_at',
             ]);
         }
     }
@@ -120,13 +129,18 @@ class JrLinkExtract extends Command
             $host = $this->resolveHost($r->url, $r->markdown);
             $categoria = $this->categoria($host);
             $status = $this->gateStatus($categoria, $r->titulo, $r->markdown);
+            [$eixo, $temperatura, $score] = $this->temperatura($categoria, $r->titulo, $r->markdown);
             DB::table('jr_link_extracao')->where('id', $r->id)->update([
                 'host' => $host,
                 'url_norm' => $this->normalizeUrl($r->url),
                 'categoria' => $categoria,
                 'status' => $status,
+                'eixo' => $eixo,
+                'temperatura' => $temperatura,
+                'score' => $score,
             ]);
-            $this->line(sprintf('  #%-3d %-12s %-8s %s', $r->id, $categoria, $status, $host ?? '?'));
+            $this->line(sprintf('  #%-3d %-12s %-8s %-7s s=%-2d %s', $r->id, $categoria, $status,
+                $temperatura ?? '-', $score, $host ?? '?'));
         }
     }
 
@@ -435,15 +449,160 @@ class JrLinkExtract extends Command
         }
     }
 
+    // ───────────────────────── quente / frio ─────────────────────────
+
+    /**
+     * Classifica a pauta em dois eixos independentes (config/jrlink.php > reguas).
+     * Região é detectada pelo CONTEÚDO (título + markdown), nunca por fonte_cidade.
+     *
+     * @return array{0:?string,1:?string,2:int} [eixo, temperatura, score]
+     */
+    private function temperatura(string $categoria, ?string $titulo, ?string $markdown): array
+    {
+        // Só primária e concorrente viram pauta; os demais não pontuam.
+        if (! in_array($categoria, ['primaria', 'concorrente'], true)) {
+            return ['-', null, 0];
+        }
+
+        $regua = $this->cfg['reguas'][$categoria] ?? [];
+        $texto = mb_strtolower(trim(($titulo ?? '') . ' ' . $this->corpoLimpo($markdown)));
+
+        $cidadeHit = $this->contemAlgum($texto, $this->cfg['regiao']['cidades'] ?? []);
+        $estadoHit = $this->contemAlgum($texto, $this->cfg['regiao']['estado'] ?? []);
+        $ganchoHit = $this->contemAlgum($texto, $this->cfg['temas']['gancho_top']['termos'] ?? []);
+        $temaHit = $this->contemAlgum($texto, $this->cfg['temas']['tema_leve']['termos'] ?? []);
+
+        $score = (int) ($regua['base'] ?? 0);
+        if ($cidadeHit) {
+            $score += (int) ($regua['peso_regiao_cidade'] ?? 0);
+        } elseif ($estadoHit) {
+            $score += (int) ($regua['peso_regiao_estado'] ?? 0);
+        }
+        if ($ganchoHit) {
+            $score += (int) ($this->cfg['temas']['gancho_top']['peso'] ?? 0);
+        }
+        if ($temaHit) {
+            $score += (int) ($this->cfg['temas']['tema_leve']['peso'] ?? 0);
+        }
+
+        // Requisitos duros (eixo concorrente mata ruído nacional).
+        $okRequisitos = true;
+        if (($regua['exige_regiao'] ?? false) && ! ($cidadeHit || $estadoHit)) {
+            $okRequisitos = false;
+        }
+        if (($regua['exige_gancho'] ?? false) && ! $ganchoHit) {
+            $okRequisitos = false;
+        }
+
+        $quente = $okRequisitos && $score >= (int) ($regua['corte_quente'] ?? 999);
+
+        return [$categoria, $quente ? 'quente' : 'frio', $score];
+    }
+
+    private function contemAlgum(string $texto, array $termos): bool
+    {
+        foreach ($termos as $t) {
+            if ($t !== '' && str_contains($texto, mb_strtolower($t))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // ───────────────────────── notificação isolada ─────────────────────────
+
+    /**
+     * Caminho ISOLADO — não encosta no disparador (g6ApLgldIyHKLwdq) nem no
+     * #JR PUBLICAR. Monta o aviso das pautas quentes com rótulo por eixo e faz
+     * POST p/ JRLINK_ALERT_WEBHOOK. DRY-RUN: env vazia => só loga o que mandaria.
+     */
+    private function notificar(): void
+    {
+        $quentes = DB::table('jr_link_extracao')
+            ->where('temperatura', 'quente')
+            ->where('duplicada', false)
+            ->orderByDesc('score')->orderByDesc('id')
+            ->get();
+
+        if ($quentes->isEmpty()) {
+            $this->line('Notificação: nenhuma pauta quente — nada a enviar.');
+
+            return;
+        }
+
+        $texto = $this->montarAviso($quentes);
+        $webhook = env('JRLINK_ALERT_WEBHOOK');
+
+        if (empty($webhook)) {
+            $this->warn('Notificação em DRY-RUN (JRLINK_ALERT_WEBHOOK vazia) — NÃO enviado. Mandaria:');
+            $this->line($texto);
+
+            return;
+        }
+
+        try {
+            $resp = Http::timeout(15)->asJson()->post($webhook, [
+                'source' => 'jrlink',
+                'quentes' => $quentes->count(),
+                'text' => $texto,
+                'itens' => $quentes->map(fn ($r) => [
+                    'eixo' => $r->eixo,
+                    'score' => $r->score,
+                    'titulo' => $r->titulo,
+                    'url' => $r->url,
+                    'host' => $r->host,
+                ])->all(),
+            ]);
+            $this->info('Notificação enviada (' . $quentes->count() . ' quentes) — HTTP ' . $resp->status());
+        } catch (\Throwable $e) {
+            $this->error('Notificação FALHOU (webhook): ' . $e->getMessage());
+        }
+    }
+
+    private function montarAviso($quentes): string
+    {
+        $prim = $quentes->where('eixo', 'primaria');
+        $conc = $quentes->where('eixo', 'concorrente');
+        $L = [];
+        $L[] = '🔥 *JR LINK — pautas quentes* (' . $quentes->count() . ')';
+
+        if ($prim->isNotEmpty()) {
+            $L[] = '';
+            $L[] = '✍️ *PRIMÁRIA — pronta pra escrever* (' . $prim->count() . '):';
+            foreach ($prim as $r) {
+                $L[] = sprintf('• [%d] %s', $r->score, $r->titulo ?: $r->url);
+                $L[] = '  ' . $r->url;
+            }
+        }
+        if ($conc->isNotEmpty()) {
+            $L[] = '';
+            $L[] = '📡 *RADAR — apurar por conta* (NÃO reescrever) (' . $conc->count() . '):';
+            foreach ($conc as $r) {
+                $L[] = sprintf('• [%d] %s', $r->score, $r->titulo ?: $r->url);
+                $L[] = '  ' . $r->url;
+            }
+        }
+
+        return implode("\n", $L);
+    }
+
     // ───────────────────────── relatório ─────────────────────────
 
     private function relatorioTexto(): string
     {
-        $rows = DB::table('jr_link_extracao')->orderBy('id')->get();
+        // Ordena: quentes primeiro, depois maior score, depois id. Duplicadas afundam.
+        $rows = DB::table('jr_link_extracao')
+            ->orderByRaw("CASE WHEN duplicada = 1 THEN 1 ELSE 0 END asc")
+            ->orderByRaw("CASE WHEN temperatura = 'quente' THEN 0 ELSE 1 END asc")
+            ->orderByDesc('score')
+            ->orderBy('id')
+            ->get();
+        $total = $rows->count();
         $L = [];
         $L[] = '################################################################';
-        $L[] = '   JR LINK — EXTRAÇÃO + CLASSIFICAÇÃO (trafilatura + Jina fallback)';
-        $L[] = '   ' . $rows->count() . ' links  ·  classificação por HOST RESOLVIDO';
+        $L[] = '   JR LINK — EXTRAÇÃO + CLASSIFICAÇÃO + QUENTE/FRIO';
+        $L[] = '   ' . $total . ' links  ·  categoria por HOST RESOLVIDO  ·  pauta por 2 eixos';
         $L[] = '   gerado: ' . Carbon::now()->format('d/m/Y H:i');
         $L[] = '################################################################';
 
@@ -451,6 +610,9 @@ class JrLinkExtract extends Command
         $porCat = [];
         $porStatus = [];
         $nDup = 0;
+        $quentes = $rows->where('temperatura', 'quente')->where('duplicada', false);
+        $qPrim = $quentes->where('eixo', 'primaria')->count();
+        $qConc = $quentes->where('eixo', 'concorrente')->count();
         foreach ($rows as $r) {
             $porMetodo[$r->metodo] = ($porMetodo[$r->metodo] ?? 0) + 1;
             $porCat[$r->categoria] = ($porCat[$r->categoria] ?? 0) + 1;
@@ -459,6 +621,9 @@ class JrLinkExtract extends Command
                 $nDup++;
             }
         }
+        $L[] = '';
+        $L[] = '🔥 QUENTES: ' . $quentes->count()
+            . '   (✍️ primária pronta=' . $qPrim . '  ·  📡 radar apurar=' . $qConc . ')';
         $L[] = '';
         $L[] = 'RESUMO:';
         $L[] = '  por categoria: ' . $this->kv($porCat);
@@ -469,16 +634,19 @@ class JrLinkExtract extends Command
         $L[] = 'LEGENDA categoria: ✅ primária (pode reescrever) · 🚫 concorrente (RADAR, não reescreve)';
         $L[] = '                   🟦 próprio (jornalrazao, já publicado) · 📱 social · ◽ outro (revisar)';
         $L[] = 'LEGENDA status...: ok (corpo real) · parcial (só título/metadado) · vazio (muro/sem conteúdo)';
+        $L[] = 'EIXO pauta.......: ✍️ primária = vira pauta direto · 📡 concorrente = só apurar, NUNCA reescrever';
 
         $i = 0;
         foreach ($rows as $r) {
             $i++;
             [$marca] = $this->marcador($r->categoria);
             $dup = $r->duplicada ? 'SIM ⟂ (duplicada de outra URL normalizada)' : 'não';
+            $temp = $this->temperaturaLabel($r->eixo, $r->temperatura, (int) $r->score);
             $L[] = '';
             $L[] = '================================================================';
-            $L[] = sprintf('LINK %02d/%02d   categoria: %s   |   status: [%s]   |   dup: %s',
-                $i, $rows->count(), $marca, strtoupper($r->status), $dup);
+            $L[] = sprintf('LINK %02d/%02d   %s', $i, $total, $temp);
+            $L[] = sprintf('  categoria: %s   |   status: [%s]   |   dup: %s',
+                $marca, strtoupper($r->status), $dup);
             $L[] = 'URL......: ' . $r->url;
             $L[] = 'host.....: ' . ($r->host ?? '?') . '   (norm: ' . ($r->url_norm ?? '-') . ')';
             $L[] = 'captura..: fonte_tipo=' . ($r->fonte_tipo ?? '-') . '  |  método=' . $r->metodo . '  |  chars=' . $r->char_len;
@@ -493,6 +661,17 @@ class JrLinkExtract extends Command
         $L[] = '================================================================';
 
         return implode("\n", $L);
+    }
+
+    private function temperaturaLabel(?string $eixo, ?string $temperatura, int $score): string
+    {
+        if (! in_array($eixo, ['primaria', 'concorrente'], true)) {
+            return 'pauta: — (não pontua)';
+        }
+        $icone = $temperatura === 'quente' ? '🔥 QUENTE' : '❄️ frio';
+        $eixoLabel = $eixo === 'primaria' ? '✍️ PRIMÁRIA (escrever)' : '📡 RADAR (apurar)';
+
+        return sprintf('pauta: %s  ·  %s  ·  score=%d', $icone, $eixoLabel, $score);
     }
 
     /** @return array{0:string} marcador visível da categoria */
