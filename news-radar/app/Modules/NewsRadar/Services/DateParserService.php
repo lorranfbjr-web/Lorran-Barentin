@@ -22,6 +22,24 @@ class DateParserService
 
         $raw = trim($raw);
 
+        // dd/mm/yyyy AMBÍGUO: fonte brasileira é SEMPRE dia/mês. Tem que vir
+        // ANTES do Carbon::parse genérico, que lê "10/06/2026" como 6 de
+        // outubro (m/d) — foi isso que mandou o lote do Caçador Online pro
+        // futuro e pro topo do painel como "agora".
+        if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})(.*)$#', $raw, $m)) {
+            $resto = trim($m[4]);
+            foreach (['d/m/Y H:i:s P', 'd/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y'] as $format) {
+                try {
+                    $dt = Carbon::createFromFormat($format, trim("{$m[1]}/{$m[2]}/{$m[3]} {$resto}"), $timezone);
+                    if ($dt !== false) {
+                        return $dt->setTimezone($timezone);
+                    }
+                } catch (\Exception) {
+                    continue;
+                }
+            }
+        }
+
         // Try ISO 8601 / standard formats first
         try {
             return Carbon::parse($raw)->setTimezone($timezone);
