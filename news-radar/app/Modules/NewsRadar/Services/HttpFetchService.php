@@ -21,7 +21,11 @@ class HttpFetchResult
 
 class HttpFetchService
 {
-    private const USER_AGENT = 'JornalRazaoBot/1.0 (+https://jornalrazao.com/bot)';
+    // 2026-06-10: UA de browser no lugar do 'JornalRazaoBot/1.0' — WAFs de
+    // fontes regionais (agorasul, vvale, oestescnoticias…) devolvem 403 pra
+    // bot desconhecido. Amostra de 14 fontes ativas validada com os dois UAs
+    // antes da troca (nenhuma regressão). Detalhe no _tmp_pos2_*/relatorio.md.
+    private const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
     private const TIMEOUT = 15;
     private const CONNECT_TIMEOUT = 10;
 

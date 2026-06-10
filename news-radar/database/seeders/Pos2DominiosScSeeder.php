@@ -143,10 +143,16 @@ class Pos2DominiosScSeeder extends Seeder
             $feed('Notiserra SC', 'https://notiserrasc.com.br', 'https://notiserrasc.com.br/feed/', 'Serra'),
             $feed('Portal Coroado', 'https://portalcoroado.com.br/home', 'https://portalcoroado.com.br/home/feed/', 'Serra'),
             $feed('Rádio Alegria FM 87,9', 'https://www.alegriafm.net', 'https://www.alegriafm.net/feed/', 'Serra'),
-            $feed('Rádio Alvorada 94.5 FM', 'https://alvorada945.com.br', 'https://alvorada945.com.br/feed/', 'Serra'),            $listing('Oeste SC Notícias', 'https://oestescnoticias.com.br', 'Oeste'),
+            $feed('Rádio Alvorada 94.5 FM', 'https://alvorada945.com.br', 'https://alvorada945.com.br/feed/', 'Serra'),
+            $listing('Oeste SC Notícias', 'https://oestescnoticias.com.br', 'Oeste'),
             $listing('TiviNet', 'https://www.tivinet.com.br', 'Oeste'),
             $listing('Portal CDR', 'https://www.portalcdr.com.br', 'Oeste'),
             $listing('Jornal do Momento', 'https://domomento.com.br', 'Serra'),
-            $listing('ViaTV', 'https://viatv.com.br', 'Serra'),        ];
+            $listing('ViaTV', 'https://viatv.com.br', 'Serra'),
+            // Re-probe 2026-06-10 (falso-mortos do 1º QA — bloqueio por UA/fingerprint):
+            $feed('Portal GuiaTem Abelardo Luz', 'https://www.guiatemabelardoluz.com.br', 'https://www.guiatemabelardoluz.com.br/feed', 'Oeste'),
+            // (saojoaquimonline e portalitapema já existiam nas fontes originais —
+            // estavam mortos pro UA antigo; recuperados pela troca de UA, sem seed novo)
+        ];
     }
 }

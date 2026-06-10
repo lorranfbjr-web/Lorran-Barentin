@@ -169,6 +169,10 @@ return [
         'tvoesc.com.br',
         'viatv.com.br',
         'vvale.com.br',
+        // Re-probe 2026-06-10 (falso-mortos recuperados):
+        'guiatemabelardoluz.com.br',
+        'saojoaquimonline.com.br',
+        'portalitapema.com',
     ],
 
     // Gate de qualidade: marcadores de muro de login / boilerplate (casados em minúsculo).
