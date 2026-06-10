@@ -1,0 +1,256 @@
+<?php
+
+namespace App\Services\Jr;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
+use OpenAI\Laravel\Facades\OpenAI;
+
+/**
+ * Juiz LLM da Fase 2 — julga LOTES de pautas (título + lead) e devolve o
+ * veredito editorial em JSON estrito por item:
+ *   {id, escopo, eh_pauta, tipo_gancho, cidade, score_editorial, motivo}
+ *
+ * Drivers:
+ *  - openai: MESMO cliente do enriquecimento NewsRadar (OpenAI::chat). Pronto
+ *    pra quando houver OPENAI_API_KEY real (a atual é noop de smoke test).
+ *  - claude-cli: `claude -p` headless com a assinatura local (Claude Max),
+ *    modelo barato (Haiku). É o que funciona HOJE nesta máquina.
+ *  - auto: openai se a chave parecer real; senão claude-cli.
+ *
+ * Toda chamada é logada em jr_juiz_log (modelo, tokens, custo, duração) no
+ * padrão de news_item_ai_logs.
+ */
+class JuizLlm
+{
+    public const ESCOPOS = ['local', 'regional', 'nacional_localizado', 'nacional'];
+
+    public const GANCHOS = [
+        'emocao', 'curiosidade', 'indignacao', 'identidade_sc', 'feel_good',
+        'escala', 'conquista_superacao', 'servico', 'solidariedade', 'vaquinha', 'nenhum',
+    ];
+
+    private array $cfg;
+
+    private string $driver;
+
+    public function __construct(?array $cfg = null, ?string $driver = null)
+    {
+        $this->cfg = $cfg ?? config('jrlink.juiz');
+        $this->driver = $this->resolveDriver($driver ?: ($this->cfg['driver'] ?? 'auto'));
+    }
+
+    public function driver(): string
+    {
+        return $this->driver;
+    }
+
+    public function modelo(): string
+    {
+        return $this->driver === 'openai'
+            ? (string) $this->cfg['modelo_openai']
+            : (string) $this->cfg['modelo_claude'];
+    }
+
+    /**
+     * Julga um lote. $itens = [['id' => int, 'titulo' => string, 'lead' => string], …].
+     *
+     * @return array<int,array>  vereditos validados, indexados pelo id do item
+     *
+     * @throws \RuntimeException se a chamada ou o parse falharem (após retry)
+     */
+    public function julgarLote(array $itens): array
+    {
+        $prompt = $this->montarPrompt($itens);
+
+        $ultimoErro = null;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $t0 = microtime(true);
+            try {
+                [$texto, $inTok, $outTok, $custo] = $this->driver === 'openai'
+                    ? $this->chamarOpenai($prompt)
+                    : $this->chamarClaudeCli($prompt);
+
+                $vereditos = $this->parse($texto, $itens);
+
+                $this->log('success', $attempt, count($itens), $inTok, $outTok, $custo, null, $t0);
+
+                return $vereditos;
+            } catch (\Throwable $e) {
+                $ultimoErro = $e;
+                $this->log('error', $attempt, count($itens), null, null, null, $e->getMessage(), $t0);
+            }
+        }
+
+        throw new \RuntimeException('Juiz LLM falhou após retry: ' . $ultimoErro->getMessage(), 0, $ultimoErro);
+    }
+
+    // ───────────────────────── prompt ─────────────────────────
+
+    private function montarPrompt(array $itens): string
+    {
+        $lista = '';
+        foreach ($itens as $it) {
+            $lead = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $it['lead'])), 0, 280);
+            $lista .= sprintf("ID %d\nTÍTULO: %s\nLEAD: %s\n\n", $it['id'], trim((string) $it['titulo']), $lead ?: '(sem lead)');
+        }
+
+        return <<<PROMPT
+Você é o editor-chefe do Jornal Razão, jornal regional de Tijucas/SC que cobre o litoral e o Vale do Itajaí em Santa Catarina. Julgue cada pauta abaixo.
+
+REGRAS DO VEREDITO:
+- escopo: "local" (uma cidade da região), "regional" (SC/região), "nacional_localizado" (assunto nacional COM ângulo local real no título), "nacional" (sem ângulo local).
+- Notícia nacional sem ângulo local real NO TÍTULO (Enem, Lula, ONU, decisões da UE, futebol nacional, loteria) = escopo "nacional" e score baixo.
+- eh_pauta=false para: SEO/listicle ("tudo o que se sabe", "como foi", receitas), coluna/opinião, horóscopo, home institucional, aniversariantes do dia, datas comemorativas, conteúdo requentado sem fato novo.
+- QUENTE é GANCHO, NUNCA gravidade do tema: emoção, curiosidade, indignação, identidade catarinense, feel-good, escala/superlativo. Prisão rotineira (ex.: flagrante com 21g) ou acidente comum JAMAIS é quente só por ser grave.
+- VALORIZE pauta leve: economia e desenvolvimento de SC, gente real, bicho, feel-good com cidade da região.
+- tipo_gancho: um de emocao|curiosidade|indignacao|identidade_sc|feel_good|escala|conquista_superacao|servico|solidariedade|vaquinha|nenhum.
+- Campanha de solidariedade/vaquinha: tipo_gancho "solidariedade" ou "vaquinha" (vai pra fila humana, nunca quente automático).
+- cidade: cidade principal da pauta ou null.
+- score_editorial: 0-100 (0 = lixo, 50 = mediano, 70+ = forte, 90+ = excepcional). USE A ESCALA TODA, não sature.
+- motivo: 1 frase curta justificando.
+
+RESPONDA APENAS com um array JSON válido, um objeto por pauta, sem markdown e sem texto fora do JSON:
+[{"id": <id>, "escopo": "...", "eh_pauta": true|false, "tipo_gancho": "...", "cidade": "..."|null, "score_editorial": <0-100>, "motivo": "..."}]
+
+PAUTAS:
+
+{$lista}
+PROMPT;
+    }
+
+    // ───────────────────────── drivers ─────────────────────────
+
+    /** @return array{0:string,1:?int,2:?int,3:?float} [texto, in_tokens, out_tokens, custo_usd] */
+    private function chamarOpenai(string $prompt): array
+    {
+        $response = OpenAI::chat()->create([
+            'model' => $this->cfg['modelo_openai'],
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt],
+            ],
+            'temperature' => 0,
+            'response_format' => ['type' => 'json_object'],
+        ]);
+
+        $texto = (string) ($response->choices[0]->message->content ?? '');
+        $in = $response->usage->promptTokens ?? null;
+        $out = $response->usage->completionTokens ?? null;
+        // gpt-4o-mini: $0.15/M in, $0.60/M out (referência; ajustar se trocar o modelo).
+        $custo = ($in !== null && $out !== null) ? ($in * 0.15 + $out * 0.60) / 1_000_000 : null;
+
+        return [$texto, $in, $out, $custo];
+    }
+
+    /** @return array{0:string,1:?int,2:?int,3:?float} */
+    private function chamarClaudeCli(string $prompt): array
+    {
+        $r = Process::timeout(180)->run([
+            'claude', '-p', $prompt,
+            '--model', $this->cfg['modelo_claude'],
+            '--output-format', 'json',
+            '--max-turns', '1',
+        ]);
+
+        if (! $r->successful()) {
+            throw new \RuntimeException('claude-cli exit ' . $r->exitCode() . ': ' . mb_substr($r->errorOutput(), 0, 300));
+        }
+
+        $json = json_decode(trim($r->output()), true);
+        if (! is_array($json) || ($json['is_error'] ?? false)) {
+            throw new \RuntimeException('claude-cli retorno inválido: ' . mb_substr($r->output(), 0, 300));
+        }
+
+        $uso = $json['usage'] ?? [];
+        $in = isset($uso['input_tokens'])
+            ? (int) $uso['input_tokens'] + (int) ($uso['cache_creation_input_tokens'] ?? 0) + (int) ($uso['cache_read_input_tokens'] ?? 0)
+            : null;
+
+        return [
+            (string) ($json['result'] ?? ''),
+            $in,
+            isset($uso['output_tokens']) ? (int) $uso['output_tokens'] : null,
+            isset($json['total_cost_usd']) ? (float) $json['total_cost_usd'] : null,
+        ];
+    }
+
+    // ───────────────────────── parse / validação ─────────────────────────
+
+    /** @return array<int,array> vereditos por id */
+    private function parse(string $texto, array $itens): array
+    {
+        $texto = trim($texto);
+        // tolera cerca de markdown e texto em volta — pega o primeiro array JSON.
+        if (preg_match('/\[.*\]/s', $texto, $m)) {
+            $texto = $m[0];
+        }
+        $arr = json_decode($texto, true);
+        if (! is_array($arr)) {
+            throw new \RuntimeException('JSON inválido do juiz: ' . mb_substr($texto, 0, 200));
+        }
+        // openai json_object mode pode embrulhar em {"pautas": [...]}.
+        if (array_keys($arr) !== range(0, count($arr) - 1)) {
+            $arr = collect($arr)->first(fn ($v) => is_array($v)) ?? [];
+        }
+
+        $idsEsperados = array_map(fn ($i) => (int) $i['id'], $itens);
+        $out = [];
+        foreach ($arr as $v) {
+            if (! is_array($v) || ! isset($v['id'])) {
+                continue;
+            }
+            $id = (int) $v['id'];
+            if (! in_array($id, $idsEsperados, true)) {
+                continue;
+            }
+            $escopo = strtolower(trim((string) ($v['escopo'] ?? '')));
+            $gancho = strtolower(trim((string) ($v['tipo_gancho'] ?? 'nenhum')));
+            $out[$id] = [
+                'escopo' => in_array($escopo, self::ESCOPOS, true) ? $escopo : 'nacional',
+                'eh_pauta' => (bool) ($v['eh_pauta'] ?? false),
+                'tipo_gancho' => in_array($gancho, self::GANCHOS, true) ? $gancho : 'nenhum',
+                'cidade' => isset($v['cidade']) && $v['cidade'] !== '' ? mb_substr((string) $v['cidade'], 0, 80) : null,
+                'score_llm' => max(0, min(100, (int) ($v['score_editorial'] ?? 0))),
+                'motivo' => mb_substr(trim((string) ($v['motivo'] ?? '')), 0, 400),
+            ];
+        }
+
+        $faltando = array_diff($idsEsperados, array_keys($out));
+        if ($faltando) {
+            throw new \RuntimeException('Juiz não devolveu os ids: ' . implode(',', $faltando));
+        }
+
+        return $out;
+    }
+
+    // ───────────────────────── infra ─────────────────────────
+
+    private function resolveDriver(string $driver): string
+    {
+        if (in_array($driver, ['openai', 'claude-cli'], true)) {
+            return $driver;
+        }
+        $key = (string) env('OPENAI_API_KEY', '');
+        $keyReal = $key !== '' && ! preg_match('/noop|smoke|test|placeholder|xxx/i', $key);
+
+        return $keyReal ? 'openai' : 'claude-cli';
+    }
+
+    private function log(string $status, int $attempt, int $itens, ?int $in, ?int $out, ?float $custo, ?string $erro, float $t0): void
+    {
+        DB::table('jr_juiz_log')->insert([
+            'operation' => 'juiz_lote',
+            'model' => $this->modelo(),
+            'status' => $status,
+            'attempt' => $attempt,
+            'itens' => $itens,
+            'input_tokens' => $in,
+            'output_tokens' => $out,
+            'custo_usd' => $custo,
+            'error_message' => $erro,
+            'duration_ms' => (int) round((microtime(true) - $t0) * 1000),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+}
