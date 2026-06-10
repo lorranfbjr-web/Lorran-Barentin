@@ -45,7 +45,9 @@ class RadarNotificador
 
     public function emJanelaDeSilencio(?Carbon $agora = null): bool
     {
-        $agora = $agora ?? Carbon::now();
+        // Janela é em hora LOCAL do editor — o app roda em UTC (silenciaria
+        // 20h-03h de Brasília se usasse now() puro).
+        $agora = $agora ?? Carbon::now($this->cfg['timezone'] ?? 'America/Sao_Paulo');
         $ini = (int) ($this->cfg['silencio_inicio'] ?? 23);
         $fim = (int) ($this->cfg['silencio_fim'] ?? 6);
         $h = (int) $agora->format('G');
@@ -98,6 +100,19 @@ class RadarNotificador
 
         return ['status' => 'enviado', 'novos' => $novos->count(),
             'enviados' => min($cap, $novos->count()), 'message_id' => $messageId];
+    }
+
+    /**
+     * Aviso operacional avulso pro grupo (ex.: poll do Instagram falhando).
+     * Respeita o kill switch e a janela de silêncio. Retorna messageId ou null.
+     */
+    public function avisar(string $mensagem): ?string
+    {
+        if (! $this->ligado() || $this->emJanelaDeSilencio()) {
+            return null;
+        }
+
+        return $this->enviar($mensagem);
     }
 
     /** Estreia anti-flood: marca TODO o estoque atual como já-notificado. */

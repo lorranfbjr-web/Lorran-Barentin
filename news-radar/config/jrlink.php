@@ -493,6 +493,7 @@ return [
         'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
         'grupo' => env('JRLINK_ALERT_GROUP', ''),          // phone do grupo Raspador
         'max_itens' => 10,                                  // cap por mensagem; resto vira "+N"
+        'timezone' => 'America/Sao_Paulo',                  // hora LOCAL da janela
         'silencio_inicio' => 23,                            // janela de silêncio (acumula)
         'silencio_fim' => 6,
         'relatorio_url' => 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html',
@@ -510,4 +511,29 @@ return [
 
     // Chave leve da aba Radar do painel React (middleware JrPanelKey).
     'painel_key' => env('JRLINK_PANEL_KEY', ''),
+
+    /*
+    |---------------------------------------------------------------------------
+    | CANAL INSTAGRAM — perfis só-IG entram na MESMA esteira (origem instagram)
+    |---------------------------------------------------------------------------
+    | jrlink:instagram-poll (15min): ator Apify nos perfis abaixo, máx
+    | max_posts_por_perfil por poll, item na régua com categoria concorrente
+    | (radar, nunca reescreve) e dedup permanente por shortcode (url do post).
+    | Kill switch: JRLINK_IG_ENABLED=false OU profiles vazio.
+    */
+    'instagram' => [
+        'enabled' => env('JRLINK_IG_ENABLED', true),
+        'actor_id' => 'apify~instagram-post-scraper', // validado no corpus do DNA
+        'max_posts_por_perfil' => 3,
+        'profiles' => [
+            'sos_naufragados', 'calamidadeoficial', 'florianopolis24h',
+            'conexao_geoclima', 'pistalimpa', 'reporter.sergioguimaraes',
+            'floripamilgrau', 'palhocamilgrau', 'saojosemilgrauu', 'portalnortedailha',
+        ],
+        // legenda com menos que isto = sem conteúdo útil, pula (logado).
+        'min_legenda' => 25,
+        // alerta no Raspador após N falhas seguidas; supressão de re-alerta (min).
+        'falhas_para_alerta' => 3,
+        'supressao_alerta_min' => 360,
+    ],
 ];

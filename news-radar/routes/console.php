@@ -22,3 +22,7 @@ Schedule::command('jrlink:bridge-news')
 Schedule::command('jrlink:juiz --hours=48')
     ->cron('5,35 * * * *')
     ->withoutOverlapping();
+
+Schedule::command('jrlink:instagram-poll')
+    ->cron('*/15 * * * *')
+    ->withoutOverlapping();
