@@ -171,18 +171,29 @@ class JrLinkJuiz extends Command
     }
 
     /**
-     * Persiste o colapso: limpa os clusters ANTERIORES criados por nós (ids
-     * referenciados em jr_link_extracao.cluster_id — news_clusters não tem outro
-     * produtor hoje), recria em news_clusters/news_cluster_items e grava
-     * cluster_id/cluster_rep nas rows.
+     * Persiste o colapso SÓ da janela corrente: recria em news_clusters/
+     * news_cluster_items e grava cluster_id/cluster_rep nas rows da janela.
+     * Rows FORA da janela ficam congeladas com a última atribuição (apagar o
+     * cluster delas faria membro antigo reaparecer como quente avulso no
+     * relatório — janela rolante não pode reescrever o passado).
      */
     private function persistirClusters(array $clusters, $byId, int $hours): void
     {
-        $antigos = DB::table('jr_link_extracao')->whereNotNull('cluster_id')->distinct()->pluck('cluster_id');
+        $idsJanela = $byId->keys()->all();
+        $antigos = DB::table('jr_link_extracao')->whereIn('id', $idsJanela)
+            ->whereNotNull('cluster_id')->distinct()->pluck('cluster_id');
         if ($antigos->isNotEmpty()) {
-            DB::table('news_clusters')->whereIn('id', $antigos)->delete(); // cascade limpa news_cluster_items
+            // Só clusters SEM membro fora da janela podem ser apagados — os
+            // demais permanecem como atribuição congelada dos itens antigos.
+            $protegidos = DB::table('jr_link_extracao')->whereNotIn('id', $idsJanela)
+                ->whereIn('cluster_id', $antigos)->distinct()->pluck('cluster_id');
+            $apagar = $antigos->diff($protegidos);
+            if ($apagar->isNotEmpty()) {
+                DB::table('news_clusters')->whereIn('id', $apagar)->delete(); // cascade limpa news_cluster_items
+            }
         }
-        DB::table('jr_link_extracao')->whereNotNull('cluster_id')->update(['cluster_id' => null, 'cluster_rep' => false]);
+        DB::table('jr_link_extracao')->whereIn('id', $idsJanela)
+            ->update(['cluster_id' => null, 'cluster_rep' => false]);
 
         // Mapa url_norm -> news_item_id pra ligar o cluster aos news_items (feed).
         $clf = new PautaClassifier();
