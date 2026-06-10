@@ -79,3 +79,44 @@ export const fetchNow = (id: number) =>
 
 export const collectAll = () =>
     apiFetch<{ message: string; dispatched: number }>('/collect-all', { method: 'POST' });
+
+// ── Aba Radar (JR Pauta / juiz) — chave leve via ?key= (cookie 90d depois) ──
+export interface RadarItem {
+    id: number;
+    titulo: string;
+    url: string;
+    host: string | null;
+    fonte_tipo: string | null;
+    origem: string;
+    eixo: 'primaria' | 'concorrente';
+    temperatura: string | null;
+    temperatura_juiz: string | null;
+    score: number;
+    score_editorial: number | null;
+    escopo: string | null;
+    eh_pauta: number | null;
+    tipo_gancho: string | null;
+    cidade_llm: string | null;
+    tema_ga4: string | null;
+    juiz_motivo: string | null;
+    cluster_id: number | null;
+    cluster_n: number;
+    publicado_em: string | null;
+    created_at: string;
+    notificado_em: string | null;
+}
+
+export const radarKeyFromUrl = (): string =>
+    new URLSearchParams(window.location.search).get('key') ?? '';
+
+export const fetchRadar = (params: Record<string, string>) => {
+    const key = radarKeyFromUrl();
+    const qs = new URLSearchParams(
+        Object.entries({ ...params, ...(key ? { key } : {}) }).filter(([, v]) => v),
+    ).toString();
+    return fetch(`/api/v1/jrlink/radar?${qs}`, { headers: { Accept: 'application/json' } }).then((res) => {
+        if (res.status === 403) throw new Error('403');
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        return res.json() as Promise<PaginatedResponse<RadarItem>>;
+    });
+};

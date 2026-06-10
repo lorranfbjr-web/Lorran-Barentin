@@ -3,8 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchStats, collectAll } from '../api';
 
 interface Props {
-    activeTab: 'feed' | 'sources';
-    onTabChange: (tab: 'feed' | 'sources') => void;
+    activeTab: 'feed' | 'sources' | 'radar';
+    onTabChange: (tab: 'feed' | 'sources' | 'radar') => void;
 }
 
 export default function Header({ activeTab, onTabChange }: Props) {
@@ -58,7 +58,7 @@ export default function Header({ activeTab, onTabChange }: Props) {
                 </div>
 
                 <nav className="flex gap-1 mt-4">
-                    {([['feed', 'Feed'], ['sources', 'Fontes']] as const).map(([key, label]) => (
+                    {([['feed', 'Feed'], ['radar', 'Radar'], ['sources', 'Fontes']] as const).map(([key, label]) => (
                         <button
                             key={key}
                             onClick={() => onTabChange(key)}

@@ -4,8 +4,9 @@ import FilterBar from './components/FilterBar';
 import SearchBar from './components/SearchBar';
 import NewsFeed from './components/NewsFeed';
 import SourcesPanel from './components/SourcesPanel';
+import RadarPanel from './components/RadarPanel';
 
-type Tab = 'feed' | 'sources';
+type Tab = 'feed' | 'sources' | 'radar';
 
 export default function App() {
     const [tab, setTab] = useState<Tab>('feed');
@@ -32,6 +33,10 @@ export default function App() {
                         <FilterBar filters={filters} onChange={setFilters} />
                     </div>
                     <NewsFeed filters={filters} />
+                </main>
+            ) : tab === 'radar' ? (
+                <main className="max-w-7xl mx-auto px-4 py-6">
+                    <RadarPanel />
                 </main>
             ) : (
                 <main className="max-w-7xl mx-auto px-4 py-6">

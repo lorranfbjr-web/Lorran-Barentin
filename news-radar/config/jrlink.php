@@ -489,4 +489,7 @@ return [
         'ignorar_from_me' => true,
         'ignorar_chats' => ['Raspador'],
     ],
+
+    // Chave leve da aba Radar do painel React (middleware JrPanelKey).
+    'painel_key' => env('JRLINK_PANEL_KEY', ''),
 ];
