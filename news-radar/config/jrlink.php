@@ -282,4 +282,92 @@ return [
             'corte_quente' => 13,
         ],
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | FASE 2 — colapso por evento (cluster) + juiz LLM
+    |---------------------------------------------------------------------------
+    | Camadas: (1) gate coarse acima = pré-corte; (2) colapso por evento via
+    | news_clusters = 1 representante por história; (3) juiz LLM só nos
+    | sobreviventes. Comando: jrlink:juiz.
+    */
+
+    'cluster' => [
+        // Similaridade entre títulos: overlap ponderado por idf dos tokens
+        // (>= min_token_len chars, sem stopwords). Une no union-find se >= corte.
+        'overlap_min' => 0.50,
+        'min_token_len' => 4,
+    ],
+
+    'juiz' => [
+        // Versão do prompt — item julgado com a MESMA versão não re-julga (idempotência).
+        'prompt_versao' => 'v1',
+
+        // Driver: auto = openai se OPENAI_API_KEY for real; senão claude-cli
+        // (claude -p headless, assinatura local). openai reusa o MESMO cliente
+        // do enriquecimento NewsRadar (OpenAI::chat), pronto pra quando houver chave.
+        'driver' => env('JRLINK_JUIZ_DRIVER', 'auto'),
+        'modelo_openai' => env('JRLINK_JUIZ_MODELO_OPENAI', 'gpt-4o-mini'),
+        'modelo_claude' => env('JRLINK_JUIZ_MODELO_CLAUDE', 'claude-haiku-4-5-20251001'),
+
+        // Hard cap de chamadas LLM por execução — estourou, ABORTA e reporta.
+        'cap_chamadas' => 300,
+        // Itens julgados por chamada (lote no mesmo prompt).
+        'lote' => 12,
+
+        // Quem vai pro juiz (além do colapso): representante quente coarse sempre;
+        // frio coarse só se score >= isto (dá chance de resgate sem julgar lixo).
+        'score_frio_minimo' => 8,
+
+        // score_editorial final >= corte (e eh_pauta e escopo não-nacional) => quente.
+        'corte_quente_final' => 60,
+
+        /*
+        | Âncora GA4 (derivada 2026-06-09, sem depender de calibração manual):
+        | cruzamento de jr_sinal_interesse (views por editoria, periodo=total) com
+        | jr_titulo_sinal (3.933 títulos, lift de views por tema/gancho).
+        | ajuste = (lift_views - 1) * 20, cap [-8, +12]. Corpus "118 títulos do
+        | Instagram" não foi localizado no disco — fallback documentado no relatório
+        | da Fase 2. Edite aqui pra calibrar.
+        |
+        | Evidência (lift de views por tema): feel_good_gente 1.70 · famosos 1.66
+        | politica 1.38 · economia_negocios 1.32 · animais 1.21 · meio_ambiente 1.15
+        | saude 1.04 · seguranca 0.95 · outros 0.86 · transito 0.62
+        */
+        'ajuste_tema' => [
+            'feel_good_gente' => 12,
+            'famosos' => 12,
+            'politica' => 8,
+            'economia_negocios' => 6,
+            'animais' => 4,
+            'meio_ambiente' => 3,
+            'saude' => 1,
+            'turismo' => 0,
+            'seguranca' => -1,
+            'outros' => -3,
+            'transito' => -8,
+        ],
+
+        /*
+        | Pelo tipo_gancho devolvido pelo juiz. Evidência GA4 (lift de views):
+        | conquista_superacao 2.28 · indignacao 1.62 · servico 1.18 · demais ~1.0.
+        | identidade_sc/feel_good herdam o sinal de feel_good_gente/conquista.
+        */
+        'ajuste_gancho' => [
+            'conquista_superacao' => 10,
+            'indignacao' => 8,
+            'identidade_sc' => 8,
+            'feel_good' => 8,
+            'escala' => 4,
+            'servico' => 4,
+            'curiosidade' => 0,
+            'emocao' => 0,
+            'solidariedade' => 0,
+            'vaquinha' => 0,
+            'nenhum' => -5,
+        ],
+
+        // Solidariedade/vaquinha NUNCA é quente automático — vai pra fila humana.
+        'ganchos_fila_humana' => ['solidariedade', 'vaquinha'],
+    ],
 ];
