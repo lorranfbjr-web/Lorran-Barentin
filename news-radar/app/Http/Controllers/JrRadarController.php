@@ -7,28 +7,34 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * API da aba Radar do painel — pautas de jr_link_extracao com o veredito do
- * juiz. Quentes finais = coalesce(temperatura_juiz, temperatura); história
- * clusterizada conta 1x (representante). Tamanho do cluster vem num único
- * GROUP BY sobre os cluster_ids da página (sem N+1).
+ * API da aba Radar — v3: EVENTO como unidade. Cada card é um cluster (item sem
+ * cluster = evento de 1). Por evento: item líder (maior score, desempate mais
+ * recente), score = MAX dos itens, fontes distintas, primeira/última cobertura.
+ * Seções: quentes (default) · alta (trending por nº de portais, sem IA) ·
+ * geral (tudo, compacto) · fila (humana). Voto de feedback = no item líder.
  */
 class JrRadarController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $secao = $request->query('secao', 'quentes');           // quentes | fila
+        $secao = $request->query('secao', 'quentes');
         $janela = min(168, max(6, (int) $request->query('janela', 48)));
-        $sort = $request->query('sort', 'score');               // score | recente
+        $cutoff = now()->subHours($janela);
+
+        if ($secao === 'alta') {
+            return $this->emAlta($cutoff);
+        }
+
+        $sort = $request->query('sort', $secao === 'geral' ? 'recente' : 'score');
         $perPage = min(50, max(5, (int) $request->query('limit', 20)));
 
-        $cutoff = now()->subHours($janela);
+        // Representantes = 1 linha por evento (cluster_rep ou sem cluster).
         $q = DB::table('jr_link_extracao')
             ->where('duplicada', false)
             ->where(function ($w) {
                 $w->where('cluster_rep', true)->orWhereNull('cluster_id');
             })
             ->where(function ($w) use ($cutoff) {
-                // data_pub é string heterogênea; ISO compara lexicográfico, resto cai no created_at
                 $w->where('data_pub', '>=', $cutoff->toDateString())
                     ->orWhere(function ($ww) use ($cutoff) {
                         $ww->whereNull('data_pub')->where('created_at', '>=', $cutoff);
@@ -37,7 +43,7 @@ class JrRadarController extends Controller
 
         if ($secao === 'fila') {
             $q->where('temperatura_juiz', 'fila_humana');
-        } else {
+        } elseif ($secao !== 'geral') {
             $q->whereRaw("coalesce(temperatura_juiz, temperatura) = 'quente'");
         }
 
@@ -66,29 +72,14 @@ class JrRadarController extends Controller
         $page = $q->paginate($perPage, [
             'id', 'titulo', 'url', 'host', 'fonte_tipo', 'origem', 'eixo',
             'temperatura', 'temperatura_juiz', 'score', 'score_editorial',
-            'escopo', 'eh_pauta', 'tipo_gancho', 'cidade_llm', 'tema_ga4',
-            'juiz_motivo', 'cluster_id', 'data_pub', 'created_at', 'notificado_em',
+            'escopo', 'tipo_gancho', 'cidade_llm', 'tema_ga4', 'juiz_motivo',
+            'cluster_id', 'data_pub', 'created_at', 'notificado_em',
         ]);
 
-        // Tamanho dos clusters e voto humano da página — 2 queries agregadas, sem N+1.
-        $clusterIds = collect($page->items())->pluck('cluster_id')->filter()->unique();
-        $tamanhos = $clusterIds->isEmpty() ? collect() : DB::table('jr_link_extracao')
-            ->whereIn('cluster_id', $clusterIds)
-            ->selectRaw('cluster_id, count(*) n')->groupBy('cluster_id')->pluck('n', 'cluster_id');
-        $votos = DB::table('jr_pauta_feedback')
-            ->whereIn('jr_link_extracao_id', collect($page->items())->pluck('id'))
-            ->pluck('faixa', 'jr_link_extracao_id');
-
-        $data = collect($page->items())->map(function ($r) use ($tamanhos, $votos) {
-            $r->cluster_n = $r->cluster_id ? (int) ($tamanhos[$r->cluster_id] ?? 1) : 1;
-            $r->publicado_em = $r->data_pub ?: null;
-            $r->faixa_voto = $votos[$r->id] ?? null;
-
-            return $r;
-        });
+        $eventos = $this->montarEventos(collect($page->items()));
 
         return response()->json([
-            'data' => $data,
+            'data' => $eventos,
             'meta' => [
                 'current_page' => $page->currentPage(),
                 'last_page' => $page->lastPage(),
@@ -96,5 +87,121 @@ class JrRadarController extends Controller
                 'total' => $page->total(),
             ],
         ]);
+    }
+
+    /**
+     * Transforma a página de representantes em EVENTOS (membros agregados em
+     * 2 queries — sem N+1): líder, fontes distintas, cobertura, voto.
+     */
+    private function montarEventos($reps)
+    {
+        $clusterIds = $reps->pluck('cluster_id')->filter()->unique();
+        $membros = $clusterIds->isEmpty() ? collect() : DB::table('jr_link_extracao')
+            ->whereIn('cluster_id', $clusterIds)->where('duplicada', false)
+            ->get(['id', 'cluster_id', 'titulo', 'url', 'host', 'fonte_tipo',
+                'score', 'score_editorial', 'data_pub', 'created_at'])
+            ->groupBy('cluster_id');
+
+        // Voto por evento = voto registrado em QUALQUER item do cluster (último vence).
+        $idsTodos = $reps->pluck('id')->merge($membros->flatten(1)->pluck('id'));
+        $votos = DB::table('jr_pauta_feedback')->whereIn('jr_link_extracao_id', $idsTodos)
+            ->orderBy('votado_em')->get(['jr_link_extracao_id', 'faixa']);
+        $votoPorItem = $votos->pluck('faixa', 'jr_link_extracao_id');
+
+        return $reps->map(function ($rep) use ($membros, $votoPorItem) {
+            $grupo = $rep->cluster_id ? collect($membros[$rep->cluster_id] ?? [$rep]) : collect([$rep]);
+
+            // Líder: maior score (coarse, cobre membro não-julgado); desempate mais recente.
+            $lider = $grupo->sortBy([
+                fn ($a, $b) => (int) $b->score <=> (int) $a->score,
+                fn ($a, $b) => strcmp((string) ($b->data_pub ?? $b->created_at), (string) ($a->data_pub ?? $a->created_at)),
+            ])->first() ?? $rep;
+
+            // Fontes distintas: melhor item de cada fonte (pra linkar a cobertura).
+            $fontes = $grupo->groupBy(fn ($m) => $m->fonte_tipo ?: $m->host ?: '?')
+                ->map(fn ($g, $nome) => [
+                    'nome' => $nome,
+                    'url' => $g->sortByDesc('score')->first()->url,
+                ])->values();
+
+            $datas = $grupo->map(fn ($m) => $m->data_pub ?: $m->created_at)->sort()->values();
+            $faixaVoto = $grupo->pluck('id')->map(fn ($id) => $votoPorItem[$id] ?? null)->filter()->last();
+
+            return [
+                'evento_id' => $rep->cluster_id ?: ('item-' . $rep->id),
+                'lider_id' => (int) $lider->id,
+                'titulo' => $lider->titulo,
+                'url' => $lider->url,
+                'score_evento' => (int) $grupo->max(fn ($m) => (int) ($m->score_editorial ?? -1)) >= 0
+                    ? (int) $grupo->max(fn ($m) => (int) ($m->score_editorial ?? -1))
+                    : null,
+                'score_coarse' => (int) $grupo->max('score'),
+                'eixo' => $rep->eixo,
+                'escopo' => $rep->escopo,
+                'tipo_gancho' => $rep->tipo_gancho,
+                'cidade_llm' => $rep->cidade_llm,
+                'juiz_motivo' => $rep->juiz_motivo,
+                'temperatura_final' => $rep->temperatura_juiz ?: $rep->temperatura,
+                'n_portais' => $fontes->count(),
+                'fontes' => $fontes,
+                'primeira_cobertura' => $datas->first(),
+                'ultima_cobertura' => $datas->last(),
+                'publicado_em' => $rep->data_pub ?: null,
+                'created_at' => $rep->created_at,
+                'notificado_em' => $rep->notificado_em,
+                'faixa_voto' => $faixaVoto,
+            ];
+        })->values();
+    }
+
+    /**
+     * EM ALTA — trending SEM IA: nº de fontes distintas ponderado por recência
+     * (cobertura < 24h conta 1.0; 24-48h conta 0.5). Entram eventos com
+     * >= jrlink.radar.alta_min_fontes (default 3) fontes na janela.
+     */
+    private function emAlta($cutoff): JsonResponse
+    {
+        $minFontes = (int) config('jrlink.radar.alta_min_fontes', 3);
+
+        $itens = DB::table('jr_link_extracao')
+            ->whereNotNull('cluster_id')->where('duplicada', false)
+            ->where(function ($w) use ($cutoff) {
+                $w->where('data_pub', '>=', $cutoff->toDateString())
+                    ->orWhere(function ($ww) use ($cutoff) {
+                        $ww->whereNull('data_pub')->where('created_at', '>=', $cutoff);
+                    });
+            })
+            ->get(['id', 'cluster_id', 'fonte_tipo', 'host', 'data_pub', 'created_at']);
+
+        $corte24 = now()->subHours(24);
+        $trending = $itens->groupBy('cluster_id')->map(function ($grupo, $clusterId) use ($corte24) {
+            $porFonte = $grupo->groupBy(fn ($m) => $m->fonte_tipo ?: $m->host ?: '?');
+            $score = $porFonte->map(function ($g) use ($corte24) {
+                $maisRecente = $g->map(fn ($m) => $m->data_pub ?: $m->created_at)->max();
+                return $maisRecente >= $corte24->format('Y-m-d H:i:s') ? 1.0 : 0.5;
+            })->sum();
+
+            return ['cluster_id' => (int) $clusterId, 'n_fontes' => $porFonte->count(), 'trending' => $score];
+        })->filter(fn ($t) => $t['n_fontes'] >= $minFontes)->sortByDesc('trending')->take(20);
+
+        if ($trending->isEmpty()) {
+            return response()->json(['data' => [], 'meta' => ['total' => 0]]);
+        }
+
+        $reps = DB::table('jr_link_extracao')
+            ->whereIn('cluster_id', $trending->pluck('cluster_id'))
+            ->where('cluster_rep', true)
+            ->get(['id', 'titulo', 'url', 'host', 'fonte_tipo', 'origem', 'eixo',
+                'temperatura', 'temperatura_juiz', 'score', 'score_editorial',
+                'escopo', 'tipo_gancho', 'cidade_llm', 'tema_ga4', 'juiz_motivo',
+                'cluster_id', 'data_pub', 'created_at', 'notificado_em']);
+
+        $eventos = $this->montarEventos($reps)->map(function ($e) use ($trending) {
+            $e['score_trending'] = $trending[$e['evento_id']]['trending'] ?? 0;
+
+            return $e;
+        })->sortByDesc('score_trending')->values();
+
+        return response()->json(['data' => $eventos, 'meta' => ['total' => $eventos->count()]]);
     }
 }

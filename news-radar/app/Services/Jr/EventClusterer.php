@@ -26,11 +26,21 @@ class EventClusterer
         'uma', 'uns', 'umas', 'que', 'por', 'ser', 'ter', 'foi', 'sao', 'são', 'tem',
         'veja', 'saiba', 'confira', 'entenda', 'assista', 'fotos', 'video', 'vídeo',
         'anos', 'ano', 'dia', 'dias', 'nova', 'novo', 'fica', 'após',
+        // calendário NÃO identifica evento — briefing diário ("Café com notícias
+        // de terça, 10 de junho de 2026") colava tudo que tem data no título.
+        'janeiro', 'fevereiro', 'marco', 'março', 'abril', 'maio', 'junho', 'julho',
+        'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+        'segunda', 'terca', 'terça', 'quarta', 'quinta', 'sexta', 'sabado', 'sábado',
+        'domingo', 'feira', 'hoje', 'amanha', 'amanhã', 'ontem', 'semana', 'madrugada',
+        'noite', 'manha', 'manhã', 'tarde', 'feriado', 'feriadao', 'feriadão',
     ];
 
     private float $overlapMin;
 
     private int $minTokenLen;
+
+    /** Pares limítrofes do último cluster(): candidatos pro merge LLM. */
+    private array $limitrofes = [];
 
     public function __construct(?array $cfg = null)
     {
@@ -111,8 +121,8 @@ class EventClusterer
                         continue; // cidades ou idades explícitas DIFERENTES = eventos distintos
                     }
                     $ov = $this->overlap($tokens[$i], $tokens[$j], $idf, $somaPeso[$i], $somaPeso[$j]);
-                    if ($ov >= $this->overlapMin * 0.9) {
-                        $pares[] = [$ov, $i, $j]; // borda inclusa — 2º passe decide
+                    if ($ov >= $this->overlapMin * 0.55) {
+                        $pares[] = [$ov, $i, $j]; // banda larga; cortes decidem abaixo
                     }
                 }
             }
@@ -169,6 +179,22 @@ class EventClusterer
             }
         }
 
+        // Pares LIMÍTROFES (similaridade intermediária que NÃO fundiu): viram
+        // candidatos pro merge assistido por LLM ("mesmo evento? sim/não").
+        // Vetos de cidade/idade já filtraram; aqui só registra o que sobrou
+        // em componentes diferentes, com os ids reais dos itens.
+        $this->limitrofes = [];
+        foreach ($pares as [$ov, $i, $j]) {
+            if ($ov < $this->overlapMin * 0.9 && $find($i) !== $find($j)) {
+                $this->limitrofes[] = [
+                    'overlap' => round($ov, 3),
+                    'id_a' => (int) $rows[$i]->id,
+                    'id_b' => (int) $rows[$j]->id,
+                ];
+            }
+        }
+        usort($this->limitrofes, fn ($x, $y) => $y['overlap'] <=> $x['overlap']);
+
         // Agrupa e escolhe representante.
         $grupos = [];
         foreach ($rows as $i => $r) {
@@ -200,6 +226,12 @@ class EventClusterer
         return $out;
     }
 
+    /** @return array<int,array{overlap:float,id_a:int,id_b:int}> do último cluster() */
+    public function paresLimitrofes(): array
+    {
+        return $this->limitrofes;
+    }
+
     /** @return array<string,true> conjunto de tokens normalizados do título */
     public function tokens(string $titulo): array
     {
@@ -207,6 +239,9 @@ class EventClusterer
         $parts = preg_split('/[^a-z0-9]+/', $t, -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $out = [];
         foreach ($parts as $p) {
+            if (preg_match('/^(19|20)\d{2}$/', $p)) {
+                continue; // ano puro = calendário, não evento
+            }
             if (mb_strlen($p) >= $this->minTokenLen && ! in_array($p, self::STOPWORDS, true)) {
                 $out[$p] = true;
             }

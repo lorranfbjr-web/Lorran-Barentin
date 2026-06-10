@@ -109,9 +109,16 @@ class JrLinkJuiz extends Command
         // ── persiste clusters (news_clusters + colunas em jr_link_extracao) ──
         $this->persistirClusters($clusters, $byId, $hours);
 
-        // ── camada 3: juiz LLM nos pendentes ──
         $juiz = new JuizLlm(null, $this->option('driver') ?: null);
         $this->info(sprintf('Driver: %s · modelo: %s', $juiz->driver(), $juiz->modelo()));
+
+        // ── merge assistido por LLM: pares limítrofes que a similaridade não decide ──
+        $fundidos = $this->mergeLlmClusters($clusterer, $byId, $juiz);
+        if ($fundidos > 0) {
+            $this->info("Merge LLM: {$fundidos} cluster(s) fundidos (títulos reformulados).");
+        }
+
+        // ── camada 3: juiz LLM nos pendentes ──
 
         $clf = new PautaClassifier();
         $julgados = 0;
@@ -239,6 +246,85 @@ class JrLinkJuiz extends Command
                 }
             }
         }
+    }
+
+    /**
+     * Merge assistido por LLM: pega os pares LIMÍTROFES do clustering (similaridade
+     * intermediária, vetos de cidade/idade já aplicados), pergunta em LOTE "mesmo
+     * evento?" (prompt próprio — o do juiz não muda) e funde clusters no sim.
+     * Cap por ciclo em jrlink.cluster.llm_merge_pares. Fusões logadas.
+     */
+    private function mergeLlmClusters(EventClusterer $clusterer, $byId, JuizLlm $juiz): int
+    {
+        $cap = (int) config('jrlink.cluster.llm_merge_pares', 40);
+        $limitrofes = $clusterer->paresLimitrofes();
+        if ($cap <= 0 || ! $limitrofes) {
+            return 0;
+        }
+
+        $ids = collect($limitrofes)->flatMap(fn ($p) => [$p['id_a'], $p['id_b']])->unique();
+        $clusterDe = DB::table('jr_link_extracao')->whereIn('id', $ids)->pluck('cluster_id', 'id');
+
+        $vistos = [];
+        $paresCluster = [];
+        foreach ($limitrofes as $p) {
+            $ca = $clusterDe[$p['id_a']] ?? null;
+            $cb = $clusterDe[$p['id_b']] ?? null;
+            if (! $ca || ! $cb || $ca === $cb) {
+                continue;
+            }
+            $key = min($ca, $cb) . ':' . max($ca, $cb);
+            if (isset($vistos[$key])) {
+                continue;
+            }
+            $vistos[$key] = true;
+            $paresCluster[] = ['ca' => (int) $ca, 'cb' => (int) $cb,
+                'a' => (string) $byId[$p['id_a']]->titulo, 'b' => (string) $byId[$p['id_b']]->titulo];
+            if (count($paresCluster) >= $cap) {
+                break;
+            }
+        }
+        if (! $paresCluster) {
+            return 0;
+        }
+
+        $veredito = $juiz->julgarMesmoEvento(array_map(fn ($p) => ['a' => $p['a'], 'b' => $p['b']], $paresCluster));
+
+        $remap = [];
+        $fundidos = 0;
+        foreach ($paresCluster as $n => $p) {
+            if (! ($veredito[$n] ?? false)) {
+                continue;
+            }
+            $ca = $remap[$p['ca']] ?? $p['ca'];
+            $cb = $remap[$p['cb']] ?? $p['cb'];
+            if ($ca === $cb) {
+                continue;
+            }
+            // Alvo: cluster cujo representante já foi julgado; senão o maior.
+            $reps = DB::table('jr_link_extracao')->whereIn('cluster_id', [$ca, $cb])
+                ->where('cluster_rep', true)->get(['cluster_id', 'juiz_julgado_em']);
+            $contagem = DB::table('jr_link_extracao')->whereIn('cluster_id', [$ca, $cb])
+                ->selectRaw('cluster_id, count(*) n')->groupBy('cluster_id')->pluck('n', 'cluster_id');
+            $julgadoA = (bool) $reps->firstWhere('cluster_id', $ca)?->juiz_julgado_em;
+            $julgadoB = (bool) $reps->firstWhere('cluster_id', $cb)?->juiz_julgado_em;
+            [$alvo, $perde] = $julgadoA === $julgadoB
+                ? ((($contagem[$ca] ?? 0) >= ($contagem[$cb] ?? 0)) ? [$ca, $cb] : [$cb, $ca])
+                : ($julgadoA ? [$ca, $cb] : [$cb, $ca]);
+
+            DB::table('jr_link_extracao')->where('cluster_id', $perde)
+                ->update(['cluster_id' => $alvo, 'cluster_rep' => false]);
+            DB::table('news_clusters')->where('id', $alvo)
+                ->update(['items_count' => (int) ($contagem[$ca] ?? 0) + (int) ($contagem[$cb] ?? 0)]);
+            DB::table('news_clusters')->where('id', $perde)->delete();
+            \Illuminate\Support\Facades\Log::info(sprintf(
+                '[ClusterMergeLLM] fundiu cluster %d -> %d: "%s" ≈ "%s"',
+                $perde, $alvo, mb_strimwidth($p['a'], 0, 70), mb_strimwidth($p['b'], 0, 70)));
+            $remap[$perde] = $alvo;
+            $fundidos++;
+        }
+
+        return $fundidos;
     }
 
     /** Aplica âncora GA4 + regras de temperatura e grava o veredito. */

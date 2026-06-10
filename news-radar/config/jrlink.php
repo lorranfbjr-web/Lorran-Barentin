@@ -383,6 +383,9 @@ return [
         // (>= min_token_len chars, sem stopwords). Une no union-find se >= corte.
         'overlap_min' => 0.50,
         'min_token_len' => 4,
+        // Merge assistido por LLM (pares limítrofes, "mesmo evento? sim/não").
+        // Cap de pares por ciclo; 0 desliga.
+        'llm_merge_pares' => 40,
     ],
 
     'juiz' => [

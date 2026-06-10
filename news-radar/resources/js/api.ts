@@ -81,30 +81,30 @@ export const collectAll = () =>
     apiFetch<{ message: string; dispatched: number }>('/collect-all', { method: 'POST' });
 
 // ── Aba Radar (JR Pauta / juiz) — chave leve via ?key= (cookie 90d depois) ──
+export interface RadarFonte { nome: string; url: string }
+
 export interface RadarItem {
-    id: number;
+    evento_id: number | string;
+    lider_id: number;
     titulo: string;
     url: string;
-    host: string | null;
-    fonte_tipo: string | null;
-    origem: string;
+    score_evento: number | null;
+    score_coarse: number;
     eixo: 'primaria' | 'concorrente';
-    temperatura: string | null;
-    temperatura_juiz: string | null;
-    score: number;
-    score_editorial: number | null;
     escopo: string | null;
-    eh_pauta: number | null;
     tipo_gancho: string | null;
     cidade_llm: string | null;
-    tema_ga4: string | null;
     juiz_motivo: string | null;
-    cluster_id: number | null;
-    cluster_n: number;
+    temperatura_final: string | null;
+    n_portais: number;
+    fontes: RadarFonte[];
+    primeira_cobertura: string | null;
+    ultima_cobertura: string | null;
     publicado_em: string | null;
     created_at: string;
     notificado_em: string | null;
     faixa_voto: 'baixa' | 'media' | 'alta' | null;
+    score_trending?: number;
 }
 
 export const radarKeyFromUrl = (): string =>

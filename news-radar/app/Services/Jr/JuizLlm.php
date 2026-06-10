@@ -125,6 +125,59 @@ PROMPT;
     }
 
     /**
+     * Merge assistido: "mesmo evento? sim/não" em LOTE para pares de títulos
+     * limítrofes do clustering. Prompt PRÓPRIO e separado — o prompt do juiz
+     * (montarPrompt) não muda. Retorna [n => bool] por par.
+     *
+     * @param  array<int,array{a:string,b:string}>  $pares
+     */
+    public function julgarMesmoEvento(array $pares): array
+    {
+        if (! $pares) {
+            return [];
+        }
+        $lista = '';
+        foreach ($pares as $n => $p) {
+            $lista .= sprintf("PAR %d\nA: %s\nB: %s\n\n", $n, trim($p['a']), trim($p['b']));
+        }
+        $prompt = <<<PROMPT
+Você verifica DEDUPLICAÇÃO de notícias regionais de Santa Catarina. Para cada par de títulos abaixo, responda se os dois cobrem o MESMO EVENTO (mesmo fato, mesmas pessoas/lugar — reformulação de manchete conta como mesmo evento; fatos parecidos em lugares/dias diferentes NÃO). Título genérico sem fato identificável (ex.: "Nota de Pesar", "Plantão de notícias") NUNCA é mesmo evento — responda false.
+
+RESPONDA APENAS com um array JSON, sem texto fora dele:
+[{"par": <n>, "mesmo": true|false}]
+
+PARES:
+
+{$lista}
+PROMPT;
+
+        $t0 = microtime(true);
+        try {
+            [$texto, $in, $out, $custo] = $this->driver === 'openai'
+                ? $this->chamarOpenai($prompt)
+                : $this->chamarClaudeCli($prompt);
+            $this->log('success', 1, count($pares), $in, $out, $custo, null, $t0, 'cluster_merge');
+
+            if (preg_match('/\[.*\]/s', $texto, $m)) {
+                $texto = $m[0];
+            }
+            $arr = json_decode($texto, true);
+            $res = [];
+            foreach (is_array($arr) ? $arr : [] as $v) {
+                if (isset($v['par'])) {
+                    $res[(int) $v['par']] = (bool) ($v['mesmo'] ?? false);
+                }
+            }
+
+            return $res;
+        } catch (\Throwable $e) {
+            $this->log('error', 1, count($pares), null, null, null, $e->getMessage(), $t0, 'cluster_merge');
+
+            return []; // merge é otimização — falhou, segue sem fundir
+        }
+    }
+
+    /**
      * Bloco "calibração do editor" (few-shot do feedback humano). Retorna ''
      * quando a flag está OFF ou há menos votos que o mínimo. Seleção: maiores
      * divergências juiz×humano primeiro, garantindo ao menos 1 exemplo por
@@ -293,10 +346,10 @@ PROMPT;
         return $keyReal ? 'openai' : 'claude-cli';
     }
 
-    private function log(string $status, int $attempt, int $itens, ?int $in, ?int $out, ?float $custo, ?string $erro, float $t0): void
+    private function log(string $status, int $attempt, int $itens, ?int $in, ?int $out, ?float $custo, ?string $erro, float $t0, string $operation = 'juiz_lote'): void
     {
         DB::table('jr_juiz_log')->insert([
-            'operation' => 'juiz_lote',
+            'operation' => $operation,
             'model' => $this->modelo(),
             'status' => $status,
             'attempt' => $attempt,
