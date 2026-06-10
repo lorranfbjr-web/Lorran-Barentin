@@ -145,6 +145,12 @@ class JrLinkJuiz extends Command
             $julgados, $falhas, (float) $custo));
         $this->tabelaTemperaturas();
 
+        // ── notificação (digest de quentes novos pro Raspador; kill switch por env) ──
+        $notif = (new \App\Services\Jr\RadarNotificador())->notificarNovos();
+        $this->line(sprintf('Notificação: %s (novos=%d, na mensagem=%d%s)',
+            $notif['status'], $notif['novos'], $notif['enviados'],
+            $notif['message_id'] ? ', messageId=' . $notif['message_id'] : ''));
+
         return $falhas > 0 ? self::FAILURE : self::SUCCESS;
     }
 

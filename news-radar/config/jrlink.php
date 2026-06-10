@@ -461,4 +461,32 @@ return [
         // Solidariedade/vaquinha NUNCA é quente automático — vai pra fila humana.
         'ganchos_fila_humana' => ['solidariedade', 'vaquinha'],
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | NOTIFICAÇÃO — digest de quentes novos pro grupo "Raspador" (Z-API direto)
+    |---------------------------------------------------------------------------
+    | Caminho próprio (HTTP do Laravel), isolado do disparador n8n. Kill switch:
+    | qualquer env vazio = desligado. Dedup permanente em notificado_em.
+    */
+    'notificacao' => [
+        'instance' => env('JRLINK_ALERT_ZAPI_INSTANCE', ''),
+        'token' => env('JRLINK_ALERT_ZAPI_TOKEN', ''),
+        'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
+        'grupo' => env('JRLINK_ALERT_GROUP', ''),          // phone do grupo Raspador
+        'max_itens' => 10,                                  // cap por mensagem; resto vira "+N"
+        'silencio_inicio' => 23,                            // janela de silêncio (acumula)
+        'silencio_fim' => 6,
+        'relatorio_url' => 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html',
+    ],
+
+    /*
+    | ANTI-LOOP da captura: mensagem que a PRÓPRIA instância manda pro Raspador
+    | não pode voltar pro pipeline como "link do WhatsApp". Corta na coleta
+    | (jrlink:extract > coletarUrls), nunca no armazenamento bruto.
+    */
+    'captura' => [
+        'ignorar_from_me' => true,
+        'ignorar_chats' => ['Raspador'],
+    ],
 ];

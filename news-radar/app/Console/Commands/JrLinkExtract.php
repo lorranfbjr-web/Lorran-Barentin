@@ -165,8 +165,13 @@ class JrLinkExtract extends Command
     /** Coleta URLs http(s) das capturas, dedup por hash bruto, N mais recentes. */
     private function coletarUrls(int $limit): array
     {
+        // ANTI-LOOP: o digest do Radar JR (enviado pela própria instância pro
+        // grupo Raspador) carrega links — não pode voltar pro pipeline.
+        $cap = $this->cfg['captura'] ?? [];
         $caps = DB::table('jr_pauta_capturas')
             ->whereNotNull('texto')->where('texto', 'like', '%http%')
+            ->when($cap['ignorar_from_me'] ?? true, fn ($q) => $q->where('from_me', false))
+            ->when(! empty($cap['ignorar_chats']), fn ($q) => $q->whereNotIn('chat_name', $cap['ignorar_chats']))
             ->orderByDesc('momment')
             ->limit(400)->get(['texto', 'fonte_tipo']);
 
