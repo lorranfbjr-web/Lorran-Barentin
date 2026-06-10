@@ -315,8 +315,10 @@ return [
 
         // Hard cap de chamadas LLM por execução — estourou, ABORTA e reporta.
         'cap_chamadas' => 300,
-        // Itens julgados por chamada (lote no mesmo prompt).
-        'lote' => 12,
+        // Itens julgados por chamada (lote no mesmo prompt). 12->24 em 2026-06-10
+        // (menos overhead de sessão do claude-cli por item); parse validado com
+        // lote real de 24 — se degradar, volte pra 12.
+        'lote' => 24,
 
         // Quem vai pro juiz (além do colapso): representante quente coarse sempre;
         // frio coarse só se score >= isto (dá chance de resgate sem julgar lixo).
