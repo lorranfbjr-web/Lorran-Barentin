@@ -272,12 +272,7 @@ class JrLinkExtract extends Command
      */
     private function notificar(): void
     {
-        $quentes = DB::table('jr_link_extracao')
-            ->where('temperatura', 'quente')
-            ->where('duplicada', false)
-            ->orderByDesc('score')->orderByDesc('id')
-            ->limit(self::REPORT_CAP)
-            ->get();
+        $quentes = $this->quentesFinais()->take(self::REPORT_CAP);
 
         if ($quentes->isEmpty()) {
             $this->line('Notificação: nenhuma pauta quente — nada a enviar.');
@@ -345,6 +340,25 @@ class JrLinkExtract extends Command
 
     private const REPORT_CAP = 50;
 
+    /**
+     * Quentes FINAIS (Fase 2): temperatura do juiz quando julgado, coarse senão.
+     * História clusterizada conta UMA vez (só o representante; sem juiz, membro
+     * não-representante de cluster não entra). Ordena por score_editorial
+     * (0-100, juiz) e depois score coarse.
+     */
+    private function quentesFinais()
+    {
+        return DB::table('jr_link_extracao')
+            ->whereRaw("coalesce(temperatura_juiz, temperatura) = 'quente'")
+            ->where('duplicada', false)
+            ->where(function ($q) {
+                $q->where('cluster_rep', true)->orWhereNull('cluster_id');
+            })
+            ->orderByRaw('coalesce(score_editorial, -1) desc')
+            ->orderByDesc('score')->orderByDesc('id')
+            ->get();
+    }
+
     private function relatorioTexto(): string
     {
         // Resumo é sobre TODO o conjunto; o detalhe lista só os QUENTES não-dup (cap).
@@ -355,12 +369,19 @@ class JrLinkExtract extends Command
         $porStatus = $this->contagem('status');
         $porOrigem = $this->contagem('origem');
 
-        $quentes = DB::table('jr_link_extracao')
-            ->where('temperatura', 'quente')->where('duplicada', false)
-            ->orderByDesc('score')->orderByDesc('id')
-            ->get();
+        $quentes = $this->quentesFinais();
         $qPrim = $quentes->where('eixo', 'primaria');
         $qConc = $quentes->where('eixo', 'concorrente');
+
+        $nJulgados = DB::table('jr_link_extracao')->whereNotNull('juiz_julgado_em')->count();
+        $nMortosJuiz = DB::table('jr_link_extracao')
+            ->where('temperatura', 'quente')->where('temperatura_juiz', 'frio')->count();
+        $filaHumana = DB::table('jr_link_extracao')
+            ->where('temperatura_juiz', 'fila_humana')->where('duplicada', false)
+            ->orderByRaw('coalesce(score_editorial, -1) desc')->get();
+        $clusterSizes = DB::table('jr_link_extracao')
+            ->whereNotNull('cluster_id')->selectRaw('cluster_id, count(*) c')
+            ->groupBy('cluster_id')->pluck('c', 'cluster_id');
 
         $L = [];
         $L[] = '################################################################';
@@ -371,6 +392,10 @@ class JrLinkExtract extends Command
         $L[] = sprintf('CONTAGEM:  processados=%d   ·   🔥 quentes(não-dup)=%d   ·   ⟂ duplicadas=%d',
             $total, $quentes->count(), $nDup);
         $L[] = sprintf('           ✍️ primária pronta=%d   ·   📡 radar apurar=%d', $qPrim->count(), $qConc->count());
+        if ($nJulgados > 0) {
+            $L[] = sprintf('JUIZ LLM:  julgados=%d   ·   🧊 quentes-coarse mortos pelo juiz=%d   ·   🙋 fila humana=%d',
+                $nJulgados, $nMortosJuiz, $filaHumana->count());
+        }
         $L[] = '';
         $L[] = 'RESUMO (todo o conjunto):';
         $L[] = '  por categoria: ' . $this->kv($porCat);
@@ -388,7 +413,7 @@ class JrLinkExtract extends Command
         $L[] = '████ ✍️ PRIMÁRIA — pronta pra escrever ████';
         foreach ($qPrim->take(self::REPORT_CAP) as $r) {
             $i++;
-            $this->blocoQuente($L, $i, $r);
+            $this->blocoQuente($L, $i, $r, $clusterSizes);
         }
         if ($qPrim->isEmpty()) {
             $L[] = '   (nenhuma)';
@@ -398,10 +423,19 @@ class JrLinkExtract extends Command
         $L[] = '████ 📡 RADAR — apurar por conta (NÃO reescrever) ████';
         foreach ($qConc->take(self::REPORT_CAP) as $r) {
             $i++;
-            $this->blocoQuente($L, $i, $r);
+            $this->blocoQuente($L, $i, $r, $clusterSizes);
         }
         if ($qConc->isEmpty()) {
             $L[] = '   (nenhuma)';
+        }
+
+        if ($filaHumana->isNotEmpty()) {
+            $L[] = '';
+            $L[] = '████ 🙋 FILA HUMANA — solidariedade/vaquinha (decisão do Lorran) ████';
+            foreach ($filaHumana->take(self::REPORT_CAP) as $r) {
+                $i++;
+                $this->blocoQuente($L, $i, $r, $clusterSizes);
+            }
         }
 
         $L[] = '';
@@ -410,16 +444,27 @@ class JrLinkExtract extends Command
         return implode("\n", $L);
     }
 
-    private function blocoQuente(array &$L, int $i, object $r): void
+    private function blocoQuente(array &$L, int $i, object $r, $clusterSizes = null): void
     {
         [$marca] = $this->marcador($r->categoria);
+        $julgado = ! empty($r->juiz_julgado_em);
+        $scoreTxt = $julgado
+            ? sprintf('score=%d/100 (coarse %d)', (int) $r->score_editorial, (int) $r->score)
+            : sprintf('score=%d', (int) $r->score);
         $L[] = '';
         $L[] = '----------------------------------------------------------------';
-        $L[] = sprintf('#%02d  🔥 score=%d  ·  %s  ·  [%s]', $i, (int) $r->score, $marca, strtoupper($r->status));
+        $L[] = sprintf('#%02d  🔥 %s  ·  %s  ·  [%s]', $i, $scoreTxt, $marca, strtoupper($r->status));
         $L[] = 'título: ' . ($r->titulo ?? '(não extraído)');
         $L[] = 'URL...: ' . $r->url;
         $L[] = 'host..: ' . ($r->host ?? '?') . '  ·  origem=' . ($r->origem ?? '-')
             . '  ·  fonte=' . ($r->fonte_tipo ?? '-') . '  ·  data=' . ($r->data_pub ?? '-');
+        if ($julgado) {
+            $nCluster = $clusterSizes[$r->cluster_id] ?? 1;
+            $L[] = sprintf('juiz..: escopo=%s  ·  gancho=%s  ·  cidade=%s  ·  tema=%s%s',
+                $r->escopo ?? '-', $r->tipo_gancho ?? '-', $r->cidade_llm ?? '-', $r->tema_ga4 ?? '-',
+                $nCluster > 1 ? sprintf('  ·  cluster=%d (1 de %d portais)', (int) $r->cluster_id, $nCluster) : '');
+            $L[] = 'motivo: ' . ($r->juiz_motivo ?: '-');
+        }
     }
 
     /** Contagem agrupada por coluna sobre todo o conjunto. */
