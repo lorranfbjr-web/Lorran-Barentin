@@ -26,7 +26,8 @@ $nacionais = DB::table('jr_link_extracao')
     ->where('duplicada', false)
     ->where(function ($q) {
         $q->where('titulo', 'like', '%Enem%')
-            ->orWhere('titulo', 'like', '%Lula%')
+            ->orWhere('titulo', 'like', '%Lula %')
+            ->orWhere('titulo', 'like', '% Lula%')
             ->orWhere('titulo', 'like', '% ONU %')
             ->orWhere(function ($qq) {
                 $qq->where('titulo', 'like', '%carne%')->where('titulo', 'like', '%Europ%');
@@ -34,6 +35,8 @@ $nacionais = DB::table('jr_link_extracao')
     })
     ->get();
 $aQuentes = $nacionais->filter(fn ($r) => ($r->temperatura_juiz ?? $r->temperatura) === 'quente'
+    // mesma semântica da saída do pipeline: só representante (ou sem cluster) aparece
+    && ($r->cluster_rep || $r->cluster_id === null)
     // ângulo local real legitima (nacional_localizado julgado pauta não conta como falha)
     && ! ($r->escopo === 'nacional_localizado' && $r->eh_pauta));
 echo sprintf("(a) nacional morto: %d itens Enem/Lula/ONU/carne-UE · %d quentes ilegítimos\n",

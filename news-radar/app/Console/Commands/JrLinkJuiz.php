@@ -35,6 +35,7 @@ class JrLinkJuiz extends Command
         . '{--hours=48 : Janela (data_pub/created_at >= agora - N horas)} '
         . '{--driver= : Força o driver (openai|claude-cli); default config/auto} '
         . '{--dry : Clusteriza e mostra o plano de julgamento, sem chamar LLM nem gravar} '
+        . '{--ids= : Julga SÓ estes ids de jr_link_extracao (separados por vírgula), ignorando idempotência} '
         . '{--force : Re-julga mesmo quem já tem veredito desta prompt_versao}';
 
     protected $description = 'Camadas 2+3 da Fase 2: colapsa eventos via news_clusters e julga os representantes com o juiz LLM (título+lead, JSON estrito).';
@@ -72,7 +73,13 @@ class JrLinkJuiz extends Command
             }
         }
 
-        $jaJulgados = $this->option('force') ? collect() : collect($aJulgar)
+        // --ids: re-julga itens específicos (calibração dirigida), sem clusterizar de novo.
+        if ($this->option('ids')) {
+            $ids = array_map('intval', explode(',', (string) $this->option('ids')));
+            $aJulgar = array_values(array_filter($rows, fn ($r) => in_array((int) $r->id, $ids, true)));
+        }
+
+        $jaJulgados = ($this->option('force') || $this->option('ids')) ? collect() : collect($aJulgar)
             ->filter(fn ($r) => $r->juiz_prompt_versao === $promptVersao && $r->juiz_julgado_em !== null)
             ->pluck('id');
         $pendentes = array_values(array_filter($aJulgar, fn ($r) => ! $jaJulgados->contains($r->id)));

@@ -111,8 +111,8 @@ class EventClusterer
                         continue; // cidades ou idades explícitas DIFERENTES = eventos distintos
                     }
                     $ov = $this->overlap($tokens[$i], $tokens[$j], $idf, $somaPeso[$i], $somaPeso[$j]);
-                    if ($ov >= $this->overlapMin) {
-                        $pares[] = [$ov, $i, $j];
+                    if ($ov >= $this->overlapMin * 0.9) {
+                        $pares[] = [$ov, $i, $j]; // borda inclusa — 2º passe decide
                     }
                 }
             }
@@ -136,18 +136,37 @@ class EventClusterer
 
         $compLoc = $locais;
         $compIdade = $idades;
-        foreach ($pares as [$ov, $i, $j]) {
+        $unir = function (int $i, int $j) use (&$pai, &$compLoc, &$compIdade, $find): bool {
             $ra = $find($i);
             $rb = $find($j);
             if ($ra === $rb) {
-                continue;
+                return false;
             }
             if ($this->conflita($compLoc[$ra], $compLoc[$rb]) || $this->conflita($compIdade[$ra], $compIdade[$rb])) {
-                continue;
+                return false;
             }
             $pai[$rb] = $ra;
             $compLoc[$ra] += $compLoc[$rb];
             $compIdade[$ra] += $compIdade[$rb];
+
+            return true;
+        };
+        foreach ($pares as [$ov, $i, $j]) {
+            if ($ov >= $this->overlapMin) {
+                $unir($i, $j);
+            }
+        }
+
+        // 2º passe: funde clusters da MESMA história que ficaram NA BORDA do
+        // corte (ex.: trio SEO "Como foi…/O que se sabe…" a 0.49 vs cobertura
+        // direta do mesmo evento). Borda estreita (>= 0.9x) e âncora bem mais
+        // rara (df <= ~1%), com os mesmos vetos de componente.
+        $tetoMerge = max(3, (int) ceil($n * 0.007));
+        foreach ($pares as [$ov, $i, $j]) {
+            if ($ov >= $this->overlapMin * 0.9
+                && $this->temAncora($tokens[$i], $tokens[$j], $df, $n, $tetoMerge)) {
+                $unir($i, $j);
+            }
         }
 
         // Agrupa e escolhe representante.
@@ -274,9 +293,9 @@ class EventClusterer
      * genérico de tragédia ("morre", "acidente") é frequente e não ancora — evita
      * encadear acidentes distintos num cluster só.
      */
-    private function temAncora(array $a, array $b, array $df, int $n): bool
+    private function temAncora(array $a, array $b, array $df, int $n, ?int $teto = null): bool
     {
-        $teto = max(3, (int) ceil($n * 0.04));
+        $teto = $teto ?? max(3, (int) ceil($n * 0.04));
         foreach (array_keys(count($a) < count($b) ? $a : $b) as $t) {
             if (isset($a[$t], $b[$t]) && ($df[$t] ?? PHP_INT_MAX) <= $teto) {
                 return true;
