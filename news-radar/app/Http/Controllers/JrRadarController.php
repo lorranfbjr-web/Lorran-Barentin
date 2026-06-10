@@ -191,6 +191,12 @@ class JrRadarController extends Controller
         $reps = DB::table('jr_link_extracao')
             ->whereIn('cluster_id', $trending->pluck('cluster_id'))
             ->where('cluster_rep', true)
+            // Nacional PURO fora do EM ALTA: pauta de agência (Mega-Sena, etanol)
+            // que todo portal replica não é "todo mundo cobrindo" editorial.
+            // nacional_localizado (tainha) e regional ficam; sem juiz ainda, fica.
+            ->where(function ($w) {
+                $w->whereNull('escopo')->orWhere('escopo', '!=', 'nacional');
+            })
             ->get(['id', 'titulo', 'url', 'host', 'fonte_tipo', 'origem', 'eixo',
                 'temperatura', 'temperatura_juiz', 'score', 'score_editorial',
                 'escopo', 'tipo_gancho', 'cidade_llm', 'tema_ga4', 'juiz_motivo',

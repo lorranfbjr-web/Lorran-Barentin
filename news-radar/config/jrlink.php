@@ -390,10 +390,11 @@ return [
 
     'juiz' => [
         // Versão do prompt — item julgado com a MESMA versão não re-julga (idempotência).
+        // v3: seção de score ancorada no DNA real do Instagram (jr-ig-dna).
         // v2: regra SEO-washing explícita ("Como foi…", "Tudo o que se sabe…" =
         // eh_pauta false mesmo com fato real). Itens v1 re-julgam aos poucos nos
         // próximos runs.
-        'prompt_versao' => 'v2',
+        'prompt_versao' => 'v3',
 
         // Driver: auto = openai se OPENAI_API_KEY for real; senão claude-cli
         // (claude -p headless, assinatura local). openai reusa o MESMO cliente

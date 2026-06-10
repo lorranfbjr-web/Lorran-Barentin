@@ -107,12 +107,30 @@ REGRAS DO VEREDITO:
 - Notícia nacional sem ângulo local real NO TÍTULO (Enem, Lula, ONU, decisões da UE, futebol nacional, loteria) = escopo "nacional" e score baixo.
 - eh_pauta=false para: SEO/listicle, coluna/opinião, horóscopo, home institucional, aniversariantes do dia, datas comemorativas, conteúdo requentado sem fato novo.
 - SEO-washing é SEMPRE eh_pauta=false, mesmo que o fato por trás seja real: título que reconta cobertura alheia em formato de busca — "Como foi…", "O que aconteceu com…", "Tudo o que se sabe sobre…", "O que se sabe…", "Entenda…", "Veja como…", receitas, listas.
-- QUENTE é GANCHO, NUNCA gravidade do tema: emoção, curiosidade, indignação, identidade catarinense, feel-good, escala/superlativo. Prisão rotineira (ex.: flagrante com 21g) ou acidente comum JAMAIS é quente só por ser grave.
-- VALORIZE pauta leve: economia e desenvolvimento de SC, gente real, bicho, feel-good com cidade da região.
+- TEMPERATURA/SCORE — a régua é UMA pergunta: "isto seria um post do @jornalrazao?" (DNA real do perfil, engajamento medido em COMENTÁRIOS):
+  · O que MAIS engaja (mediana real): política local com emoção/indignação (1648) > flagrante policial COM NARRATIVA (798) > viral/insólito (757) > luto/comoção (686) > superação com nome e história (583) > acidente/resgate com drama (527).
+  · O que MENOS engaja e o perfil quase não posta: evento/agenda cultural (150), economia/negócios institucional (141), clima rotineiro (211), serviço/utilidade (265), institucional de prefeitura (313).
+  · Flagrante/ocorrência SÓ esquenta com narrativa ou insólito — boletim burocrático (corte de cabos, apreensão sem história) é frio mesmo sendo crime.
+  · Evento institucional fofo de prefeitura/órgão (casamento coletivo, inauguração protocolar, campanha oficial) NÃO é quente (score < 60), salvo cobertura múltipla independente de portais.
+- EXEMPLOS REAIS do perfil com ALTO engajamento (a cara do quente 80-100):
+  · "Casal de pastores de Joinville manteve mulher em cárcere por mais de um ano" (11,4 mil comentários)
+  · "Ladrão invadiu casa em Chapecó e teve uma surpresa nada agradável" (10,9 mil)
+  · "Por mais de um ano, ela dormiu de chupeta e foi cuidada como bebê" (10,8 mil)
+  · "Pescadores choraram na vigia em Quatro Ilhas com a volta da pesca da tainha" (10,5 mil)
+  · "Caminhada de uma jovem de 20 anos virou pânico" (9,5 mil)
+  · "Padre catarinense viraliza ao pedir oração por 'vadios e preguiçosos'" (7,3 mil)
+  · "Ligação 'apavorada' fez Lula reabrir a pesca da tainha" (7,6 mil)
+  · "Corretor de luxo em Dubai e companheira investigados por golpe milionário" (6,3 mil)
+- EXEMPLOS com BAIXO engajamento / que o perfil evita (frio, score < 40):
+  · "Encontro de motos gratuito neste sábado em Tijucas" (6 comentários — agenda)
+  · "Blumenau dá passo que famílias esperavam: Vila da casa própria" (8 — institucional)
+  · "Programa Estrada Boa Rural segue em expansão" (26 — release de governo)
+  · "Loteamento de acesso controlado chega à Grande Florianópolis" (8 — negócio/publi)
+  · "Caminhão caçamba atinge dois carros e invade residência" (14 — boletim sem história)
 - tipo_gancho: um de emocao|curiosidade|indignacao|identidade_sc|feel_good|escala|conquista_superacao|servico|solidariedade|vaquinha|nenhum.
 - Campanha de solidariedade/vaquinha: tipo_gancho "solidariedade" ou "vaquinha" (vai pra fila humana, nunca quente automático).
 - cidade: cidade principal da pauta ou null.
-- score_editorial: 0-100 (0 = lixo, 50 = mediano, 70+ = forte, 90+ = excepcional). USE A ESCALA TODA, não sature.
+- score_editorial: 0-100 calibrado pelo DNA acima — 80-100 = postaria HOJE com cara de capa (história forte, nome, drama, indignação ou insólito); 60-79 = postável; 40-59 = fraco/talvez; <40 = não parece post do perfil. USE A ESCALA TODA, não sature.
 - motivo: 1 frase curta justificando.
 
 {$calibracao}RESPONDA APENAS com um array JSON válido, um objeto por pauta, sem markdown e sem texto fora do JSON:
@@ -122,6 +140,32 @@ PAUTAS:
 
 {$lista}
 PROMPT;
+    }
+
+    /**
+     * Chamada genérica de UM prompt esperando array JSON na resposta (usada por
+     * comandos auxiliares — DNA do Instagram etc.). NÃO toca no prompt do juiz.
+     * Loga em jr_juiz_log com a operation dada. Retorna [] em falha.
+     */
+    public function completarJson(string $prompt, string $operation, int $itens = 0): array
+    {
+        $t0 = microtime(true);
+        try {
+            [$texto, $in, $out, $custo] = $this->driver === 'openai'
+                ? $this->chamarOpenai($prompt)
+                : $this->chamarClaudeCli($prompt);
+            $this->log('success', 1, $itens, $in, $out, $custo, null, $t0, $operation);
+            if (preg_match('/\[.*\]/s', $texto, $m)) {
+                $texto = $m[0];
+            }
+            $arr = json_decode($texto, true);
+
+            return is_array($arr) ? $arr : [];
+        } catch (\Throwable $e) {
+            $this->log('error', 1, $itens, null, null, null, $e->getMessage(), $t0, $operation);
+
+            return [];
+        }
     }
 
     /**
