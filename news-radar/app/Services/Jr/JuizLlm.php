@@ -95,6 +95,10 @@ class JuizLlm
             $lista .= sprintf("ID %d\nTÍTULO: %s\nLEAD: %s\n\n", $it['id'], trim((string) $it['titulo']), $lead ?: '(sem lead)');
         }
 
+        // Few-shot do feedback humano: '' quando desligado/sem votos — e aí o
+        // prompt fica byte a byte idêntico ao atual (interpolação vazia).
+        $calibracao = $this->blocoCalibracao();
+
         return <<<PROMPT
 Você é o editor-chefe do Jornal Razão, jornal regional de Tijucas/SC que cobre o litoral e o Vale do Itajaí em Santa Catarina. Julgue cada pauta abaixo.
 
@@ -111,13 +115,65 @@ REGRAS DO VEREDITO:
 - score_editorial: 0-100 (0 = lixo, 50 = mediano, 70+ = forte, 90+ = excepcional). USE A ESCALA TODA, não sature.
 - motivo: 1 frase curta justificando.
 
-RESPONDA APENAS com um array JSON válido, um objeto por pauta, sem markdown e sem texto fora do JSON:
+{$calibracao}RESPONDA APENAS com um array JSON válido, um objeto por pauta, sem markdown e sem texto fora do JSON:
 [{"id": <id>, "escopo": "...", "eh_pauta": true|false, "tipo_gancho": "...", "cidade": "..."|null, "score_editorial": <0-100>, "motivo": "..."}]
 
 PAUTAS:
 
 {$lista}
 PROMPT;
+    }
+
+    /**
+     * Bloco "calibração do editor" (few-shot do feedback humano). Retorna ''
+     * quando a flag está OFF ou há menos votos que o mínimo. Seleção: maiores
+     * divergências juiz×humano primeiro, garantindo ao menos 1 exemplo por
+     * faixa disponível e cobertura dos ganchos mais votados. Só título +
+     * cidade + gancho + faixa — sem texto longo.
+     */
+    private function blocoCalibracao(): string
+    {
+        $fs = $this->cfg['fewshot'] ?? [];
+        if (! ($fs['enabled'] ?? false)) {
+            return '';
+        }
+
+        $votos = DB::table('jr_pauta_feedback as f')
+            ->join('jr_link_extracao as e', 'e.id', '=', 'f.jr_link_extracao_id')
+            ->whereNotNull('f.score_juiz_na_hora')
+            ->get(['f.faixa', 'f.ponto_medio', 'f.score_juiz_na_hora', 'f.gancho_na_hora', 'e.titulo', 'e.cidade_llm']);
+
+        if ($votos->count() < (int) ($fs['min_votos'] ?? 30)) {
+            return '';
+        }
+
+        $max = (int) ($fs['max_exemplos'] ?? 12);
+        $ordenados = $votos->sortByDesc(fn ($v) => abs((int) $v->score_juiz_na_hora - (int) $v->ponto_medio))->values();
+
+        // Top divergências + garantia de 1 por faixa + ganchos mais frequentes.
+        $escolhidos = $ordenados->take($max)->collect();
+        foreach (['baixa', 'media', 'alta'] as $faixa) {
+            if (! $escolhidos->contains('faixa', $faixa) && ($cand = $ordenados->firstWhere('faixa', $faixa))) {
+                $escolhidos->pop();
+                $escolhidos->push($cand);
+            }
+        }
+        $ganchosTop = $votos->groupBy('gancho_na_hora')->map->count()->sortDesc()->take(3)->keys();
+        foreach ($ganchosTop as $g) {
+            if ($g && ! $escolhidos->contains('gancho_na_hora', $g) && ($cand = $ordenados->firstWhere('gancho_na_hora', $g))) {
+                $escolhidos->pop();
+                $escolhidos->push($cand);
+            }
+        }
+
+        $rotulo = ['baixa' => 'FRACA (10-30)', 'media' => 'MEDIANA (30-60)', 'alta' => 'FORTE (60-100)'];
+        $linhas = $escolhidos->take($max)->map(fn ($v) => sprintf('- "%s"%s%s → o editor avaliou: %s',
+            mb_strimwidth(trim((string) $v->titulo), 0, 110),
+            $v->cidade_llm ? ' (' . $v->cidade_llm . ')' : '',
+            $v->gancho_na_hora && $v->gancho_na_hora !== 'nenhum' ? ' [gancho ' . $v->gancho_na_hora . ']' : '',
+            $rotulo[$v->faixa] ?? $v->faixa))->implode("\n");
+
+        return "CALIBRAÇÃO DO EDITOR (avaliações reais do dono do jornal — alinhe sua régua a elas):\n{$linhas}\n\n";
     }
 
     // ───────────────────────── drivers ─────────────────────────

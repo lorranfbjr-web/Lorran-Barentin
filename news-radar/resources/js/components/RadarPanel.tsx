@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { fetchRadar, RadarItem } from '../api';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { fetchRadar, votarFeedback, RadarItem } from '../api';
 import { timeAgo } from './NewsCard';
 
 /**
@@ -27,6 +27,42 @@ function scoreColor(s: number | null): string {
     if (s >= 60) return 'bg-[#0061FF] text-white';
     if (s >= 40) return 'bg-amber-500 text-black';
     return 'bg-white/15 text-white/70';
+}
+
+const FAIXAS = [
+    ['baixa', '❄️', '10-30'],
+    ['media', '😐', '30-60'],
+    ['alta', '🔥', '60-100'],
+] as const;
+
+function VotoBotoes({ item }: { item: RadarItem }) {
+    // Voto otimista: pinta na hora, manda em background; erro = desfaz.
+    const [voto, setVoto] = useState<string | null>(item.faixa_voto ?? null);
+
+    const votar = (faixa: 'baixa' | 'media' | 'alta') => {
+        const anterior = voto;
+        setVoto(faixa);
+        votarFeedback(item.id, faixa).catch(() => setVoto(anterior));
+    };
+
+    return (
+        <div className="mt-2 flex gap-1.5" onClick={(e) => e.preventDefault()}>
+            {FAIXAS.map(([faixa, emoji, rotulo]) => (
+                <button
+                    key={faixa}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); votar(faixa); }}
+                    className={`flex-1 py-1.5 rounded-md text-[11px] font-bold transition-colors ${
+                        voto === faixa
+                            ? 'bg-[#0061FF] text-white ring-2 ring-[#18ADFE]/60'
+                            : 'bg-white/5 text-white/50 hover:bg-white/10 active:bg-white/15'
+                    }`}
+                    title={`nota humana ${rotulo}`}
+                >
+                    {emoji} {rotulo}
+                </button>
+            ))}
+        </div>
+    );
 }
 
 function RadarCard({ item }: { item: RadarItem }) {
@@ -73,6 +109,8 @@ function RadarCard({ item }: { item: RadarItem }) {
                 )}
                 {item.notificado_em && <span title="já avisado no Raspador">🔔</span>}
             </div>
+
+            <VotoBotoes item={item} />
         </a>
     );
 }

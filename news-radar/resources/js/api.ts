@@ -104,6 +104,7 @@ export interface RadarItem {
     publicado_em: string | null;
     created_at: string;
     notificado_em: string | null;
+    faixa_voto: 'baixa' | 'media' | 'alta' | null;
 }
 
 export const radarKeyFromUrl = (): string =>
@@ -115,8 +116,21 @@ export const fetchRadar = (params: Record<string, string>) => {
         Object.entries({ ...params, ...(key ? { key } : {}) }).filter(([, v]) => v),
     ).toString();
     return fetch(`/api/v1/jrlink/radar?${qs}`, { headers: { Accept: 'application/json' } }).then((res) => {
-        if (res.status === 403) throw new Error('403');
+        if (res.status === 403 || res.status === 401) throw new Error('403');
         if (!res.ok) throw new Error(`API ${res.status}`);
         return res.json() as Promise<PaginatedResponse<RadarItem>>;
+    });
+};
+
+export const votarFeedback = (itemId: number, faixa: 'baixa' | 'media' | 'alta') => {
+    const key = radarKeyFromUrl();
+    const qs = key ? `?key=${encodeURIComponent(key)}` : '';
+    return fetch(`/api/v1/jrlink/feedback${qs}`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: itemId, faixa }),
+    }).then((res) => {
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        return res.json() as Promise<{ ok: boolean; faixa: string }>;
     });
 };

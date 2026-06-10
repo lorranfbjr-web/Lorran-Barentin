@@ -19,12 +19,12 @@ class JrPanelKey
     {
         $esperada = (string) config('jrlink.painel_key', '');
         if ($esperada === '') {
-            return response()->json(['error' => 'painel sem chave configurada'], 403);
+            return response()->json(['error' => 'painel sem chave configurada'], 401);
         }
 
         $fornecida = (string) ($request->query('key') ?: $request->cookie(self::COOKIE, ''));
         if (! hash_equals($esperada, $fornecida)) {
-            return response()->json(['error' => 'chave inválida'], 403);
+            return response()->json(['error' => 'chave inválida'], 401);
         }
 
         $response = $next($request);

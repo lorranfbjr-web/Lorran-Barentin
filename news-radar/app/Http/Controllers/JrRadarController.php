@@ -70,15 +70,19 @@ class JrRadarController extends Controller
             'juiz_motivo', 'cluster_id', 'data_pub', 'created_at', 'notificado_em',
         ]);
 
-        // Tamanho dos clusters da página — 1 query agregada, sem N+1.
+        // Tamanho dos clusters e voto humano da página — 2 queries agregadas, sem N+1.
         $clusterIds = collect($page->items())->pluck('cluster_id')->filter()->unique();
         $tamanhos = $clusterIds->isEmpty() ? collect() : DB::table('jr_link_extracao')
             ->whereIn('cluster_id', $clusterIds)
             ->selectRaw('cluster_id, count(*) n')->groupBy('cluster_id')->pluck('n', 'cluster_id');
+        $votos = DB::table('jr_pauta_feedback')
+            ->whereIn('jr_link_extracao_id', collect($page->items())->pluck('id'))
+            ->pluck('faixa', 'jr_link_extracao_id');
 
-        $data = collect($page->items())->map(function ($r) use ($tamanhos) {
+        $data = collect($page->items())->map(function ($r) use ($tamanhos, $votos) {
             $r->cluster_n = $r->cluster_id ? (int) ($tamanhos[$r->cluster_id] ?? 1) : 1;
             $r->publicado_em = $r->data_pub ?: null;
+            $r->faixa_voto = $votos[$r->id] ?? null;
 
             return $r;
         });

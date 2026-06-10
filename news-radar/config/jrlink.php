@@ -460,6 +460,20 @@ return [
 
         // Solidariedade/vaquinha NUNCA é quente automático — vai pra fila humana.
         'ganchos_fila_humana' => ['solidariedade', 'vaquinha'],
+
+        /*
+        | FEW-SHOT do feedback humano — DESLIGADO por default. Ligar = 1 linha
+        | no .env: JRLINK_JUIZ_FEWSHOT=true. Quando ligado E houver >= min_votos
+        | em jr_pauta_feedback, o prompt do juiz ganha um bloco "calibração do
+        | editor" com até max_exemplos (prioriza maiores divergências juiz×humano
+        | + cobertura das 3 faixas e dos ganchos mais frequentes). Com a flag
+        | OFF o prompt é byte a byte o atual.
+        */
+        'fewshot' => [
+            'enabled' => env('JRLINK_JUIZ_FEWSHOT', false),
+            'min_votos' => 30,
+            'max_exemplos' => 12,
+        ],
     ],
 
     /*

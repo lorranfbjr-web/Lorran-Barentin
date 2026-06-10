@@ -48,4 +48,5 @@ Route::prefix('v1/jrlink')
     ->middleware(\App\Http\Middleware\JrPanelKey::class)
     ->group(function () {
         Route::get('/radar', [\App\Http\Controllers\JrRadarController::class, 'index']);
+        Route::post('/feedback', [\App\Http\Controllers\JrFeedbackController::class, 'store']);
     });
