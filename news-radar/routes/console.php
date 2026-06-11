@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('news-radar:dispatch')
-    ->everyFifteenMinutes()
+    ->everyFiveMinutes()
     ->withoutOverlapping();
 
 // FASE 2 — radar de pauta: ponte news_items->jr_link_extracao a cada 30min e o
@@ -25,4 +25,10 @@ Schedule::command('jrlink:juiz --hours=48')
 
 Schedule::command('jrlink:instagram-poll')
     ->cron('*/15 * * * *')
+    ->withoutOverlapping();
+
+// v4.1 — espelho dos posts publicados (WPGraphQL, só leitura) + marcação
+// "já publicado" nos eventos quentes do Radar (some do painel, nunca notifica).
+Schedule::command('jrlink:publicados-sync')
+    ->everyThirtyMinutes()
     ->withoutOverlapping();

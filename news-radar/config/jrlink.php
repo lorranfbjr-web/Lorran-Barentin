@@ -496,6 +496,10 @@ return [
         'timezone' => 'America/Sao_Paulo',                  // hora LOCAL da janela
         'silencio_inicio' => 23,                            // janela de silêncio (acumula)
         'silencio_fim' => 6,
+        // v4.1: publicação ORIGINAL mais velha que isto (horas) NUNCA vira
+        // WhatsApp — catch-up de matéria velha é bloqueado (e marcado como
+        // tratado pra não acumular). Já-publicado no site também nunca notifica.
+        'max_idade_horas' => 12,
         'relatorio_url' => 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html',
     ],
 
@@ -507,6 +511,49 @@ return [
     'captura' => [
         'ignorar_from_me' => true,
         'ignorar_chats' => ['Raspador'],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | RADAR v4.1 — painel "tempo real"
+    |---------------------------------------------------------------------------
+    | decaimento: score_atual = score do juiz × fator pela IDADE da publicação
+    | original do líder do evento (data_pub; sem data_pub usa created_at).
+    | Faixas em horas, avaliadas em ordem; idade além da última faixa usa
+    | decaimento_apos. O score do juiz NÃO muda no banco — o decaimento é
+    | cálculo determinístico de exibição/ordenação (mérito ≠ urgência).
+    */
+    'radar' => [
+        // EM ALTA: mínimo de fontes distintas pra entrar no trending.
+        'alta_min_fontes' => 3,
+        // fator por faixa de idade (horas). Edite à vontade.
+        'decaimento' => [
+            ['ate_horas' => 6, 'fator' => 1.0],
+            ['ate_horas' => 12, 'fator' => 0.85],
+            ['ate_horas' => 24, 'fator' => 0.65],
+            ['ate_horas' => 48, 'fator' => 0.4],
+        ],
+        // idade maior que a última faixa (ex.: catch-up de matéria de 3 dias).
+        'decaimento_apos' => 0.4,
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | JÁ-PUBLICADO (v4.1) — jrlink:publicados-sync (scheduler, 30min)
+    |---------------------------------------------------------------------------
+    | Lê posts PUBLICADOS do WordPress via WPGraphQL (SÓ query, nunca mutation),
+    | espelha em jr_publicado e casa contra os eventos quentes do Radar:
+    | similaridade textual (mesma máquina do EventClusterer) decide os óbvios;
+    | pares limítrofes vão pro LLM em lote ("mesma história? sim/não", prompt
+    | próprio, logado em jr_juiz_log como publicado_match). Match = evento ganha
+    | ja_publicado_em/slug → some do Radar por default e NUNCA notifica.
+    | Cruza também com jr_ig_corpus (badge "✅ no IG").
+    */
+    'publicados' => [
+        'endpoint' => 'https://controle.jornalrazao.com/graphql',
+        'janela_horas' => 72,     // posts do WP puxados por ciclo
+        'janela_eventos_horas' => 168, // estoque de eventos quentes confrontado
+        'llm_cap_pares' => 40,    // pares duvidosos por ciclo no LLM (0 desliga)
     ],
 
     // Chave leve da aba Radar do painel React (middleware JrPanelKey).

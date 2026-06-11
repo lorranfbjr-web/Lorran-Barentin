@@ -56,6 +56,52 @@ class RadarNotificador
     }
 
     /**
+     * Plano do digest SEM efeito colateral (não envia, não marca): separa os
+     * candidatos nunca-notificados em enviáveis × bloqueados por idade da
+     * publicação original (> notificacao.max_idade_horas — catch-up de matéria
+     * velha não vira WhatsApp). Já-publicado no site NUNCA entra (v4.1).
+     *
+     * @return array{enviaveis: \Illuminate\Support\Collection, bloqueados_idade: \Illuminate\Support\Collection}
+     */
+    public function planejar(): array
+    {
+        $corte = (int) config('jrlink.juiz.corte_quente_final', 60);
+        $candidatos = DB::table('jr_link_extracao')
+            ->where('temperatura_juiz', 'quente')
+            ->where('score_editorial', '>=', $corte)
+            ->where('duplicada', false)
+            ->where(function ($q) {
+                $q->where('cluster_rep', true)->orWhereNull('cluster_id');
+            })
+            ->whereNull('notificado_em')
+            ->whereNull('ja_publicado_em')
+            ->orderByDesc('score_editorial')->orderByDesc('id')
+            ->get();
+
+        $maxIdade = (int) ($this->cfg['max_idade_horas'] ?? 12);
+        [$enviaveis, $velhos] = $candidatos->partition(function ($r) use ($maxIdade) {
+            $idade = $this->idadeHoras($r->data_pub ?: $r->created_at);
+
+            return $idade === null || $idade <= $maxIdade;
+        });
+
+        return ['enviaveis' => $enviaveis->values(), 'bloqueados_idade' => $velhos->values()];
+    }
+
+    /** Idade em horas de um datetime string heterogêneo; null se imprestável. */
+    private function idadeHoras(?string $dt): ?float
+    {
+        if ($dt === null || trim($dt) === '') {
+            return null;
+        }
+        try {
+            return Carbon::now()->diffInHours(Carbon::parse($dt), true);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Seleciona, envia (se houver) e marca. Retorna resumo pra log do comando.
      *
      * @return array{status:string, novos:int, enviados:int, message_id:?string}
@@ -69,17 +115,16 @@ class RadarNotificador
             return ['status' => 'silencio', 'novos' => 0, 'enviados' => 0, 'message_id' => null];
         }
 
-        $corte = (int) config('jrlink.juiz.corte_quente_final', 60);
-        $novos = DB::table('jr_link_extracao')
-            ->where('temperatura_juiz', 'quente')
-            ->where('score_editorial', '>=', $corte)
-            ->where('duplicada', false)
-            ->where(function ($q) {
-                $q->where('cluster_rep', true)->orWhereNull('cluster_id');
-            })
-            ->whereNull('notificado_em')
-            ->orderByDesc('score_editorial')->orderByDesc('id')
-            ->get();
+        $plano = $this->planejar();
+        $novos = $plano['enviaveis'];
+
+        // Velho demais = tratado (marca sem enviar) — não acumula no candidato
+        // de todo ciclo nem nunca vira WhatsApp. Mesma semântica de digest.
+        if ($plano['bloqueados_idade']->isNotEmpty()) {
+            $this->marcarNotificados($plano['bloqueados_idade']);
+            Log::info(sprintf('[RadarNotificador] %d quente(s) bloqueado(s) por idade > %dh (catch-up, não notifica)',
+                $plano['bloqueados_idade']->count(), (int) ($this->cfg['max_idade_horas'] ?? 12)));
+        }
 
         if ($novos->isEmpty()) {
             return ['status' => 'sem_novos', 'novos' => 0, 'enviados' => 0, 'message_id' => null];

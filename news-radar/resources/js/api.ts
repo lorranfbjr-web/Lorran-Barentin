@@ -89,6 +89,8 @@ export interface RadarItem {
     titulo: string;
     url: string;
     score_evento: number | null;
+    score_atual: number | null;
+    idade_horas: number | null;
     score_coarse: number;
     eixo: 'primaria' | 'concorrente';
     escopo: string | null;
@@ -103,8 +105,21 @@ export interface RadarItem {
     publicado_em: string | null;
     created_at: string;
     notificado_em: string | null;
+    ja_publicado_em: string | null;
+    ja_publicado_slug: string | null;
+    ja_ig_em: string | null;
+    ja_ig_shortcode: string | null;
     faixa_voto: 'baixa' | 'media' | 'alta' | null;
     score_trending?: number;
+}
+
+export interface RadarMeta {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    votados?: number;
+    total_triagem?: number;
 }
 
 export const radarKeyFromUrl = (): string =>
