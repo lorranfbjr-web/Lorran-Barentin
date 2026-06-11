@@ -525,6 +525,9 @@ return [
         'enabled' => env('JRLINK_IG_ENABLED', true),
         'actor_id' => 'apify~instagram-post-scraper', // validado no corpus do DNA
         'max_posts_por_perfil' => 3,
+        // round-robin: perfis visitados por poll (1 = rotação completa em
+        // ciclo×N polls; subir = mais cobertura, mais custo proporcional).
+        'perfis_por_poll' => 1,
         'profiles' => [
             'sos_naufragados', 'calamidadeoficial', 'florianopolis24h',
             'conexao_geoclima', 'pistalimpa', 'reporter.sergioguimaraes',

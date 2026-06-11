@@ -72,9 +72,36 @@ class JrInstagramPoll extends Command
             throw new \RuntimeException('APIFY_TOKEN ausente');
         }
 
+        // ECONOMIA (medida em 5 configurações reais): o ator cobra por post
+        // DEVOLVIDO e posts FIXADOS furam o onlyPostsNewerThan em todo poll —
+        // não existe poll quieto a custo ~zero em nenhum ator testado (apify,
+        // sones, apidojo, fast). O piso é ~US$0,0027/post visitado. Então:
+        // ROUND-ROBIN — cada poll visita `perfis_por_poll` perfis (rotação
+        // completa a cada ciclo*N/perfis_por_poll) + filtro de data corta o
+        // re-pagamento dos posts do dia. Dedup segue como cinto.
+        $quantos = max(1, (int) ($cfg['perfis_por_poll'] ?? 1));
+        $pos = (int) Cache::get('jrlink_ig_rr', 0);
+        $visitar = [];
+        for ($i = 0; $i < $quantos; $i++) {
+            $visitar[] = $profiles[($pos + $i) % count($profiles)];
+        }
+        Cache::forever('jrlink_ig_rr', ($pos + $quantos) % count($profiles));
+
+        $input = [
+            'username' => $visitar,
+            'resultsLimit' => (int) ($cfg['max_posts_por_perfil'] ?? 3),
+            'skipPinnedPosts' => true, // fixado fura o filtro de data e seria re-cobrado em todo poll
+        ];
+        $ultimo = DB::table('jr_link_extracao')->where('origem', 'instagram')->max('data_pub');
+        if ($ultimo) {
+            // formato Zulu — o schema do ator rejeita offset "+00:00" (HTTP 400).
+            $input['onlyPostsNewerThan'] = Carbon::parse($ultimo)->utc()->format('Y-m-d\TH:i:s.000\Z');
+        }
+        $profiles = $visitar; // p/ log
+
         $run = Http::timeout(30)->post(
             'https://api.apify.com/v2/acts/' . ($cfg['actor_id'] ?? 'apify~instagram-post-scraper') . '/runs?token=' . $token,
-            ['username' => array_values($profiles), 'resultsLimit' => (int) ($cfg['max_posts_por_perfil'] ?? 3)],
+            $input,
         );
         if (! $run->successful()) {
             throw new \RuntimeException('start HTTP ' . $run->status());
