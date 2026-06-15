@@ -36,6 +36,7 @@ class JrLinkJuiz extends Command
         . '{--driver= : Força o driver (openai|claude-cli); default config/auto} '
         . '{--dry : Clusteriza e mostra o plano de julgamento, sem chamar LLM nem gravar} '
         . '{--ids= : Julga SÓ estes ids de jr_link_extracao (separados por vírgula), ignorando idempotência} '
+        . '{--ig-backlog : Julga o BACKLOG de posts de Instagram não-julgados direto (sem re-clusterizar a janela)} '
         . '{--force : Re-julga mesmo quem já tem veredito desta prompt_versao}';
 
     protected $description = 'Camadas 2+3 da Fase 2: colapsa eventos via news_clusters e julga os representantes com o juiz LLM (título+lead, JSON estrito).';
@@ -45,6 +46,12 @@ class JrLinkJuiz extends Command
         $cfg = config('jrlink.juiz');
         $hours = (int) $this->option('hours');
         $promptVersao = (string) $cfg['prompt_versao'];
+
+        // Via dedicada: limpa o backlog de IG (itens > janela, que o clustering
+        // pesado de 168h não alcança) julgando-os direto pelos clusters que já têm.
+        if ($this->option('ig-backlog')) {
+            return $this->julgarIgBacklog($cfg, $promptVersao);
+        }
 
         // ── camada 1: pré-corte (gate coarse já aplicado nas colunas) ──
         $rows = $this->candidatos($hours);
@@ -71,6 +78,28 @@ class JrLinkJuiz extends Command
             if ($quenteCoarse || $scoreMax >= (int) $cfg['score_frio_minimo']) {
                 $aJulgar[] = $rep;
             }
+        }
+
+        // ── CANAL INSTAGRAM direto ao juiz ──
+        // O gate coarse foi calibrado pra MANCHETE de portal; o scraper de IG
+        // salva a 1ª linha da LEGENDA como "título" (emoji/horário/frase solta),
+        // que quase nunca passa o coarse — 88% do canal morria antes do juiz.
+        // Aqui todo item origem=instagram (não-julgado) entra DIRETO, sem exigir
+        // score coarse. Feed/WhatsApp seguem só pela via de cluster-rep acima —
+        // esta via NÃO os toca. O juiz decide pauta lendo a legenda (aviso no
+        // input). Dedup do display segue por cluster (radar mostra 1 por evento).
+        $igDireto = 0;
+        if (! $this->option('ids')) {
+            $jaNaLista = collect($aJulgar)->keyBy('id');
+            foreach ($rows as $r) {
+                if ($r->origem === 'instagram' && ! $jaNaLista->has($r->id)) {
+                    $aJulgar[] = $r;
+                    $igDireto++;
+                }
+            }
+        }
+        if ($igDireto > 0) {
+            $this->info(sprintf('Canal Instagram: +%d posts de IG roteados direto ao juiz (sem gate coarse).', $igDireto));
         }
 
         // --ids: re-julga itens específicos (calibração dirigida), sem clusterizar de novo.
@@ -127,46 +156,8 @@ class JrLinkJuiz extends Command
         }
 
         // ── camada 3: juiz LLM nos pendentes ──
-
-        $clf = new PautaClassifier();
-        $fatoVelho = new \App\Services\Jr\FatoVelho();
-        $julgados = 0;
-        $falhas = 0;
-        $velhoPorId = [];
-        foreach (array_chunk($pendentes, $lote) as $chunk) {
-            $itens = array_map(function ($r) use ($clf, $fatoVelho, &$velhoPorId) {
-                $lead = $clf->corpoFromMarkdown($r->markdown);
-                // GUARDA DE FATO-VELHO: a instrução entra pelo INPUT do item (o
-                // prompt BASE do juiz não muda). Heurística barata sinaliza no
-                // input pro Opus raciocinar E rebaixa de forma determinística no
-                // aplicarVeredito (o corpo às vezes afirma "lei nova" e o LLM não
-                // tem como datar a sanção — a heurística é a autoridade aqui).
-                $sinal = $fatoVelho->analisar((string) $r->titulo, (string) $r->markdown, $r->data_pub ?: $r->created_at);
-                if ($sinal !== null) {
-                    $velhoPorId[(int) $r->id] = $sinal;
-                    $lead .= "\n\n[ALERTA EDITORIAL — possível FATO ANTIGO apenas re-noticiado: {$sinal}. "
-                        . 'Se o acontecimento central NÃO for recente (lei já em vigor há tempo, efeméride, '
-                        . 'retrospectiva, recapitulação de fato anterior), marque eh_pauta=false mesmo que a '
-                        . 'data de publicação seja recente.]';
-                }
-
-                return ['id' => (int) $r->id, 'titulo' => (string) $r->titulo, 'lead' => $lead];
-            }, $chunk);
-
-            try {
-                $vereditos = $juiz->julgarLote($itens);
-            } catch (\Throwable $e) {
-                $falhas++;
-                $this->error('Lote falhou: ' . $e->getMessage());
-                continue;
-            }
-
-            foreach ($chunk as $r) {
-                $this->aplicarVeredito($r, $vereditos[(int) $r->id], $juiz, $promptVersao, $cfg, $velhoPorId[(int) $r->id] ?? null);
-                $julgados++;
-            }
-            $this->line(sprintf('  julgados %d/%d…', $julgados, count($pendentes)));
-        }
+        ['julgados' => $julgados, 'falhas' => $falhas, 'velho' => $velhoPorId] =
+            $this->processarLotes($pendentes, $juiz, $promptVersao, $cfg, $lote);
 
         // ── resumo ──
         $custo = DB::table('jr_juiz_log')->where('created_at', '>=', Carbon::now()->subMinutes(30))->sum('custo_usd');
@@ -351,6 +342,117 @@ class JrLinkJuiz extends Command
         }
 
         return $fundidos;
+    }
+
+    /**
+     * Julga $pendentes em lotes: monta o input (aviso de legenda p/ IG + alerta
+     * de fato-velho), chama o juiz e aplica o veredito. Compartilhado entre o
+     * ciclo normal e o backlog de IG.
+     *
+     * @return array{julgados:int, falhas:int, velho:array<int,string>}
+     */
+    private function processarLotes(array $pendentes, JuizLlm $juiz, string $promptVersao, array $cfg, int $lote): array
+    {
+        $clf = new PautaClassifier();
+        $fatoVelho = new \App\Services\Jr\FatoVelho();
+        $julgados = 0;
+        $falhas = 0;
+        $velhoPorId = [];
+        foreach (array_chunk($pendentes, $lote) as $chunk) {
+            $itens = array_map(function ($r) use ($clf, $fatoVelho, &$velhoPorId) {
+                $lead = $clf->corpoFromMarkdown($r->markdown);
+                // CANAL INSTAGRAM: o "título" é a LEGENDA do post (pode começar
+                // com emoji/horário/frase solta, sem formato de manchete). Aviso
+                // entra pelo INPUT do item — o prompt BASE do juiz não muda.
+                if (($r->origem ?? null) === 'instagram') {
+                    $lead = "[Este texto é a LEGENDA de um post de INSTAGRAM de um perfil regional — pode começar com emoji, horário ou frase solta, sem formato de manchete de jornal. Avalie o ASSUNTO da legenda como possível pauta, não o formato.]\n\n" . $lead;
+                }
+                // GUARDA DE FATO-VELHO: a instrução entra pelo INPUT do item (o
+                // prompt BASE do juiz não muda). Heurística barata sinaliza no
+                // input pro Opus raciocinar E rebaixa de forma determinística no
+                // aplicarVeredito (o corpo às vezes afirma "lei nova" e o LLM não
+                // tem como datar a sanção — a heurística é a autoridade aqui).
+                $sinal = $fatoVelho->analisar((string) $r->titulo, (string) $r->markdown, $r->data_pub ?: $r->created_at);
+                if ($sinal !== null) {
+                    $velhoPorId[(int) $r->id] = $sinal;
+                    $lead .= "\n\n[ALERTA EDITORIAL — possível FATO ANTIGO apenas re-noticiado: {$sinal}. "
+                        . 'Se o acontecimento central NÃO for recente (lei já em vigor há tempo, efeméride, '
+                        . 'retrospectiva, recapitulação de fato anterior), marque eh_pauta=false mesmo que a '
+                        . 'data de publicação seja recente.]';
+                }
+
+                return ['id' => (int) $r->id, 'titulo' => (string) $r->titulo, 'lead' => $lead];
+            }, $chunk);
+
+            try {
+                $vereditos = $juiz->julgarLote($itens);
+            } catch (\Throwable $e) {
+                $falhas++;
+                $this->error('Lote falhou: ' . $e->getMessage());
+                continue;
+            }
+
+            foreach ($chunk as $r) {
+                $this->aplicarVeredito($r, $vereditos[(int) $r->id], $juiz, $promptVersao, $cfg, $velhoPorId[(int) $r->id] ?? null);
+                $julgados++;
+            }
+            $this->line(sprintf('  julgados %d/%d…', $julgados, count($pendentes)));
+        }
+
+        return ['julgados' => $julgados, 'falhas' => $falhas, 'velho' => $velhoPorId];
+    }
+
+    /**
+     * Backlog do CANAL INSTAGRAM: julga TODOS os posts de IG ainda não julgados
+     * com esta prompt_versao, direto, sem re-rodar o clustering pesado da janela
+     * (os itens de IG já têm cluster_id de ciclos anteriores). Roda os MESMOS
+     * guardas (legenda no input, fato-velho) e o notificador ao final (com o
+     * match já-publicado + decaimento). Não toca feed/whatsapp.
+     */
+    private function julgarIgBacklog(array $cfg, string $promptVersao): int
+    {
+        $pendentes = DB::table('jr_link_extracao')
+            ->where('origem', 'instagram')
+            ->where('duplicada', false)
+            ->where(function ($q) use ($promptVersao) {
+                $q->whereNull('juiz_julgado_em')->orWhere('juiz_prompt_versao', '!=', $promptVersao);
+            })
+            ->orderBy('id')
+            ->get()->all();
+
+        $this->info(sprintf('Backlog IG: %d posts de Instagram não-julgados (prompt %s).', count($pendentes), $promptVersao));
+        if (! $pendentes) {
+            return self::SUCCESS;
+        }
+
+        $lote = max(1, (int) $cfg['lote']);
+        $chamadas = (int) ceil(count($pendentes) / $lote);
+        if ($chamadas > (int) $cfg['cap_chamadas']) {
+            $this->error(sprintf('ABORTADO: %d chamadas > cap %d.', $chamadas, (int) $cfg['cap_chamadas']));
+
+            return self::FAILURE;
+        }
+
+        $juiz = new JuizLlm(null, $this->option('driver') ?: null);
+        $fs = $juiz->fewShotInfo();
+        $this->info(sprintf('Driver: %s · modelo: %s · few-shot: %s', $juiz->driver(), $juiz->modelo(),
+            $fs['enabled'] ? $fs['exemplos'] . ' exemplos' : 'off'));
+
+        ['julgados' => $julgados, 'falhas' => $falhas, 'velho' => $velho] =
+            $this->processarLotes($pendentes, $juiz, $promptVersao, $cfg, $lote);
+
+        $custo = DB::table('jr_juiz_log')->where('created_at', '>=', Carbon::now()->subMinutes(30))->sum('custo_usd');
+        $this->info(sprintf('Backlog IG concluído: %d julgados · %d falhas · %d fato-velho · custo 30min US$ %.4f',
+            $julgados, $falhas, count($velho), (float) $custo));
+        $this->tabelaTemperaturas();
+
+        // Notificação com os MESMOS guardas (match já-publicado síncrono + idade).
+        $notif = (new \App\Services\Jr\RadarNotificador())->notificarNovos();
+        $this->line(sprintf('Notificação: %s (novos=%d, na mensagem=%d%s)',
+            $notif['status'], $notif['novos'], $notif['enviados'],
+            $notif['message_id'] ? ', messageId=' . $notif['message_id'] : ''));
+
+        return $falhas > 0 ? self::FAILURE : self::SUCCESS;
     }
 
     /** Aplica âncora GA4 + regras de temperatura e grava o veredito. */
