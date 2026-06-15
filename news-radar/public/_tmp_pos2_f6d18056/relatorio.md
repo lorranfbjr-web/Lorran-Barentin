@@ -636,3 +636,7 @@ Open Sans, Royal #0061FF, Navy #0D2481, Sky #18ADFE. Card por assunto: título l
 
 ### Validação
 Tainha 1 bloco (13 clusters sob a166930) ✓ · nenhum já-publicado/fato-velho visível ✓ · decaimento aplicado (score_atual) ✓ · IG visível e filtrável (17) ✓ · página abre SEM disparar Opus (jr_juiz_log 996→996, ~0,32s) ✓ · rota nova 200 + NewsRadar (feed/fontes/radar-api) 200 ✓ · paridade **122/122** ✓ · md5 do prompt base **idêntico** (`4c4e394b…`) ✓ · custo do agrupamento US$ 0,57/ciclo ✓ · migration reversível ✓.
+
+### Ciclo do scheduler observado (assuntos, produção)
+
+`jrlink:assuntos` rodou agendado: **18:10 (app) — 1m 46s DONE**, custo **US$ 0,33** (82 grupos → 1 chamada Opus, `claude-opus-4-8`). Pós-ciclo a vitrine segue 200 (~0,29s, sem LLM no request) e o assunto **"Pesca da tainha em SC" agregou 15 clusters** (cresceu de 13 com a cobertura nova) sob o mesmo `assunto_id` estável `a166930` — 1 bloco na vitrine. Pipeline de juiz/cluster/notificação/IG dos commits c3daf10/988bf83 intactos.
