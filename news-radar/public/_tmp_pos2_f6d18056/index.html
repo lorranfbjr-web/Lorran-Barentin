@@ -1,0 +1,450 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>JR Pauta — Pós-Fase 2</title>
+<style>
+body{margin:0;background:#0f1419;color:#e8e8e8;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace}
+.wrap{max-width:1000px;margin:0 auto;padding:18px}
+h1{font:600 20px system-ui;margin:8px 0 14px;color:#fff}
+h2{font:600 16px system-ui;margin:22px 0 8px;color:#7dd3fc;border-bottom:1px solid #1e293b;padding-bottom:4px}
+h3{font:600 14px system-ui;margin:14px 0 6px;color:#a5b4fc}
+p{margin:4px 0} .li{margin:2px 0 2px 12px} .sp{height:8px}
+code{background:#1e293b;padding:1px 5px;border-radius:4px;color:#fbbf24}
+pre.code{background:#0a0e12;border:1px solid #1e293b;border-radius:8px;padding:12px;overflow-x:auto;color:#9ece6a}
+table{border-collapse:collapse;margin:8px 0;width:100%}
+th,td{border:1px solid #1e293b;padding:4px 8px;text-align:left}
+th{background:#16202b;color:#7dd3fc}
+hr{border:0;border-top:1px solid #1e293b;margin:16px 0}
+b{color:#fff}
+</style></head><body><div class="wrap"><h1>JR Pauta — Pós-Fase 2: push, juiz otimizado, agendamento e seed de fontes</h1>
+<div class="sp"></div>
+<p><b>Data:</b> 2026-06-10 · <b>Branch:</b> <code>claude/sc-news-aggregator-2M470</code> · <b>Autor:</b> Claude (goal autônomo do Lorran)</p>
+<div class="sp"></div>
+<p><b>Status: as 4 frentes fechadas. Pipeline rodando 100% sozinho (evidência de ciclo real no journal), 75 fontes novas ativas no radar, revalidação do aceite da Fase 2 de pé.</b></p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>(A) Push ✅</h2>
+<div class="sp"></div>
+<p><code>git push origin claude/sc-news-aggregator-2M470</code> executado com sucesso — 17 commits da Fase 2 subiram (<code>d51359f..0b6f6c7</code>) e mais os commits deste goal foram pushados ao final (<code>git push</code> final abaixo). Remote: <code>github.com/lorranfbjr-web/Lorran-Barentin</code>.</p>
+<div class="sp"></div>
+<h2>(B) Juiz otimizado ✅ (claude-cli + Haiku mantidos)</h2>
+<div class="sp"></div>
+<div class="li">• <code>juiz.lote</code> 12 → <b>24</b> itens/chamada (<code>config/jrlink.php</code>).</div>
+<div class="li">• Teste com lote REAL de 24: parse JSON <b>100% na 1ª tentativa</b> (24/24 vereditos válidos).</div>
+<div class="li">• Custo/item caiu <b>34%</b>: US$ 0,0046 → US$ 0,0030 (o overhead de ~25k tokens de sessão do CLI dilui no lote maior).</div>
+<div class="li">• Modelo segue <code>claude-haiku-4-5</code> no driver <code>claude-cli</code> (assinatura Max local), como decidido.</div>
+<div class="sp"></div>
+<h2>(C) Scheduler ✅ — pipeline roda sozinho</h2>
+<div class="sp"></div>
+<p>Agendado em <code>routes/console.php</code> (Kernel do Laravel):</p>
+<div class="sp"></div>
+<table>
+<tr><th>comando</th><th>cron</th><th>proteção</th></tr>
+<tr><td><code>news-radar:dispatch</code></td><td><code><i>/5 </i> <i> </i> *</code></td><td>withoutOverlapping</td></tr>
+<tr><td><code>jrlink:bridge-news</code></td><td><code><i>/30 </i> <i> </i> *</code></td><td>withoutOverlapping</td></tr>
+<tr><td><code>jrlink:juiz --hours=48</code></td><td><code>5,35 <i> </i> <i> </i></code></td><td>withoutOverlapping (idempotente, cap 300)</td></tr>
+</table>
+<div class="sp"></div>
+<p><b>Dois problemas reais encontrados e corrigidos no caminho:</b></p>
+<p>1. O unit <code>newsradar-scheduler.service</code> chamava <code>news-radar:dispatch</code> DIRETO (sem Laravel Scheduler) e o timer disparava em minuto quebrado (<code>OnUnitActiveSec</code>, :X4/:X9) — cron de minuto cheio nunca casaria. Unit agora roda <code>artisan schedule:run</code> e o timer é <code>OnCalendar=<i>:00/5:10</code> (backups dos dois arquivos em <code>/tmp/newsradar-scheduler.</i>.bak-pos2*</code>).</p>
+<p>2. <code>runInBackground</code> + <code>Type=oneshot</code> = systemd matava o cgroup ~24ms depois do <code>schedule:run</code> sair, deixando mutex órfão de 24h em <code>cache_locks</code> (dispatch/bridge ficaram mudos das 08:50 às 09:10). Agendamento passou a foreground sequencial e os mutexes órfãos foram limpos.</p>
+<div class="sp"></div>
+<p><b>Evidência de ciclo real, 100% automático (journal do systemd):</b></p>
+<pre class="code">
+09:35:19 Running [&#x27;artisan&#x27; news-radar:dispatch] ........ 1s DONE
+09:35:21 Running [&#x27;artisan&#x27; jrlink:juiz --hours=48] .... 17m DONE   ← julgou as fontes novas sozinho
+10:00:18 Running [&#x27;artisan&#x27; news-radar:dispatch] ........ 4s DONE
+10:00:23 Running [&#x27;artisan&#x27; jrlink:bridge-news] ......... 4s DONE
+10:05    Running [&#x27;artisan&#x27; jrlink:juiz --hours=48] ........ DONE   ← pegou o item das 10:00 (ex.: #3839)
+</pre>
+<p>O item #3839 (&quot;Quero comer uma tainha&quot;, diz Lula… Litoral Norte) entrou pela ponte das 10:00 e o juiz das 10:05 deu o veredito sozinho: <code>nacional_localizado · quente 81</code> — exatamente a regra do ângulo local.</p>
+<div class="sp"></div>
+<h2>(D) Seed + QA dos domínios ✅</h2>
+<div class="sp"></div>
+<p>Fonte: <code>/home/jr/dominios-sc-raw.txt</code> (lista crua de ChatGPT/Grok). Probe real: HTTP com redirects (https→www→http), busca de notícia datada recente (mai-jun/2026) e sondagem de feed (link rel → /feed → /rss → wp-json), 16 threads.</p>
+<div class="sp"></div>
+<h3>Funil</h3>
+<div class="sp"></div>
+<table>
+<tr><th>etapa</th><th>n</th><th>detalhe</th></tr>
+<tr><td>recebidos</td><td>149 linhas</td><td>144 domínios únicos (0 duplicados internos; 5 linhas em branco = grupos regionais)</td></tr>
+<tr><td>mortos / inventados</td><td><b>−20</b></td><td>sem HTTP 200 em nenhuma variante (ex.: portalsmo, valesc, saojoaquimonline, portaldacidade)</td></tr>
+<tr><td>já cadastrados / allowlist</td><td><b>−19</b></td><td>ex.: peperi, pagina3, portalmenina, diarinho, jdv<i>, rbatv (</i>via news_sources)</td></tr>
+<tr><td>vivos sem notícia datada em texto</td><td><b>−5</b></td><td>rádios só-player/parked: novafm103, radionova, culturacamposnovos, portalpalhoca, palhocense</td></tr>
+<tr><td>pendente-sitemap (não cadastrados)</td><td><b>−20</b></td><td>vivos com data recente mas sem feed e sem listing parseável (ex.: diariodajaragua, rco, alianca.news, folhadooeste) — candidatos a sitemap na próxima fase</td></tr>
+<tr><td><b>cadastrados</b></td><td><b>80</b></td><td>75 com feed RSS/Atom validado (item recente) + 5 html_listing com ≥5 artigos datados</td></tr>
+<tr><td>quebraram no 1º ciclo → <code>active=false</code></td><td><b>−5</b></td><td>Portal Agora e Vvale (HTTP 403 no feed), Jornal Nossa Ilha (SSL expirado), SC em Pauta (XML inválido), Oeste SC Notícias (403 no listing)</td></tr>
+<tr><td><b>ativas no radar</b></td><td><b>75</b></td><td>news_sources: 67 → 147 fontes (129 ativas no total)</td></tr>
+</table>
+<div class="sp"></div>
+<p>Seeder versionado: <code>database/seeders/Pos2DominiosScSeeder.php</code>. Os 80 entraram também na allowlist <code>concorrente</code> do <code>config/jrlink.php</code> (27 → 108 domínios — RADAR, nunca reescrever) e o <code>--reclass</code> rodou sem re-fetch.</p>
+<div class="sp"></div>
+<h3>Revalidação obrigatória ✅</h3>
+<div class="sp"></div>
+<p>Um ciclo completo coleta+bridge+juiz com as fontes novas (1580 itens na janela de 48h, +630 vs antes; jr_link_extracao foi a 2262+ rows):</p>
+<div class="sp"></div>
+<div class="li">• <b>Aceite da Fase 2 (script automático): TODOS OS CRITÉRIOS PASSARAM.</b> (a) 40 itens Enem/Lula/ONU/carne-UE, 0 quentes ilegítimos; (b) 429 quentes julgados, 38 scores distintos, moda 7%; (c) oceanógrafo 1 cluster, 0 repetições; (d) SEO eh_pauta=false.</div>
+<div class="li">• <b>Paridade WhatsApp: 122/122 OK</b> (re-rodada após cada mudança).</div>
+<div class="li">• <b>Bug real de janela rolante achado pela revalidação e corrigido:</b> o run agendado (<code>--hours=48</code>) apagava TODOS os clusters e recriava só os da janela — item antigo perdia o cluster e voltava ao relatório como quente avulso (oceanógrafo reapareceu 4×). <code>persistirClusters</code> agora congela a atribuição de quem está fora da janela. Commit <code>pos2(D2)</code>.</div>
+<div class="li">• <b>Ruído das fontes novas:</b> taxa de eh_pauta=false entre 30-55% por fonte — mesmo patamar do baseline pré-existente (visornoticias: 62%); o juiz absorve por desenho. Nenhuma fonte degradou o veredito; as 5 quebradas (acima) foram desativadas.</div>
+<div class="sp"></div>
+<h2>Consumo do juiz no volume novo</h2>
+<div class="sp"></div>
+<div class="li">• Hoje (validação + catch-up das 80 fontes): 140 chamadas, 1.840 julgamentos, <b>US$ 7,08</b> equivalentes (na prática: franquia da assinatura Max — não é fatura).</div>
+<div class="li">• Regime: o catch-up foi único (idempotência). Ciclo incremental observado: 10:05 julgou só o delta da meia hora. Projeção com o dobro de itens/dia (~1.000): ~400 julgados/dia ÷ 24 = <b>~17 chamadas/dia ≈ US$ 1,20/dia equivalente</b> no claude-cli (ou ~US$ 0,03/dia se entrar chave <code>gpt-4o-mini</code>).</div>
+<div class="sp"></div>
+<h2>Pendências / próxima fase</h2>
+<div class="sp"></div>
+<div class="li">• 20 domínios <b>pendente-sitemap</b> (lista em <code>/tmp/pos2_classificacao.json</code>, espelhada abaixo no anexo) — implementar descoberta via sitemap.xml pra incorporá-los.</div>
+<div class="li">• As 5 fontes desativadas podem ser re-tentadas com UA de browser/bypass 403 ou aguardar SSL renovar.</div>
+<div class="li">• 3 fontes com runs ok e 0 itens (Portal Norte da Ilha, Lages Diário, Portal CDR) — observar; podem precisar de seletor específico no listing.</div>
+<div class="li">• Notificação segue DRY (<code>JRLINK_ALERT_WEBHOOK</code> vazio) — portão humano.</div>
+<div class="sp"></div>
+<h2>Anexo — pendente-sitemap (20)</h2>
+<div class="sp"></div>
+<p>folhadooeste.com.br · portaloestenews.com.br · rco.com.br · minutta.com.br · radiorural.com.br · alianca.news · tudosobrexanxere.com.br · cacodarosa.com · otempodefato.com.br · uaaau.com.br · hcnoticias.com.br · rcnoticia.com.br · portalfolharegional.com · liberdadesbs.com.br · diariodajaragua.com.br · diarioderiomafra.com.br · radiometropolitanaitapoa.com.br · imagemdailha.com.br · jornaisemfoco.com.br · correiootaciliense.com.br</p>
+<div class="sp"></div>
+<h2>Anexo — rejeitados com motivo</h2>
+<div class="sp"></div>
+<div class="li">• <b>Mortos (20):</b> portalsmo.com.br, portaltri.com.br, nossaradio.net.br, guiatemabelardoluz.com.br, canaldosul.com.br, radio98fm.com, valesc.com.br, portaldacidade.com, testonoticias.com.br, jornaldepomerode.com.br, sintonia.fm.br, radiocidadesc.com.br, bcnoticias.com.br, portalitapema.com, praianortenews.com.br, jornalconexao.com.br, jornaltopnews.com.br, olhovivocan.com.br, saojoaquimonline.com.br, asemanacuritibanos.com.br</div>
+<div class="li">• <b>Duplicados (19):</b> peperi, clicrdc, oestemais, ederluiz, portalclicksul, rc.fm.br, cruzeirodovale, jornalmetas, guabirubazeitung, rbatv, diarinho, portalmenina, camboriu.news, pagina3, abreolhonoticias, jornaldenavegantes, scempauta, radiosuper, vipsocial</div>
+<div class="li">• <b>Vivos sem notícia em texto (5):</b> novafm103.com.br, radionova.fm.br, culturacamposnovos.com.br (rádio só-player), portalpalhoca.com.br, palhocense.com.br (sem data recente detectável)</div>
+<div class="li">• <b>Quebraram no 1º ciclo, desativados (5):</b> agorasul.com.br (403), vvale.com.br (403), jornalnossailha.com.br (SSL expirado), santacatarinaempauta.com.br (XML inválido), oestescnoticias.com.br (403 no listing)</div>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Re-probe (correção de falso-mortos) — 2026-06-10</h2>
+<div class="sp"></div>
+<p>O QA original deu falso-negativo em parte dos 30 reprovados: o probe rodava 16 threads do mesmo IP com fingerprint de <code>python-requests</code>, e o coletor de produção usava UA <code>JornalRazaoBot/1.0</code> — WAFs regionais respondem 403/timeout pra isso. Re-auditoria sequencial (~2 req/s, headers de Chrome real, Referer Google, retry com backoff) + validação final com o client real do coletor (curl do Laravel):</p>
+<div class="sp"></div>
+<p><b>Causa raiz dupla e correções aplicadas:</b></p>
+<p>1. <b>UA do coletor</b> trocado globalmente de <code>JornalRazaoBot/1.0</code> → Chrome 137 (<code>HttpFetchService</code>). Amostra de 14 fontes ativas testada com os dois UAs antes da troca: nenhuma regressão (14×200 em ambos).</p>
+<p>2. <b>Worker com classe velha em memória</b>: o queue worker é processo de longa duração e seguiu usando o UA antigo após o deploy — <code>systemctl restart newsradar-worker</code> resolveu (403→200 nas mesmas fontes, no mesmo minuto).</p>
+<div class="sp"></div>
+<h3>Tabela: domínio → diagnóstico real → destino</h3>
+<div class="sp"></div>
+<table>
+<tr><th>domínio</th><th>diagnóstico (cliente realista)</th><th>destino</th></tr>
+<tr><td>guiatemabelardoluz.com.br</td><td>200 + feed recente (falso-morto)</td><td><b>cadastrado</b> (feed, Oeste) — 31 itens no 1º fetch</td></tr>
+<tr><td>saojoaquimonline.com.br</td><td>200 + feed (bloqueava python-requests; curl passa)</td><td><b>reativado</b> (fonte original id 31) — fetch OK</td></tr>
+<tr><td>portalitapema.com</td><td>200 + feed (timeout era só do fingerprint python)</td><td><b>reativado</b> (fonte original id 16) — 76 itens</td></tr>
+<tr><td>agorasul.com.br</td><td>200 com Chrome UA (403 pro bot)</td><td><b>reativado</b> — fetch OK pós-UA</td></tr>
+<tr><td>vvale.com.br</td><td>200 com Chrome UA (403 pro bot)</td><td><b>reativado</b> — fetch OK pós-UA</td></tr>
+<tr><td>oestescnoticias.com.br</td><td>200 com Chrome UA (403 pro bot no listing)</td><td><b>reativado</b> (listing) — fetch OK pós-UA</td></tr>
+<tr><td>santacatarinaempauta.com.br</td><td>200; RSS com XML inválido, wp-json ok (parser não suporta)</td><td><b>reativado como html_listing</b> — 28 itens</td></tr>
+<tr><td>jornalnossailha.com.br</td><td>200 só com verify desligado — certificado TLS EXPIRADO</td><td><b>vivo-porém-bloqueado (TLS)</b> — fora até renovarem</td></tr>
+<tr><td>nossaradio.net.br · canaldosul.com.br · testonoticias.com.br · jornaldepomerode.com.br · sintonia.fm.br · radiocidadesc.com.br · bcnoticias.com.br · praianortenews.com.br · jornalconexao.com.br · jornaltopnews.com.br · olhovivocan.com.br · asemanacuritibanos.com.br</td><td>403/desafio anti-bot deste IP mesmo com curl+Chrome UA (bcnoticias/olhovivocan confirmados vivos de fora)</td><td><b>vivo-porém-bloqueado (12)</b> — anti-bot duro/reputação do IP do VPS; NÃO cadastrados</td></tr>
+<tr><td>portaldacidade.com</td><td>200, mas landing de diretório nacional sem notícia datada</td><td><b>fora da régua</b> (diretório/agregador)</td></tr>
+<tr><td>portalsmo.com.br · portaltri.com.br · valesc.com.br</td><td>connect timeout 20s (DNS resolve, servidor não responde a este IP)</td><td><b>morto-real (timeout)</b></td></tr>
+<tr><td>radio98fm.com</td><td>HTTP 500 persistente</td><td><b>morto-real (erro de servidor)</b></td></tr>
+<tr><td>novafm103 · radionova.fm.br · culturacamposnovos · portalpalhoca · palhocense</td><td>200, mas sem notícia datada em texto (rádio-player/institucional) — reconfirmado</td><td><b>rejeição mantida</b></td></tr>
+</table>
+<div class="sp"></div>
+<h3>Resultado</h3>
+<div class="sp"></div>
+<div class="li">• <b>+7 fontes recuperadas</b> (1 cadastro novo + 6 reativações, todas com fetch de produção OK e itens fluindo).</div>
+<div class="li">• Allowlist concorrente: 108 → <b>111</b> domínios.</div>
+<div class="li">• <b>Fontes ativas: 129 → 134</b> (148 cadastradas no total).</div>
+<div class="li">• Revalidação pós-recuperação: ciclo automático bridge 11:30 + juiz 11:35 (2m59s) com o volume novo → <b>aceite da Fase 2 inteiro de pé</b> (nacional=frio, 38 scores distintos/moda 7%, oceanógrafo 1 cluster, SEO eh_pauta=false) e <b>paridade WhatsApp 122/122</b>.</div>
+<div class="li">• Pendência: os 12 vivo-porém-bloqueado podem ser re-tentados de outro IP/proxy residencial numa fase futura; jornalnossailha volta quando renovar o certificado.</div>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Notificação ligada — 2026-06-10</h2>
+<div class="sp"></div>
+<p>O Radar JR agora avisa sozinho: digest de pautas quentes NOVAS no grupo WhatsApp <b>&quot;Raspador&quot;</b>, via Z-API direto de dentro do Laravel — caminho 100% próprio, sem encostar no disparador n8n (g6ApLgldIyHKLwdq, intocado) nem no dedup-svc.</p>
+<div class="sp"></div>
+<h3>Configuração</h3>
+<div class="sp"></div>
+<div class="li">• <b>Group-id descoberto e validado via API</b> (listagem de chats, match único pelo nome): <code>120363425758810671-group</code>.</div>
+<div class="li">• <b>Envs criados</b> (<code>.env</code>, backup prévio em <code>/tmp/.env.bak-notif-*</code>): <code>JRLINK_ALERT_ZAPI_INSTANCE</code>, <code>JRLINK_ALERT_ZAPI_TOKEN</code>, <code>JRLINK_ALERT_ZAPI_CLIENT_TOKEN</code>, <code>JRLINK_ALERT_GROUP</code>. <b>Kill switch:</b> qualquer um vazio = desligado. Estado final: <b>LIGADO</b>.</div>
+<div class="li">• <b>Migration</b> <code>2026_06_10_150000_add_notificado_em_to_jr_link_extracao</code> (coluna <code>notificado_em</code>, com rollback) — dedup permanente por item E por cluster (história notificada nunca repete).</div>
+<div class="li">• Service <code>app/Services/Jr/RadarNotificador.php</code>, chamado ao fim de cada <code>jrlink:juiz</code> agendado. Digest único por ciclo: cabeçalho &quot;🔥 Radar JR — N pautas novas&quot;, por item eixo/score/cidade/gancho/título/link, rodapé com o extract.html. Cap 10 itens (+N no relatório), janela de silêncio 23h–06h — tudo em <code>config/jrlink.php &gt; notificacao</code>.</div>
+<div class="sp"></div>
+<h3>Provas (mensagens reais no grupo)</h3>
+<div class="sp"></div>
+<table>
+<tr><th>prova</th><th>resultado</th></tr>
+<tr><td>Teste de conexão</td><td>&quot;✅ Radar JR conectado — 10/06/2026 12:07&quot; → <b>HTTP 200, messageId <code>3B15A983E05373E15657</code></b></td></tr>
+<tr><td>Anti-flood de estreia</td><td><b>531 quentes do estoque marcados como já-notificados</b> antes de ligar — só o delta daqui pra frente</td></tr>
+<tr><td>Ciclo real (quente novo → mensagem)</td><td>pauta #10324 (&quot;PARAJESC… inclusão&quot;, score 92) → digest enviado, <b>messageId <code>3EB0C649A5395169758841</code></b></td></tr>
+<tr><td>Dedup (2º ciclo)</td><td>mesmo comando de novo → <b>&quot;sem_novos&quot;, nenhuma mensagem</b></td></tr>
+<tr><td>Anti-loop</td><td>Mensagem da própria instância com link foi capturada pelo webhook (e chega com <code>from_me=0</code>! — o flag não protege) → filtro por <code>chat_name=&#x27;Raspador&#x27;</code> no <code>coletarUrls</code>: <b>com filtro o link NÃO entra na coleta; contraprova com filtro desligado em memória: entraria</b>. Config em <code>jrlink.captura</code> (<code>ignorar_from_me</code> + <code>ignorar_chats</code>)</td></tr>
+<tr><td>Paridade WhatsApp</td><td><b>122/122 OK</b></td></tr>
+<tr><td>Aceite Fase 2</td><td><b>TODOS OS CRITÉRIOS PASSARAM</b></td></tr>
+</table>
+<div class="sp"></div>
+<p>Detalhe operacional: o webhook da Z-API entrega mensagem enviada pela própria instância com <code>fromMe</code> ausente/falso — por isso a defesa principal do anti-loop é a exclusão do grupo Raspador na coleta (o armazenamento bruto continua guardando tudo; o corte é só na entrada do pipeline).</p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Painel Radar v2 — 2026-06-10</h2>
+<div class="sp"></div>
+<h3>Bug dos horários: causa-raiz (diagnosticada antes de codar)</h3>
+<div class="sp"></div>
+<p>1. <b>dd/mm lido como m/d</b>: <code>DateParserService</code> tentava <code>Carbon::parse()</code> genérico ANTES dos formatos brasileiros — &quot;10/06/2026&quot; virava <b>6 de outubro</b>. O lote do Caçador Online ficou datado no futuro, dominando o sort desc e exibindo &quot;agora&quot; (timeAgo de data futura ≈ 0 min). Fix: padrão <code>dd/mm/yyyy</code> agora resolve como d/m SEMPRE, antes do parse genérico. <b>15 linhas históricas re-parseadas e corrigidas; 0 datas futuras restantes.</b></p>
+<p>2. <b>Catch-up vestido de &quot;agora&quot;</b>: fontes listing sem published_at caíam no <code>created_at</code> (hora da coleta) sem aviso. Fix: card rotula hora de PUBLICAÇÃO; sem ela, mostra &quot;coleta Xm&quot; explicitamente. Ordenação já era por published_at_utc (NULLs pro fim — verificado).</p>
+<p>3. <b>Prova com 10 itens reais</b>: 7 batem exatos com o <code>article:published_time</code> da origem, 1 bate com offset convertido (Visor -03:00), Caçador bate com a data da URL (/2026/06/10/), 2 sem meta tag na origem (sem divergência). Nenhum mismatch.</p>
+<div class="sp"></div>
+<h3>Aba Radar (painel React)</h3>
+<div class="sp"></div>
+<div class="li">• <b>Rota nova</b>: <code>GET /api/v1/jrlink/radar</code> — paginada, quentes finais (<code>coalesce(temperatura_juiz, temperatura)</code>), 1 história por cluster, tamanho do cluster agregado em 1 query (sem N+1). Filtros: eixo, score mínimo, cidade, busca (título+motivo), janela 24/48h, ordenação score|recente, <code>secao=fila</code> pra fila humana.</div>
+<div class="li">• <b>Front</b>: aba &quot;Radar&quot; entre Feed e Fontes (identidade visual mantida; Feed/Fontes intactos — 200 em produção). Card: PRIMÁRIA (verde) / RADAR (âmbar), score 0-100 colorido por faixa, cidade, gancho, motivo do juiz, fonte, &quot;1 de N portais&quot;, 🔔 quando já avisado no Raspador, tempo de publicação honesto. Mobile-first (lista de texto, filtros em grid 2 colunas no iPhone). Seção &quot;Fila humana&quot; colapsável.</div>
+<div class="li">• <b>Chave leve</b>: middleware <code>JrPanelKey</code> fail-closed — <code>?key=</code> no 1º acesso grava cookie de 90 dias (verificado: expira 2026-09-08). Sem key/cookie: 403 e a aba mostra o cadeado com instrução. <code>JRLINK_PANEL_KEY</code> no .env (backup em /tmp).</div>
+<div class="sp"></div>
+<h3>Validação</h3>
+<div class="sp"></div>
+<table>
+<tr><th>check</th><th>resultado</th></tr>
+<tr><td>Build vite + produção</td><td>bundle novo servido em jornaldetijucas.com.br; Feed items 200 · Sources 200</td></tr>
+<tr><td>Radar vs extract.html</td><td>mesmo topo (Pronampe 100, Casamento 166 anos 98…); aba aplica janela 24/48h por design</td></tr>
+<tr><td>Scheduler pós-deploy</td><td>ciclo 12:35 automático: dispatch + juiz (1m29s) DONE</td></tr>
+<tr><td>Notificação pós-deploy</td><td>digest real enviado no ciclo: 3 novas, messageId <code>3EB0BBBCA257AB1769FF1F</code></td></tr>
+<tr><td>Paridade WhatsApp</td><td>122/122 OK</td></tr>
+</table>
+<div class="sp"></div>
+<p><b>Acesso (Lorran):</b> https://jornaldetijucas.com.br/?key=4bbcaa9c2e75ae4ba7703810a422e4dc → aba <b>Radar</b> (o cookie segura por 90 dias; a key fica no .env como <code>JRLINK_PANEL_KEY</code>).</p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Feedback humano — 2026-06-10</h2>
+<div class="sp"></div>
+<p>O Radar agora aprende com o Lorran: cada card da aba Radar tem <b>3 botões de nota</b> — ❄️ 10-30 · 😐 30-60 · 🔥 60-100. Um toque vota (otimista, sem reload), o botão votado fica azul e <b>persiste ao recarregar</b>; tocar outro troca o voto (mesma linha no banco, sem duplicar). Funciona só com a chave do painel (sem key = 401).</p>
+<div class="sp"></div>
+<h3>Como votar</h3>
+<p>Abrir o painel (cookie de 90 dias já resolve, ou <code>?key=</code>), aba <b>Radar</b>, tocar na nota de cada pauta. O snapshot do juiz (score+gancho daquele momento) fica gravado junto — re-julgamentos futuros não contaminam o rótulo.</p>
+<div class="sp"></div>
+<h3>Como rodar o report</h3>
+<pre class="code">
+php artisan jrlink:feedback-report
+</pre>
+<p>Sai no terminal: total de votos, <b>matriz juiz×humano</b> (3 faixas), divergência média e % de concordância, top 10 maiores divergências (título, score do juiz, faixa humana, gancho, fonte), divergência média por gancho e por cidade. Espelho JSON em <code>storage/app/jr-feedback-report.json</code>. Validado com 3 votos de teste por curl (um por faixa + re-voto trocando faixa sem duplicar) — <b>votos de teste limpos ao final</b>, a base começa zerada pro uso real.</p>
+<div class="sp"></div>
+<h3>Como ligar o few-shot (quando houver volume)</h3>
+<p>1 linha no <code>.env</code>:</p>
+<pre class="code">
+JRLINK_JUIZ_FEWSHOT=true
+</pre>
+<p>Com a flag ligada <b>e ≥ 30 votos</b> (<code>jrlink.juiz.fewshot.min_votos</code>), o prompt do juiz ganha o bloco &quot;CALIBRAÇÃO DO EDITOR&quot; com até 12 exemplos (só título+cidade+gancho+faixa humana), priorizando as maiores divergências juiz×humano e cobrindo as 3 faixas e os ganchos mais votados. Smoke-test do caminho ligado: bloco gerado com os exemplos corretos.</p>
+<div class="sp"></div>
+<h3>Prova: juiz INALTERADO neste goal</h3>
+<p>Flag default OFF → prompt gerado antes e depois das mudanças é <b>byte a byte idêntico</b>:</p>
+<pre class="code">
+md5(prompt antes)  = d9dac880a20d620dd112c3a0bd897f41
+md5(prompt depois) = d9dac880a20d620dd112c3a0bd897f41
+diff = vazio
+</pre>
+<p>Aceite Fase 2: <b>4/4 de pé</b> · paridade WhatsApp <b>122/122</b> · ciclo do scheduler pós-deploy observado (13:05: dispatch + juiz 2m DONE, notificação em silêncio correto — sem quentes novos) · Feed/Fontes/Radar 200 em produção com o bundle novo.</p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Radar v3 — EVENTO como unidade — 2026-06-10</h2>
+<div class="sp"></div>
+<p>A aba Radar deixou de listar ITEM e passou a listar <b>EVENTO</b>: 1 card por cluster (item sem cluster = evento de 1), com badge &quot;N portais&quot; que expande pras coberturas. Validado em produção: <b>30 eventos na primeira página, zero cluster repetido</b>; caso real &quot;ampliação da cota da tainha&quot; = <b>22 portais → 1 card</b>.</p>
+<div class="sp"></div>
+<h3>O que cada card de evento traz</h3>
+<p>Item líder (maior score, desempate mais recente) dá título e link; score = MAX dos itens; cidade/gancho/motivo do veredito; lista de fontes distintas com link individual; primeira/última cobertura; 🔔 se já avisado no Raspador. <b>Voto de feedback agora é do evento</b> (upsert no item líder; o GET devolve o voto no nível do evento — verificado persistindo).</p>
+<div class="sp"></div>
+<h3>Clusters fundidos no re-run (merge assistido por LLM)</h3>
+<p>Pares de similaridade intermediária (0,275–0,45, vetos de cidade/idade respeitados) vão em LOTE pro driver com <b>prompt próprio e separado</b> — &quot;mesmo evento? sim/não&quot; — cap de 40 pares/ciclo (<code>jrlink.cluster.llm_merge_pares</code>, 0 desliga). <b>Re-run de 48h fundiu 18 clusters</b>, todos logados (<code>[ClusterMergeLLM]</code> no laravel.log). Exemplos reais:</p>
+<div class="li">• &quot;Tentativa de roubo a banco termina com suspeitos presos após sequestro&quot; ≈ &quot;Megaoperação da PM prende suspeitos de roubo e sequestro&quot;</div>
+<div class="li">• &quot;Baixa adesão de produtores em eventos da AMAP preocupa…&quot; ≈ &quot;Baixa participação em assembleia da AMAP acende alerta…&quot;</div>
+<div class="li">• &quot;Moradores controlam princípio de incêndio…&quot; ≈ &quot;Bombeiros Voluntários de Presidente Getúlio atendem princípio de incêndio…&quot;</div>
+<div class="sp"></div>
+<p><b>Prova de juiz intocado:</b> md5 do prompt do juiz <b><code>e6f4315232881f6f5071d7bb75188df5</code> antes e depois</b> (diff vazio). Limitação conhecida: título genérico sem fato (&quot;NOTA DE PESAR!&quot;) induziu fusão de obituários distintos — prompt do merge já endurecido (genérico = false); itens são frios, sem impacto editorial.</p>
+<div class="sp"></div>
+<p>Bônus do re-clustering: vocabulário de <b>calendário virou stopword</b> — o mega-cluster lixo &quot;Café com Notícias – 10/06&quot; (17 itens colados por &quot;junho/2026/terça-feira&quot;) morreu, e o EM ALTA passou a refletir cobertura real.</p>
+<div class="sp"></div>
+<h3>EM ALTA (trending sem IA)</h3>
+<p><code>score_trending</code> por evento = nº de fontes distintas ponderado por recência (cobertura &lt;24h vale 1,0; 24-48h vale 0,5). Entram eventos com <b>≥3 fontes</b> na janela, ordenados por trending — independente do score do juiz (o sinal é cobertura, não gosto). Hoje no topo: tainha (22 portais, 18,5), Mega-Sena (13,5), ciclones em SC (10,5), vacina dengue (10,5). <b>Ajuste do corte:</b> <code>config/jrlink.php &gt; radar.alta_min_fontes</code> (default 3).</p>
+<div class="sp"></div>
+<h3>Desktop de editor (mobile intacto)</h3>
+<div class="li">• <b>≥1024px</b>: faixa 🔥 EM ALTA no topo (grid 3-4 colunas), quentes em <b>grid 2-3 colunas</b>, &quot;📋 Radar geral&quot; (tudo da janela, linhas compactas) colapsável, &quot;🙋 Fila humana&quot; ao final.</div>
+<div class="li">• <b>Mobile</b>: 1 coluna como antes, EM ALTA vira carrossel horizontal. Filtros e identidade visual preservados.</div>
+<div class="sp"></div>
+<h3>Validação</h3>
+<p>Zero cluster repetido (30/30 únicos) · caso 22→1 · 18 fusões logadas · EM ALTA real · voto em evento persiste · md5 do juiz idêntico · aceite Fase 2 <b>4/4</b> · paridade <b>122/122</b> · Feed/Fontes 200 · build v3 servido em produção · <b>ciclo pós-deploy observado: 16:05, dispatch + juiz 3m26s DONE já com o merge LLM dentro</b>.</p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>DNA Instagram — 2026-06-10</h2>
+<div class="sp"></div>
+<p>O juiz agora pontua com a régua real do negócio: <b>&quot;isto seria um post do @jornalrazao?&quot;</b> — ancorada no corpus do perfil puxado via Apify (400 posts, 14/mai–10/jun, ator <code>apify~instagram-post-scraper</code>, <b>custo real do run: US$ 1,0773</b>). <code>likesCount</code> vem oculto no scraper (0/1 falso) e foi ignorado; engajamento = <b>comentários</b> (mediana), views de reel como secundária.</p>
+<div class="sp"></div>
+<h3>Tabela tipo × engajamento (jr-ig-dna.json)</h3>
+<div class="sp"></div>
+<table>
+<tr><th>tipo de pauta</th><th>n</th><th>% do feed</th><th>mediana comentários</th><th>mediana views (reel)</th></tr>
+<tr><td>política (local, com emoção)</td><td>48</td><td>12%</td><td><b>1.648</b></td><td>116k</td></tr>
+<tr><td>flagrante_policial</td><td>109</td><td>27,3%</td><td><b>798</b></td><td>287k</td></tr>
+<tr><td>viral_curiosidade</td><td>47</td><td>11,8%</td><td>757</td><td>272k</td></tr>
+<tr><td>obito_luto</td><td>15</td><td>3,8%</td><td>686</td><td>154k</td></tr>
+<tr><td>superacao_historia</td><td>26</td><td>6,5%</td><td>583</td><td>144k</td></tr>
+<tr><td>acidente_resgate</td><td>67</td><td>16,8%</td><td>527</td><td>246k</td></tr>
+<tr><td>animal</td><td>14</td><td>3,5%</td><td>325</td><td>146k</td></tr>
+<tr><td>institucional</td><td>10</td><td>2,5%</td><td>313</td><td>98k</td></tr>
+<tr><td>servico_utilidade</td><td>19</td><td>4,8%</td><td>265</td><td>73k</td></tr>
+<tr><td>clima</td><td>6</td><td>1,5%</td><td>211</td><td>135k</td></tr>
+<tr><td>evento_cultura</td><td>12</td><td>3%</td><td><b>150</b></td><td>93k</td></tr>
+<tr><td>economia_negocios</td><td>9</td><td>2,3%</td><td><b>141</b></td><td>67k</td></tr>
+</table>
+<div class="sp"></div>
+<p>Top reais: pastores que mantiveram mulher em cárcere (11,4 mil comentários), ladrão surpreendido em Chapecó (10,9 mil), pescadores chorando com a volta da tainha (10,5 mil). Flop reais: encontro de motos (6), release &quot;Estrada Boa Rural&quot; (26), loteamento (8). O DNA do IG é diferente do GA4 do site: lá economia tinha lift 1,32; no IG, economia institucional flopa — o prompt novo reflete o IG (canal da pauta), a âncora GA4 segue como ajuste fino.</p>
+<div class="sp"></div>
+<h3>O que mudou no prompt (v3) — só a seção temperatura/score</h3>
+<div class="sp"></div>
+<p>Resumo do DNA por tipo + 8 exemplos reais de alto engajamento + 5 de baixo/que o perfil evita; regra explícita: <b>flagrante só esquenta com narrativa</b> (boletim burocrático é frio mesmo sendo crime) e <b>evento institucional fofo (casamento coletivo, inauguração protocolar) NÃO é quente</b> salvo cobertura múltipla. Escopo, eh_pauta, tipo_gancho e SEO-washing intactos. <code>prompt_versao=v3</code> (idempotência re-julgou o estoque 1x: 1.155 itens, US$ 3,56, 0 falhas).</p>
+<div class="sp"></div>
+<h3>Prova antes/depois (sombra de 1.106 reps de 48h, sem tocar produção)</h3>
+<div class="sp"></div>
+<div class="li">• <b>Casamento coletivo de Itajaí: 98 → 58, frio</b> (&quot;evento institucional fofo que não esquenta&quot;) — exatamente o caso-teste do goal.</div>
+<div class="li">• Maiores movimentos (15): Adota Jaraguá 96→19 · &quot;Lula fala sobre a polêmica das tainhas&quot; 8→79 · ordem de serviço de casas populares 82→14 · &quot;Pelo Estado: tainha fala mais sobre política&quot; 16→86 · AMAP 86→19 · Senai na Itália 84→19 · &quot;SC consolida confiança dos mercados&quot; 85→21 · incêndio com vítima fatal 12→75 · &quot;Marginais invadem casa em Indaial&quot; 22→85 · Joaçaba preside Escola de Pais 83→21 · Lions Clube posse 72→11 · Catedral energia solar 84→24 · motorista foge após acidente 9→69 · projeto &quot;Dia Nacional de...&quot; 86→27 · Deolane na cela 0→71 (viral; escopo nacional segue frio na temperatura).</div>
+<div class="li">• Quentes 465 → 324 na sombra (régua mais seletiva); 98 valores distintos de score; institucionais ≥60 sobraram só 16/328 (e legítimos, ex.: pesquisa do Procon com variação de 449%).</div>
+<div class="li">• <b>Concordância juiz×humano: N/A</b> — <code>jr_pauta_feedback</code> estava zerada (votos de teste limpos no goal anterior; few-shot segue OFF até haver ≥30 votos reais).</div>
+<div class="li">• Promovido na 1ª iteração (não precisou das 3).</div>
+<div class="sp"></div>
+<h3>EM ALTA sem nacional puro</h3>
+<div class="sp"></div>
+<p>O endpoint do EM ALTA agora exclui evento cujo líder tem <code>escopo=nacional</code> (pauta de agência que todo portal replica). Validado em produção: <b>Mega-Sena sumiu, tainha (regional/nacional_localizado) ficou</b> — topo atual: cota da tainha (13,5), VPA recorde (12,5), ciclones (10,5), vacina dengue (10,5).</p>
+<div class="sp"></div>
+<h3>Validação final</h3>
+<div class="sp"></div>
+<p>Aceite Fase 2 <b>4/4 com o prompt v3</b> (nacional morto 0/44 · 39 scores distintos moda 6% · oceanógrafo 1 cluster · SEO eh_pauta=false) · paridade <b>122/122</b> · notificação viva (digest da promoção: 107 novos pela régua nova, 10 na mensagem +97 no relatório, messageId <code>3EB02928920E8AE7EDDC33</code>) · ciclo automático no journal (18:00 dispatch+bridge).</p>
+<div class="sp"></div>
+<h3>Como re-rodar o corpus (mensal)</h3>
+<div class="sp"></div>
+<pre class="code">
+php artisan jrlink:ig-corpus            # puxa os ~400 posts mais recentes (Apify, ~US$ 1)
+php artisan jrlink:ig-dna --reclass     # re-classifica e regenera storage/app/jr-ig-dna.json
+</pre>
+<p>Depois, atualizar manualmente os números/exemplos da seção DNA no prompt (<code>JuizLlm::montarPrompt</code>) e bump de <code>prompt_versao</code> — o estoque re-julga sozinho 1x.</p>
+<div class="sp"></div>
+<hr>
+<div class="sp"></div>
+<h2>Canal Instagram — 2026-06-10</h2>
+<div class="sp"></div>
+<p>Perfis que só publicam no Instagram agora entram na <b>mesma esteira</b> do radar: <code>jrlink:instagram-poll</code> (a cada 15min no scheduler) roda o ator Apify, e cada post vira item <code>origem=&#x27;instagram&#x27;</code> na régua — gate coarse → cluster → <b>juiz v3</b> → aba Radar → notificação. Nada de caminho paralelo.</p>
+<div class="sp"></div>
+<h3>Como está funcionando (1º poll real)</h3>
+<div class="sp"></div>
+<div class="li">• <b>27 itens novos</b> de 11 perfis reais (3 por perfil; alguns posts são co-autorados — a fonte gravada é o dono real do post, ex.: @andreguesser, @pmscrodoviaria via repost dos milgrau).</div>
+<div class="li">• <b>Re-poll imediato: 0 duplicados</b> (dedup permanente por shortcode na url canônica).</div>
+<div class="li">• A régua dura filtrou o ruído social (memes score 0-3) e mandou 5 pro juiz, que julgou com o DNA: <i>&quot;Câmara de São José custa R$ 33 mi&quot;</i> (@calamidadeoficial) → <b>quente 84</b> (indignação política local, o nº 1 do DNA); <i>&quot;FILAS E DESCASO COM A SAÚDE&quot;</i> → quente 81; resgate de animais (@sos_naufragados) → fila humana; festa-agenda e meme → frios.</div>
+<div class="li">• Card IG na aba Radar como evento de 1, linkando o post ✓. Prompt v3 do juiz INTOCADO (md5 <code>eeda2cf7…</code> idêntico).</div>
+<div class="li">• Ciclo automático observado: poll das 20:45 rodou sozinho no scheduler (1m44s DONE).</div>
+<div class="sp"></div>
+<h3>Ator e custo — v2 (incremental + round-robin, medido com dinheiro real)</h3>
+<div class="sp"></div>
+<p>A 1ª versão custava <b>US$ 210/mês</b> porque cada poll re-pagava os mesmos posts. Investigação paga em <b>5 configurações reais</b> (apify c/ <code>onlyPostsNewerThan</code>, sones lowcost, apidojo, fast-scraper, apify c/ <code>skipPinnedPosts</code>):</p>
+<div class="sp"></div>
+<div class="li">• <b>Nenhum ator devolve poll quieto a custo zero</b>: todos cobram por post retornado; sones cobra a 1ª página inteira mesmo com cutoff; apidojo nem entrega posts desses perfis; fast cobra &quot;processing fee&quot; pelos filtrados; e <b>post FIXADO fura o filtro de data</b> em todo poll.</div>
+<div class="li">• Config final no <code>apify~instagram-post-scraper</code> (US$ 2,7/1k): <b><code>onlyPostsNewerThan</code> = post mais novo já ingerido + <code>skipPinnedPosts</code> + ROUND-ROBIN de 1 perfil por poll</b> (config <code>instagram.perfis_por_poll</code>; rotação completa a cada 2h30 com ciclo de 15min mantido).</div>
+<div class="sp"></div>
+<table>
+<tr><th><b>PROVA (2 polls seguidos, MESMO perfil, sem post novo)</b></th><th>1 resultado residual cada · <b>US$ 0,0027/poll</b> (vs US$ 0,073 antes = <b>27× mais barato</b>); &quot;custo ~zero absoluto&quot; é impossível em qualquer ator testado</th></tr>
+<tr><td>Poll quieto</td><td>US$ 0,0027 · poll com posts novos: + US$ 0,0027/post</td></tr>
+<tr><td><b>Projeção mensal (ciclo 15min mantido)</b></td><td>96 polls/dia × US$ 0,0027 ≈ US$ 7,80 + posts novos ≈ <b>US$ 8-9/mês</b> ✅ meta &lt;US$ 10</td></tr>
+<tr><td>Alavancas</td><td><code>perfis_por_poll</code> (cobertura×custo proporcional) · cron · <code>max_posts_por_perfil</code></td></tr>
+<tr><td>Trade-off declarado</td><td>cada perfil é visitado a cada ~2h30 (não a cada 15min); pra perfil crítico em tempo real, suba <code>perfis_por_poll</code> (2 → ~US$ 16-18/mês, rotação 75min)</td></tr>
+</table>
+<div class="sp"></div>
+<h3>Operação</h3>
+<div class="sp"></div>
+<div class="li">• <b>Editar perfis:</b> <code>config/jrlink.php &gt; instagram.profiles</code> (lista simples de usernames). Lista vazia = canal desligado.</div>
+<div class="li">• <b>Desligar tudo:</b> <code>JRLINK_IG_ENABLED=false</code> no <code>.env</code>.</div>
+<div class="li">• <b>Resiliência:</b> 3 falhas seguidas do poll → 1 alerta no grupo Raspador (supressão de 6h pra não floodar); log por run com run_id, posts novos e custo.</div>
+<div class="li">• Post sem legenda útil (&lt;25 chars) é pulado e logado. <code>likesCount</code> do ator vem oculto e é ignorado.</div>
+<div class="sp"></div>
+<h3>Bônus: bug real corrigido no caminho</h3>
+<div class="sp"></div>
+<p>A <b>janela de silêncio da notificação calculava em UTC</b> — na prática silenciava 20h–03h de Brasília (3h mais cedo). Corrigida pra hora local (<code>notificacao.timezone</code>). Digests do começo da noite voltam a sair.</p>
+<div class="sp"></div>
+<h2>Radar v4.1 — tempo real — 2026-06-11</h2>
+<div class="sp"></div>
+<p>A reclamação central do editor era ver <b>pauta de dias atrás no topo como &quot;quentíssima&quot;</b>. O v4.1 separa mérito de urgência: o juiz julga o mérito <b>uma vez</b> (prompt v3 intocado, md5 idêntico) e o painel calcula <b>score_atual = score do juiz × fator de frescor</b> pela idade da publicação original do líder do evento.</p>
+<div class="sp"></div>
+<h3>1. Decaimento temporal — ordenação default vira &quot;🔥 Quente agora&quot;</h3>
+<div class="sp"></div>
+<div class="li">• Fatores: <b>&lt;6h=1.0 · 6-12h=0.85 · 12-24h=0.65 · 24-48h=0.4 · &gt;48h=0.4</b> — editável em <code>config/jrlink.php &gt; radar.decaimento</code>. O score do juiz NÃO muda no banco.</div>
+<div class="li">• Select: 🔥 Quente agora (default) · Score puro · Mais recente. Card mostra score_atual + badge de idade (&quot;9h&quot;/&quot;2d&quot;, cinza apagado pra velho).</div>
+<div class="li">• <b>Caso-teste:</b> cassação Cleiton Profeta (juiz 94, 08/06) → <b>atual 38</b>, com 9 quentes reais de &lt;6h acima; e como casou com o site, some do default (badge ✅).</div>
+<div class="li">• <b>Notificação:</b> publicação original mais velha que <code>notificacao.max_idade_horas</code> (default 12) NUNCA vira WhatsApp — dry-run real: velho bloqueado, fresco enviável.</div>
+<div class="sp"></div>
+<h3>2. Já-publicado — WPGraphQL → jr_publicado → matching</h3>
+<div class="sp"></div>
+<div class="li">• <code>jrlink:publicados-sync</code> no scheduler (30min, withoutOverlapping): posts publicados das últimas 72h (só leitura) → upsert por slug em <code>jr_publicado</code>.</div>
+<div class="li">• Matching em 2 camadas: <b>a própria máquina do cluster</b> (posts como linhas-fantasma; co-membro = match direto) + <b>LLM em lote nos limítrofes</b> (prompt próprio &quot;mesma história? sim/não&quot;, cap 40/ciclo, logado como <code>publicado_match</code>).</div>
+<div class="li">• Match = cluster inteiro ganha <code>ja_publicado_em</code>/slug: some do Radar por default (chip &quot;Já publicadas&quot; mostra com badge <b>✅ no site</b>), notificador nunca notifica. Cruzamento com <code>jr_ig_corpus</code> → badge <b>✅ no IG</b> (informativo).</div>
+<div class="li">• <b>Backfill 7 dias: 203 posts · 58 eventos casados com o site (141 itens) · 22 com o IG.</b> Ex.: &quot;Vovó da cocada&quot; ← <code>vovo-cocada-presa-tijucas-…</code>, pedreiros/feminicídio Itapema, tainha na Justiça, Cleiton Profeta.</div>
+<div class="sp"></div>
+<h3>3. Modo triagem (mobile)</h3>
+<div class="sp"></div>
+<div class="li">• Toggle ☰ Lista / ▦ Cards (persistido). Lista = 1-2 linhas com score_atual colorido, título truncado, cidade, idade e ❄️😐🔥 inline (vota sem expandir; tap expande o card).</div>
+<div class="li">• Chips: ⚡ Agora (&lt;24h) · Não votados (server-side) · Já publicadas (off). Contador votados/total. Tudo persiste em localStorage.</div>
+<div class="sp"></div>
+<h3>Como ajustar</h3>
+<div class="sp"></div>
+<table>
+<tr><td>decaimento</td><td><code>radar.decaimento</code> + <code>radar.decaimento_apos</code></td></tr>
+<tr><td>teto de idade da notificação</td><td><code>notificacao.max_idade_horas</code> (12)</td></tr>
+<tr><td>janela WP / estoque / cap LLM</td><td><code>publicados.janela_horas</code> (72) · <code>publicados.janela_eventos_horas</code> (168) · <code>publicados.llm_cap_pares</code> (40)</td></tr>
+<tr><td>backfill manual</td><td><code>php artisan jrlink:publicados-sync --backfill</code> (7 dias) · <code>--dry</code></td></tr>
+</table>
+<div class="sp"></div>
+<p><b>Validação:</b> Cleiton 94→38 fora do topo ✓ · dry-run notificador velho=bloqueado ✓ · 58 matches reais sumindo do default e fora da notificação ✓ · voto pela lista persiste ✓ · md5 do juiz idêntico (<code>4c4e394b…</code>) ✓ · aceite Fase 2 4/4 ✓ · paridade 122/122 ✓ · Feed/Fontes/Radar 200 ✓ · ciclo real do scheduler no journal: 08:30 dispatch → bridge → instagram-poll → <b>publicados-sync 46s DONE</b> (+11 eventos casados no próprio ciclo → 69 no total).</p>
+<div class="sp"></div>
+<h2>Opus + match robusto + digest agrupado — 2026-06-15</h2>
+<div class="sp"></div>
+<p>Duas reclamações reais do editor no digest do WhatsApp: (a) pauta que o JR <b>já publicou</b> voltava como nova (manchetes do mesmo fato sem palavra em comum não casavam no matching textual) e (b) 5 portais com a mesma matéria viravam 5 linhas. Mais a diretriz de subir a inteligência pro melhor modelo.</p>
+<div class="sp"></div>
+<h3>1. Opus 4.8 por função</h3>
+<div class="sp"></div>
+<p>Nova seção <code>config/jrlink.php &gt; modelos</code>, default <b>Opus 4.8</b> (<code>claude-opus-4-8</code>):</p>
+<table>
+<tr><th>função</th><th>config / env</th></tr>
+<tr><td>juiz (mérito)</td><td><code>jrlink.modelos.juiz</code> / <code>JRLINK_MODELO_JUIZ</code></td></tr>
+<tr><td>dedup (mesmo evento?)</td><td><code>jrlink.modelos.dedup</code> / <code>JRLINK_MODELO_DEDUP</code></td></tr>
+<tr><td>match publicado (já publicamos?)</td><td><code>jrlink.modelos.match_publicado</code> / <code>JRLINK_MODELO_MATCH</code></td></tr>
+</table>
+<div class="li">• <code>JuizLlm</code> roteia o <code>--model</code> do claude-cli por função (timeout 600s). Fallback: troque o env pro <code>claude-haiku-4-5-20251001</code> ou qualquer id válido. Cada chamada loga o modelo usado.</div>
+<div class="li">• Teste real: Opus respondeu JSON no claude-cli (juiz e match), logado como <code>claude-opus-4-8</code>.</div>
+<div class="sp"></div>
+<h3>2. Match de publicado robusto — pré-filtro largo, LLM decide</h3>
+<div class="sp"></div>
+<div class="li">• <b>Pré-filtro</b> = gerador de candidatos generoso: overlap idf título×título + <b>palavras do SLUG do post</b> (carrega cidade/ângulo que o título omite). Top-6 por evento, overlap mínimo baixo (0.12). Não decide.</div>
+<div class="li">• <b>Decisão = SEMPRE do LLM (Opus)</b>, lotes de 20, cap 80/ciclo: "MESMO FATO? as manchetes podem ser totalmente diferentes — compare fato/pessoas/lugar, não as palavras". "Não" fica 7d em cache.</div>
+<div class="li">• <b>Caso cravado PROVADO:</b> evento "Criança de 2 anos internada em UTI após suspeitas de maus-tratos em SC" (radiomirador) <b>casou</b> com o post "Criança de 2 anos internada com lesões…: caiu no banho, diz mãe" (<code>crianca-2-anos-…-jaragua-do-sul</code>) — sem palavra em comum no título; Opus reconheceu o mesmo fato. Sumiu do digest.</div>
+<div class="li">• <b>Backfill 7 dias:</b> 210 posts → <b>+13 eventos site +9 IG</b> que o textual-only não pegava. Custo: 8 chamadas Opus · 160 pares · <b>US$ 1,48</b>.</div>
+<div class="sp"></div>
+<h3>3. Digest do WhatsApp agrupado por evento</h3>
+<div class="sp"></div>
+<p>1 bloco por evento (coberturas em 1 query, sem N+1). N≥2 portais vira uma mensagem só:</p>
+<div class="li" style="font-family:monospace;white-space:pre-wrap">4. [RADAR 100] Joinville · indignacao
+Mulher de 37 anos é denunciada por se passar por criança de 11…
+🔥 3 portais cobrindo:
+https://rbatv.com.br/… · https://portalrbv.com.br/… · https://alvorada945.com.br/…</div>
+<div class="li">• Evento de 1 portal segue simples. Cap 6 links/evento (<code>notificacao.max_links_por_evento</code>). Respeita decaimento (max_idade) e já-publicado.</div>
+<div class="sp"></div>
+<p><b>Validação:</b> Opus responde (juiz+match, logado claude-opus-4-8) ✓ · criança de 2 anos casa e sai do digest (reset+re-match) ✓ · backfill +13 site +9 IG, US$ 1,48 ✓ · digest agrupado multi-portal numa msg ✓ · few-shot ligado (55 votos, 12 exemplos no prompt) sem quebrar ✓ · paridade 122/122 ✓ · Feed/Fontes/Radar 200 ✓ · aceite Fase 2 (b)(c)(d) passam; (a) sinaliza 1 item (#138868 Jorginho Mello/tainha/Lula) que o Opus re-julgou como <b>regional/quente legítimo</b> (governador de SC sobre tema de SC) — heurístico pega "Lula" numa pauta regional real, veredito mantido.</p>
+<div class="sp"></div>
+<h3>Ciclo do scheduler observado (código novo, 2026-06-15)</h3>
+<div class="sp"></div>
+<div class="li" style="font-family:monospace;white-space:pre-wrap">13:30:20 news-radar:dispatch .. 503ms DONE
+13:30:20 jrlink:bridge-news ......... 2s DONE
+13:30:23 jrlink:instagram-poll ..... 47s DONE
+13:31:10 jrlink:publicados-sync .. 4m 5s DONE   ← match Opus (código novo)
+13:35:16 jrlink:juiz --hours=48 . 2m 10s DONE   ← juiz Opus + few-shot</div>
+<div class="li">• O juiz disparou o digest: <b>digest enviado: 2 novos · messageId=F1AF88688FA39824699D</b> (13:37). Mensagem real agrupada:</div>
+<div class="li" style="font-family:monospace;white-space:pre-wrap">🔥 *Radar JR — 2 pautas novas*
+
+1. [RADAR 95] Abelardo Luz · indignacao
+Homem que matou ex-companheira e namorado dela na frente do filho é condenado a 68 anos de prisão em SC
+🔥 5 portais cobrindo:
+https://atualfm.com.br/… · https://clickxaxim.com.br/… · https://visornoticias.com.br/… · https://araguaiabrusque.com.br/… · https://diplomatafm.com.br/…
+
+2. [RADAR 69] identidade sc
+Santa Catarina proíbe fogos de artifício com estampido em todo o estado
+https://portalrbv.com.br/…</div>
+<div class="li">• 5 portais da MESMA história = <b>1 bloco</b>; evento de 1 portal simples; <b>criança de 2 anos fora</b> (já-publicado, criança no plano: false).</div>
+<div class="sp"></div></div></body></html>
