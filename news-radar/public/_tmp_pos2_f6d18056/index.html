@@ -489,4 +489,22 @@ https://portalrbv.com.br/…</div>
 <div class="li">• Backlog: <b>127 IG julgados, 0 falhas, custo US$ 2,57</b> (Opus, few-shot 12). 22 viraram quente.</div>
 <div class="li">• Aprovados lendo a legenda: vereadores R$17mil → <b>quente 100</b> (indignação); pescador chora tainha → <b>89</b> (emoção, Bombinhas); resgate tartaruga → <b>88</b> (feel-good); Câmara São José R$33mi → <b>84</b>. Rejeitados (eh_pauta=0): "novo tempo movendo Palhoça" (institucional), "ixtepora tava brava 😂" (meme), "que coisa mais linda raça" (vago).</div>
 <div class="li">• <b>Guardas sobre IG:</b> só 1 dos 22 IG quentes notificou (messageId 3EB0556…) — 21 barrados por idade/já-publicado/já-notificado. Fato-velho rodou nos 127 (4 sinalizados). Feed/WhatsApp inalterados (mudança aditiva na seleção).</div>
+<div class="sp"></div>
+<h2>Vitrine Radar JR — 2026-06-15</h2>
+<div class="sp"></div>
+<p>O extract.html antigo era lista chapada por score (tainha de dias atrás no topo, 13 itens soltos). A nova <b>vitrine</b> server-rendered lê jr_link_extracao na hora, agrupa por assunto e aplica decaimento + guardas — <b>sem IA no clique</b>.</p>
+<div class="sp"></div>
+<h3>Assunto agrupa (tainha 13→1)</h3>
+<div class="li">• Novo passo do ciclo <code>jrlink:assuntos</code> (scheduler 10,40, depois do juiz). Pré-grupo barato (union-find por overlap idf com token-âncora distintivo — geografia/ação genérica não ancora) + <b>Opus rotula</b> (1 chamada/ciclo) dando o MESMO rótulo aos grupos do mesmo assunto em curso.</div>
+<div class="li">• Real: <b>"Pesca da tainha em SC" = 13 clusters sob 1 assunto_id (a166930)</b> → na vitrine 1 bloco "🔥 N portais cobrindo", não 13 cards. Custo <b>US$ 0,57/ciclo</b> (logado assunto_group). Migration aditiva/reversível.</div>
+<div class="sp"></div>
+<h3>Sem LLM no request (prova)</h3>
+<div class="li">• Rota <code>GET /radar</code> (mesma chave leve do painel, antes do catch-all do SPA). Controller só lê DB + render: <code>jr_juiz_log</code> tem o MESMO total antes/depois de abrir (996→996) — zero LLM; request ~0,32s. Latência/custo do Opus vivem no ciclo.</div>
+<div class="sp"></div>
+<h3>Guardas, decaimento, visual</h3>
+<div class="li">• Esconde já-publicado e frio/fato-velho; decaimento score_atual = score × fator(idade) (régua do digest); blocos Agora (&lt;6h) e Últimas 24h.</div>
+<div class="li">• V5.1: Open Sans, Royal #0061FF, Navy #0D2481, Sky #18ADFE; chip de editoria COM A COR (Segurança E63946, Política 0D2481, Economia 2D6A4F, Meio Ambiente 40916C, Saúde 48CAE4, Entretenimento E056A0, Especiais D4A373); chip cidade/origem, selo score, host, link. Cabeçalho com números do ciclo em cards. Filtros client-side instantâneos (origem/cidade 46/editoria 9/só-hoje + busca). Mobile-first.</div>
+<div class="li">• 116 assuntos quentes · <b>17 do Instagram</b> (aba própria, IG em 7d) · 21 cards no Agora.</div>
+<div class="li">• <b>URL:</b> <code>https://jornaldetijucas.com.br/radar?key=&lt;JRLINK_PANEL_KEY&gt;</code> (200 com chave, 401 sem — testado em produção).</div>
+<div class="li"><b>Validação:</b> tainha 1 bloco (13 clusters) ✓ · nenhum já-publicado/fato-velho ✓ · decaimento ✓ · IG filtrável (17) ✓ · sem Opus no request (996→996) ✓ · rota 200 + NewsRadar 200 ✓ · paridade 122/122 ✓ · md5 base idêntico ✓ · custo US$ 0,57/ciclo ✓ · migration reversível ✓.</div>
 <div class="sp"></div></div></body></html>

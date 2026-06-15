@@ -599,3 +599,40 @@ Legendas que o juiz **rejeitou** (eh_pauta=0): *"Um novo tempo está movendo Pal
 
 ### Feed/WhatsApp inalterados
 A mudança é **aditiva na seleção do juiz** — só acrescenta itens de IG à fila. Feed e WhatsApp seguem a rota de sempre (coarse → cluster → juiz no representante). Paridade **122/122**, Feed/Fontes/Radar **200**, md5 do prompt base idêntico.
+
+---
+
+## Vitrine Radar JR — 2026-06-15
+
+O `extract.html` antigo era lista chapada por score (tainha de dias atrás no topo, 13 itens soltos). A nova **vitrine** (server-rendered, no Caddy existente) fica à altura do digest: lê `jr_link_extracao` na hora, agrupa por assunto e aplica decaimento + guardas — **sem IA no clique**.
+
+### Como o assunto agrupa (tainha 13→1)
+
+Novo passo do ciclo `jrlink:assuntos` (scheduler **10,40**, depois do juiz). Estratégia híbrida (a mesma do cluster-merge, agora no nível de ASSUNTO):
+1. **Pré-grupo barato** (sem custo): union-find por overlap idf dos títulos, exigindo um **token-âncora distintivo** (ex.: "tainha") — geografia/fonte/ação genérica ("santa", "preso", "operação") não ancoram, senão encadeiam tudo num assunto-monstro.
+2. **Opus rotula** (1 chamada/ciclo, todos os grupos multi-cluster juntos): dá um rótulo PT-BR curto a cada grupo e o **MESMO rótulo** aos grupos do mesmo assunto em curso (encerramento + reabertura + cota + disputa da tainha). Grupos com rótulo idêntico viram 1 `assunto_id` estável.
+
+Resultado real: **"Pesca da tainha em SC" = 13 clusters distintos sob 1 `assunto_id` (a166930)** — na vitrine, **1 bloco** "🔥 N portais cobrindo", não 13 cards. Migration aditiva e reversível (`assunto_id` + `assunto_label` + `assunto_em`). **Custo do agrupamento: US$ 0,57/ciclo** (82 grupos → 1 chamada Opus, logado em `jr_juiz_log` como `assunto_group`). O que já tem `assunto_id` estável é reusado.
+
+### A vitrine não chama LLM no request (prova)
+
+Rota `GET /radar` (atrás da MESMA chave leve do painel: `?key=…` → cookie 90d), declarada antes do catch-all do SPA. O controller só faz **leituras de DB + render**. Prova: `jr_juiz_log` tem o MESMO total **antes e depois** de abrir a página (996 → 996) — zero chamadas LLM; request em **~0,32s**. O agrupamento (latência/custo do Opus) vive no ciclo, nunca no clique.
+
+### Guardas e decaimento aplicados
+
+- **Esconde já-publicado** (`whereNull ja_publicado_em`) e **frio/fato-velho** (`temperatura_juiz='quente'` — fato-velho já entra frio do juiz). 0 referências a já-publicado no HTML.
+- **Decaimento temporal**: `score_atual = score × fator(idade)` (mesma régua do digest, `JrRadarController::fatorDecaimento`). Ordena por `score_atual`; badge de idade fica cinza pra ≥24h.
+- Dois blocos: **Agora** (líder < 6h) e **Últimas 24h**.
+
+### Visual (V5.1) e filtros
+
+Open Sans, Royal #0061FF, Navy #0D2481, Sky #18ADFE. Card por assunto: título legível (1ª maiúscula; legenda "shouty" de IG vira sentence-case), **chip de editoria COM A COR** (Segurança #E63946, Política #0D2481, Economia #2D6A4F, Meio Ambiente #40916C, Saúde #48CAE4, Entretenimento #E056A0, Especiais #D4A373), chip cidade, chip origem, selo de score_atual, host, link. Cabeçalho com os números do ciclo em cards limpos (processados/julgados/assuntos/IG). **Filtros client-side instantâneos** (sem recarregar): abas de origem (Portais/WhatsApp/**Instagram**), cidade (46 opções), editoria (9), "só de hoje", e busca por palavra no título/cidade. Mobile-first.
+
+### Contagem por origem (janela atual)
+
+116 assuntos quentes renderizados · **17 do Instagram** (aba própria; IG puxado em 7d porque é o canal novo de baixo volume — dos ~49 IG eh_pauta=1, ~21 são quentes). Feed/WhatsApp na janela de 48h. 21 cards no bloco "Agora".
+
+**URL:** `https://jornaldetijucas.com.br/radar?key=<JRLINK_PANEL_KEY>` (200 com chave, 401 sem — testado em produção).
+
+### Validação
+Tainha 1 bloco (13 clusters sob a166930) ✓ · nenhum já-publicado/fato-velho visível ✓ · decaimento aplicado (score_atual) ✓ · IG visível e filtrável (17) ✓ · página abre SEM disparar Opus (jr_juiz_log 996→996, ~0,32s) ✓ · rota nova 200 + NewsRadar (feed/fontes/radar-api) 200 ✓ · paridade **122/122** ✓ · md5 do prompt base **idêntico** (`4c4e394b…`) ✓ · custo do agrupamento US$ 0,57/ciclo ✓ · migration reversível ✓.
