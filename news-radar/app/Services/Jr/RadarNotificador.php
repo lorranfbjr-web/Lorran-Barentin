@@ -171,8 +171,17 @@ class RadarNotificador
 
     // ───────────────────────── interno ─────────────────────────
 
-    private function montar($novos, int $cap): string
+    /**
+     * Monta o digest AGRUPADO POR EVENTO (1 bloco por cluster, como o painel
+     * Radar): evento com N≥2 portais vira um bloco só com o título do líder +
+     * "🔥 N portais cobrindo: link1 · link2 · …". Evento de 1 portal segue
+     * simples (título + link). As coberturas saem em 1 query (sem N+1).
+     */
+    public function montar($novos, int $cap): string
     {
+        $coberturas = $this->coberturasPorEvento($novos);
+        $maxLinks = (int) ($this->cfg['max_links_por_evento'] ?? 6);
+
         $L = [];
         $L[] = sprintf('🔥 *Radar JR — %d pauta%s nova%s*', $novos->count(),
             $novos->count() > 1 ? 's' : '', $novos->count() > 1 ? 's' : '');
@@ -187,7 +196,16 @@ class RadarNotificador
             $L[] = sprintf('%d. [%s %d] %s', $i + 1, $eixo, (int) $r->score_editorial,
                 $meta ? implode(' · ', $meta) : '—');
             $L[] = trim((string) $r->titulo);
-            $L[] = (string) $r->url;
+
+            $fontes = $coberturas[$r->cluster_id] ?? null;
+            if ($fontes && $fontes->count() >= 2) {
+                $links = $fontes->take($maxLinks)->map(fn ($f) => (string) $f['url'])->implode(' · ');
+                $extra = $fontes->count() > $maxLinks ? sprintf(' (+%d)', $fontes->count() - $maxLinks) : '';
+                $L[] = sprintf('🔥 %d portais cobrindo:%s', $fontes->count(), $extra);
+                $L[] = $links;
+            } else {
+                $L[] = (string) $r->url;
+            }
             $L[] = '';
         }
 
@@ -199,6 +217,31 @@ class RadarNotificador
         $L[] = 'Relatório: ' . ($this->cfg['relatorio_url'] ?? 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html');
 
         return implode("\n", $L);
+    }
+
+    /**
+     * Fontes distintas (1 melhor URL por fonte) de cada cluster dos eventos —
+     * em 1 query só (sem N+1). Retorna [cluster_id => Collection<['nome','url']>].
+     */
+    private function coberturasPorEvento($novos): array
+    {
+        $clusterIds = $novos->pluck('cluster_id')->filter()->unique()->values();
+        if ($clusterIds->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('jr_link_extracao')
+            ->whereIn('cluster_id', $clusterIds)->where('duplicada', false)
+            ->get(['cluster_id', 'url', 'host', 'fonte_tipo', 'score'])
+            ->groupBy('cluster_id')
+            ->map(function ($membros) {
+                return $membros
+                    ->groupBy(fn ($m) => $m->fonte_tipo ?: $m->host ?: '?')
+                    ->map(fn ($g, $nome) => [
+                        'nome' => $nome,
+                        'url' => $g->sortByDesc('score')->first()->url,
+                    ])->values();
+            })->all();
     }
 
     /** POST send-text na Z-API. Retorna messageId ou null. */

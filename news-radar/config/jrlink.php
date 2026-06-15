@@ -388,6 +388,26 @@ return [
         'llm_merge_pares' => 40,
     ],
 
+    /*
+    |---------------------------------------------------------------------------
+    | MODELOS POR FUNÇÃO (claude-cli) — precisão acima de custo
+    |---------------------------------------------------------------------------
+    | Cada inteligência do pipeline tem o seu modelo, editável por env. Default
+    | Opus 4.8 (claude-opus-4-8), o mais capaz disponível — o juiz julga mérito,
+    | o dedup decide "mesmo evento?" e o match_publicado decide "já publicamos
+    | esse fato?" (manchetes podem ser totalmente diferentes; erro aqui irrita o
+    | editor). Fallback se algum modelo sair do ar: troque o env pro anterior
+    | validado, claude-haiku-4-5-20251001 (mais barato, menos preciso), ou
+    | qualquer id de modelo que o `claude` aceite em --model. O resolvedor de
+    | driver (JuizLlm) ainda escolhe openai vs claude-cli; isto é só o --model
+    | do claude-cli por função.
+    */
+    'modelos' => [
+        'juiz' => env('JRLINK_MODELO_JUIZ', 'claude-opus-4-8'),
+        'dedup' => env('JRLINK_MODELO_DEDUP', 'claude-opus-4-8'),
+        'match_publicado' => env('JRLINK_MODELO_MATCH', 'claude-opus-4-8'),
+    ],
+
     'juiz' => [
         // Versão do prompt — item julgado com a MESMA versão não re-julga (idempotência).
         // v3: seção de score ancorada no DNA real do Instagram (jr-ig-dna).
@@ -401,7 +421,9 @@ return [
         // do enriquecimento NewsRadar (OpenAI::chat), pronto pra quando houver chave.
         'driver' => env('JRLINK_JUIZ_DRIVER', 'auto'),
         'modelo_openai' => env('JRLINK_JUIZ_MODELO_OPENAI', 'gpt-4o-mini'),
-        'modelo_claude' => env('JRLINK_JUIZ_MODELO_CLAUDE', 'claude-haiku-4-5-20251001'),
+        // modelo_claude: fallback legado. A fonte de verdade do modelo claude-cli
+        // por função é jrlink.modelos.* acima; isto cobre chamadas antigas.
+        'modelo_claude' => env('JRLINK_JUIZ_MODELO_CLAUDE', 'claude-opus-4-8'),
 
         // Hard cap de chamadas LLM por execução — estourou, ABORTA e reporta.
         'cap_chamadas' => 300,
@@ -493,6 +515,7 @@ return [
         'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
         'grupo' => env('JRLINK_ALERT_GROUP', ''),          // phone do grupo Raspador
         'max_itens' => 10,                                  // cap por mensagem; resto vira "+N"
+        'max_links_por_evento' => 6,                        // links por evento multi-portal no digest
         'timezone' => 'America/Sao_Paulo',                  // hora LOCAL da janela
         'silencio_inicio' => 23,                            // janela de silêncio (acumula)
         'silencio_fim' => 6,
@@ -539,21 +562,31 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | JÁ-PUBLICADO (v4.1) — jrlink:publicados-sync (scheduler, 30min)
+    | JÁ-PUBLICADO (v4.2) — jrlink:publicados-sync (scheduler, 30min)
     |---------------------------------------------------------------------------
     | Lê posts PUBLICADOS do WordPress via WPGraphQL (SÓ query, nunca mutation),
-    | espelha em jr_publicado e casa contra os eventos quentes do Radar:
-    | similaridade textual (mesma máquina do EventClusterer) decide os óbvios;
-    | pares limítrofes vão pro LLM em lote ("mesma história? sim/não", prompt
-    | próprio, logado em jr_juiz_log como publicado_match). Match = evento ganha
-    | ja_publicado_em/slug → some do Radar por default e NUNCA notifica.
-    | Cruza também com jr_ig_corpus (badge "✅ no IG").
+    | espelha em jr_publicado e casa contra os eventos quentes do Radar.
+    |
+    | v4.2: a similaridade textual NÃO decide mais nada — é só um GERADOR DE
+    | CANDIDATOS largo (qualquer post das últimas 72h com sobreposição mínima de
+    | entidade/cidade/tema com o evento). A DECISÃO é SEMPRE do LLM (Opus) em
+    | lote: "este evento do radar é o MESMO FATO que este post já publicado?
+    | manchetes podem ser totalmente diferentes — compare fato/pessoas/lugar,
+    | não as palavras. sim/não". Isso casa "mesmo fato, manchete diferente"
+    | (ex.: criança internada por maus-tratos, dois portais sem palavra em
+    | comum) que o textual sozinho perdia. Logado em jr_juiz_log como
+    | publicado_match. Match = evento ganha ja_publicado_em/slug → some do Radar
+    | e NUNCA notifica. Cruza também com jr_ig_corpus (badge "✅ no IG").
     */
     'publicados' => [
         'endpoint' => 'https://controle.jornalrazao.com/graphql',
         'janela_horas' => 72,     // posts do WP puxados por ciclo
         'janela_eventos_horas' => 168, // estoque de eventos quentes confrontado
-        'llm_cap_pares' => 40,    // pares duvidosos por ciclo no LLM (0 desliga)
+        'llm_cap_pares' => 80,    // pares evento×post julgados pelo LLM por ciclo (0 desliga)
+        // Pré-filtro (gerador de candidatos): generoso de propósito — o LLM é
+        // quem corta. min_overlap baixo + janela de candidatos por entidade rara.
+        'prefiltro_overlap_min' => 0.12, // sobreposição idf mínima evento×post
+        'prefiltro_max_cand_por_evento' => 6, // top-K posts candidatos por evento
     ],
 
     // Chave leve da aba Radar do painel React (middleware JrPanelKey).

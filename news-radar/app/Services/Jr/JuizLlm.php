@@ -34,6 +34,9 @@ class JuizLlm
 
     private string $driver;
 
+    /** Modelo claude-cli efetivamente usado na última chamada (pro log). */
+    private ?string $ultimoModelo = null;
+
     public function __construct(?array $cfg = null, ?string $driver = null)
     {
         $this->cfg = $cfg ?? config('jrlink.juiz');
@@ -45,11 +48,25 @@ class JuizLlm
         return $this->driver;
     }
 
+    /**
+     * Modelo claude-cli por FUNÇÃO (jrlink.modelos.*) — default Opus. Cai pro
+     * legado jrlink.juiz.modelo_claude se a chave não existir.
+     */
+    public function modeloFuncao(string $funcao): string
+    {
+        return (string) (config('jrlink.modelos.' . $funcao)
+            ?? $this->cfg['modelo_claude']
+            ?? 'claude-opus-4-8');
+    }
+
+    /** Modelo "principal" (juiz) — pro display antes de qualquer chamada. */
     public function modelo(): string
     {
-        return $this->driver === 'openai'
-            ? (string) $this->cfg['modelo_openai']
-            : (string) $this->cfg['modelo_claude'];
+        if ($this->driver === 'openai') {
+            return (string) $this->cfg['modelo_openai'];
+        }
+
+        return $this->ultimoModelo ?? $this->modeloFuncao('juiz');
     }
 
     /**
@@ -69,7 +86,7 @@ class JuizLlm
             try {
                 [$texto, $inTok, $outTok, $custo] = $this->driver === 'openai'
                     ? $this->chamarOpenai($prompt)
-                    : $this->chamarClaudeCli($prompt);
+                    : $this->chamarClaudeCli($prompt, $this->modeloFuncao('juiz'));
 
                 $vereditos = $this->parse($texto, $itens);
 
@@ -144,16 +161,17 @@ PROMPT;
 
     /**
      * Chamada genérica de UM prompt esperando array JSON na resposta (usada por
-     * comandos auxiliares — DNA do Instagram etc.). NÃO toca no prompt do juiz.
-     * Loga em jr_juiz_log com a operation dada. Retorna [] em falha.
+     * comandos auxiliares — DNA do Instagram, match de publicado). NÃO toca no
+     * prompt do juiz. $modelo força o modelo claude-cli da chamada (default: o
+     * modelo da função juiz). Loga em jr_juiz_log com a operation dada.
      */
-    public function completarJson(string $prompt, string $operation, int $itens = 0): array
+    public function completarJson(string $prompt, string $operation, int $itens = 0, ?string $modelo = null): array
     {
         $t0 = microtime(true);
         try {
             [$texto, $in, $out, $custo] = $this->driver === 'openai'
                 ? $this->chamarOpenai($prompt)
-                : $this->chamarClaudeCli($prompt);
+                : $this->chamarClaudeCli($prompt, $modelo);
             $this->log('success', 1, $itens, $in, $out, $custo, null, $t0, $operation);
             if (preg_match('/\[.*\]/s', $texto, $m)) {
                 $texto = $m[0];
@@ -199,7 +217,7 @@ PROMPT;
         try {
             [$texto, $in, $out, $custo] = $this->driver === 'openai'
                 ? $this->chamarOpenai($prompt)
-                : $this->chamarClaudeCli($prompt);
+                : $this->chamarClaudeCli($prompt, $this->modeloFuncao('dedup'));
             $this->log('success', 1, count($pares), $in, $out, $custo, null, $t0, 'cluster_merge');
 
             if (preg_match('/\[.*\]/s', $texto, $m)) {
@@ -278,6 +296,7 @@ PROMPT;
     /** @return array{0:string,1:?int,2:?int,3:?float} [texto, in_tokens, out_tokens, custo_usd] */
     private function chamarOpenai(string $prompt): array
     {
+        $this->ultimoModelo = (string) $this->cfg['modelo_openai'];
         $response = OpenAI::chat()->create([
             'model' => $this->cfg['modelo_openai'],
             'messages' => [
@@ -296,12 +315,18 @@ PROMPT;
         return [$texto, $in, $out, $custo];
     }
 
-    /** @return array{0:string,1:?int,2:?int,3:?float} */
-    private function chamarClaudeCli(string $prompt): array
+    /**
+     * @param  string|null  $modelo  modelo claude-cli; null = modelo da função juiz
+     * @return array{0:string,1:?int,2:?int,3:?float}
+     */
+    private function chamarClaudeCli(string $prompt, ?string $modelo = null): array
     {
-        $r = Process::timeout(180)->run([
+        $modelo = $modelo ?: $this->modeloFuncao('juiz');
+        $this->ultimoModelo = $modelo;
+        // Opus é mais lento que Haiku; timeout generoso pro lote de 24.
+        $r = Process::timeout(600)->run([
             'claude', '-p', $prompt,
-            '--model', $this->cfg['modelo_claude'],
+            '--model', $modelo,
             '--output-format', 'json',
             '--max-turns', '1',
         ]);

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\Jr\EventClusterer;
 use App\Services\Jr\JuizLlm;
+use App\Services\Jr\PautaClassifier;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -12,16 +13,23 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * v4.1 — filtro "já publicado": espelha os posts publicados do WordPress
+ * v4.2 — filtro "já publicado": espelha os posts publicados do WordPress
  * (WPGraphQL, SÓ leitura) em jr_publicado e casa contra os eventos quentes
- * do Radar. Camadas do matching, na mesma filosofia da Fase 2:
+ * do Radar. Estratégia "pré-filtro largo + LLM decide":
  *
- *   1. similaridade textual = a MESMA máquina do EventClusterer (overlap idf
- *      + âncora + vetos de cidade/idade): WP posts e líderes de evento entram
- *      juntos no cluster(); co-membro = match direto, zero custo;
- *   2. pares LIMÍTROFES (similar mas não fundiu) vão pro LLM em LOTE com
- *      prompt PRÓPRIO "mesma história? sim/não" (cap publicados.llm_cap_pares
- *      por ciclo, logado em jr_juiz_log como publicado_match).
+ *   1. PRÉ-FILTRO (gerador de candidatos, generoso): overlap idf título×título
+ *      reusando os tokens do EventClusterer, enriquecido com as palavras do
+ *      SLUG do post (que carregam cidade/ângulo que o título às vezes omite).
+ *      Top-K posts por evento acima de um overlap mínimo BAIXO — o objetivo é
+ *      NÃO perder candidato, nem decidir nada aqui.
+ *   2. DECISÃO (sempre do LLM, Opus): lote evento×post com prompt próprio
+ *      "MESMO FATO? as manchetes podem ser totalmente diferentes — compare o
+ *      fato/pessoas/lugar, não as palavras. sim/não". Cap por ciclo
+ *      (publicados.llm_cap_pares), logado em jr_juiz_log como publicado_match.
+ *
+ * Isso casa "mesmo fato, manchete diferente" (ex.: criança de 2 anos internada
+ * por maus-tratos noticiada por dois portais sem palavra em comum no título)
+ * que a similaridade textual sozinha perdia.
  *
  * Match => cluster inteiro ganha ja_publicado_em + ja_publicado_slug: some do
  * Radar por default e o RadarNotificador nunca notifica. O mesmo confronto
@@ -32,8 +40,6 @@ use Illuminate\Support\Facades\Log;
  */
 class JrPublicadosSync extends Command
 {
-    /** Offset dos ids-fantasma (WP/IG) dentro do cluster() — nunca colide com jr_link_extracao. */
-    private const PSEUDO = 900_000_000;
 
     protected $signature = 'jrlink:publicados-sync '
         . '{--hours= : Janela de posts do WP (default config publicados.janela_horas)} '
@@ -70,7 +76,7 @@ class JrPublicadosSync extends Command
                     ->orWhere('created_at', '>=', $cutEventos);
             })
             ->get(['id', 'titulo', 'eixo', 'score', 'data_pub', 'created_at',
-                'cluster_id', 'ja_publicado_em', 'ja_ig_em']);
+                'cluster_id', 'ja_publicado_em', 'ja_ig_em', 'markdown']);
 
         $capLlm = (int) $cfg['llm_cap_pares'];
         $juiz = new JuizLlm();
@@ -160,11 +166,11 @@ class JrPublicadosSync extends Command
     }
 
     /**
-     * Casa eventos × alvos (posts WP ou IG) reusando o EventClusterer: alvos
-     * entram como linhas-fantasma; co-membro do mesmo cluster = match direto,
-     * pares limítrofes evento×alvo vão pro LLM ("mesma história? sim/não").
+     * Casa eventos × alvos (posts WP ou IG). PRÉ-FILTRO largo gera candidatos
+     * (top-K posts por evento por overlap idf título×título + slug); a DECISÃO
+     * de cada candidato é SEMPRE do LLM (Opus) em lote.
      *
-     * @return array<int,object> evento_id => alvo (com quando/extra)
+     * @return array<int,object> evento_id => alvo (com quando/extra/titulo)
      */
     private function casar($eventos, $alvos, JuizLlm $juiz, int $capLlm, string $rotulo): array
     {
@@ -172,73 +178,140 @@ class JrPublicadosSync extends Command
             return [];
         }
 
-        $porPseudo = [];
-        $rows = [];
-        foreach ($eventos as $e) {
-            $rows[] = $e;
-        }
-        foreach ($alvos as $i => $a) {
-            $pid = self::PSEUDO + $i;
-            $porPseudo[$pid] = $a;
-            $rows[] = (object) ['id' => $pid, 'titulo' => $a->titulo, 'eixo' => 'concorrente',
-                'score' => 0, 'data_pub' => $a->quando, 'created_at' => $a->quando];
-        }
-
+        $cfg = config('jrlink.publicados');
+        $overlapMin = (float) ($cfg['prefiltro_overlap_min'] ?? 0.12);
+        $maxCand = (int) ($cfg['prefiltro_max_cand_por_evento'] ?? 6);
         $clusterer = new EventClusterer();
-        $clusters = $clusterer->cluster($rows);
 
-        // Match direto: evento e alvo no MESMO cluster.
-        $matches = [];
-        foreach ($clusters as $c) {
-            $pseudos = array_values(array_filter($c['ids'], fn ($id) => isset($porPseudo[$id])));
-            $reais = array_values(array_filter($c['ids'], fn ($id) => ! isset($porPseudo[$id])));
-            if ($pseudos && $reais) {
-                foreach ($reais as $eid) {
-                    $matches[$eid] = $porPseudo[$pseudos[0]];
+        // Tokens: eventos pelo título; alvos pelo título + palavras do SLUG
+        // (carregam cidade/ângulo que o título às vezes omite). DF/IDF sobre o
+        // corpus combinado pra ponderar entidade rara > vocabulário comum.
+        $evTokens = [];
+        foreach ($eventos as $i => $e) {
+            $evTokens[$i] = $clusterer->tokens((string) $e->titulo);
+        }
+        $alTokens = [];
+        $alExtraTxt = [];
+        foreach ($alvos as $j => $a) {
+            $slugTxt = $rotulo === 'site' ? ' ' . str_replace('-', ' ', (string) $a->extra) : '';
+            $alTokens[$j] = $clusterer->tokens(((string) $a->titulo) . $slugTxt);
+            $alExtraTxt[$j] = trim(str_replace('-', ' ', $rotulo === 'site' ? (string) $a->extra : ''));
+        }
+
+        $df = [];
+        $docs = 0;
+        foreach ([$evTokens, $alTokens] as $conj) {
+            foreach ($conj as $tks) {
+                $docs++;
+                foreach (array_keys($tks) as $t) {
+                    $df[$t] = ($df[$t] ?? 0) + 1;
                 }
             }
         }
+        $idf = [];
+        foreach ($df as $t => $d) {
+            $idf[$t] = log(1 + $docs / $d);
+        }
 
-        // Duvidosos: pares limítrofes evento×alvo que a similaridade não decidiu.
-        $pares = [];
-        $byId = collect($rows)->keyBy('id');
-        foreach ($clusterer->paresLimitrofes() as $p) {
-            $aPseudo = isset($porPseudo[$p['id_a']]);
-            $bPseudo = isset($porPseudo[$p['id_b']]);
-            if ($aPseudo === $bPseudo) {
-                continue; // evento×evento ou alvo×alvo não interessam aqui
-            }
-            $eid = $aPseudo ? $p['id_b'] : $p['id_a'];
-            $pid = $aPseudo ? $p['id_a'] : $p['id_b'];
-            if (isset($matches[$eid])) {
-                continue;
-            }
-            // "não" do LLM é lembrado 7 dias — o ciclo de 30min não re-pergunta
-            // o mesmo par toda vez (o "sim" se auto-resolve: o evento é marcado).
-            if (Cache::get($this->chavePar($eid, $porPseudo[$pid])) === false) {
-                continue;
-            }
-            $pares[] = ['eid' => $eid, 'pid' => $pid,
-                'evento' => (string) $byId[$eid]->titulo, 'alvo' => (string) $byId[$pid]->titulo];
-            if (count($pares) >= $capLlm) {
-                break;
+        // Índice invertido nos tokens dos alvos (só compara pares que partilham token).
+        $inv = [];
+        foreach ($alTokens as $j => $tks) {
+            foreach (array_keys($tks) as $t) {
+                $inv[$t][] = $j;
             }
         }
 
+        // Candidatos generosos: top-K alvos por evento acima do overlap mínimo.
+        $pares = [];
+        foreach ($eventos as $i => $e) {
+            $somaE = 0.0;
+            foreach (array_keys($evTokens[$i]) as $t) {
+                $somaE += $idf[$t] ?? 0;
+            }
+            if ($somaE <= 0) {
+                continue;
+            }
+            $cand = [];
+            $vistosJ = [];
+            foreach (array_keys($evTokens[$i]) as $t) {
+                foreach ($inv[$t] ?? [] as $j) {
+                    if (isset($vistosJ[$j])) {
+                        continue;
+                    }
+                    $vistosJ[$j] = true;
+                    $shared = 0.0;
+                    $somaA = 0.0;
+                    foreach (array_keys($alTokens[$j]) as $ta) {
+                        $somaA += $idf[$ta] ?? 0;
+                    }
+                    foreach (array_keys($evTokens[$i]) as $te) {
+                        if (isset($alTokens[$j][$te])) {
+                            $shared += $idf[$te] ?? 0;
+                        }
+                    }
+                    $ov = ($somaA > 0) ? $shared / min($somaE, $somaA) : 0.0;
+                    if ($ov >= $overlapMin) {
+                        $cand[$j] = $ov;
+                    }
+                }
+            }
+            arsort($cand);
+            foreach (array_slice(array_keys($cand), 0, $maxCand, true) as $j) {
+                $pares[] = ['ei' => $i, 'aj' => $j, 'overlap' => round($cand[$j], 3)];
+            }
+        }
+
+        // Cache de "não" (7d) evita re-perguntar o mesmo par a cada ciclo de 30min.
+        $pares = array_values(array_filter($pares, function ($p) use ($eventos, $alvos) {
+            return Cache::get($this->chavePar((int) $eventos[$p['ei']]->id, $alvos[$p['aj']])) !== false;
+        }));
+
+        // Ordena por overlap desc e aplica o cap por ciclo (os mais promissores primeiro).
+        usort($pares, fn ($a, $b) => $b['overlap'] <=> $a['overlap']);
+        if ($capLlm > 0 && count($pares) > $capLlm) {
+            $pares = array_slice($pares, 0, $capLlm);
+        }
+
+        $matches = [];
         if ($pares && $capLlm > 0) {
-            $vereditos = $this->julgarMesmaHistoria($juiz, $pares, $rotulo);
+            $itens = [];
             foreach ($pares as $n => $p) {
+                $e = $eventos[$p['ei']];
+                $a = $alvos[$p['aj']];
+                $itens[$n] = [
+                    'evento' => (string) $e->titulo,
+                    'evento_lead' => $this->lead($e),
+                    'alvo' => (string) $a->titulo . ($alExtraTxt[$p['aj']] !== '' ? ' (' . $alExtraTxt[$p['aj']] . ')' : ''),
+                ];
+            }
+            $vereditos = $this->julgarMesmoFato($juiz, $itens, $rotulo);
+            foreach ($pares as $n => $p) {
+                $eid = (int) $eventos[$p['ei']]->id;
+                $alvo = $alvos[$p['aj']];
                 if ($vereditos[$n] ?? false) {
-                    $matches[$p['eid']] = $porPseudo[$p['pid']];
-                    Log::info(sprintf('[PublicadosSync] LLM confirmou (%s): "%s" = "%s"',
-                        $rotulo, mb_strimwidth($p['evento'], 0, 70), mb_strimwidth($p['alvo'], 0, 70)));
+                    if (! isset($matches[$eid])) {
+                        $matches[$eid] = $alvo;
+                    }
+                    Log::info(sprintf('[PublicadosSync] LLM confirmou MESMO FATO (%s): "%s" = "%s"',
+                        $rotulo, mb_strimwidth((string) $eventos[$p['ei']]->titulo, 0, 70), mb_strimwidth((string) $alvo->titulo, 0, 70)));
                 } elseif (array_key_exists($n, $vereditos)) {
-                    Cache::put($this->chavePar($p['eid'], $porPseudo[$p['pid']]), false, now()->addDays(7));
+                    Cache::put($this->chavePar($eid, $alvo), false, now()->addDays(7));
                 }
             }
         }
 
         return $matches;
+    }
+
+    /** Lead curto do evento (1ª frase real do markdown) pra dar contexto ao LLM. */
+    private function lead(object $e): string
+    {
+        if (empty($e->markdown)) {
+            return '';
+        }
+        $corpo = (new PautaClassifier())->corpoFromMarkdown((string) $e->markdown);
+
+        return mb_substr(trim(preg_replace('/\s+/u', ' ', $corpo)), 0, 240);
     }
 
     private function chavePar(int $eventoId, object $alvo): string
@@ -247,34 +320,56 @@ class JrPublicadosSync extends Command
     }
 
     /**
-     * Lote LLM "mesma história? sim/não" — prompt PRÓPRIO deste comando (o
-     * prompt do juiz não muda). Logado via completarJson como publicado_match.
+     * Lote LLM "MESMO FATO? sim/não" — prompt PRÓPRIO deste comando (o prompt do
+     * juiz não muda). A decisão compara fato/pessoas/lugar, NÃO as palavras das
+     * manchetes. Roda no modelo da função match_publicado (Opus). Logado via
+     * completarJson como publicado_match.
      *
-     * @return array<int,bool> por índice do par
+     * @param  array<int,array{evento:string,evento_lead:string,alvo:string}>  $itens
+     * @return array<int,bool> por índice
      */
-    private function julgarMesmaHistoria(JuizLlm $juiz, array $pares, string $rotulo): array
+    private function julgarMesmoFato(JuizLlm $juiz, array $itens, string $rotulo): array
     {
+        // Lotes de 20 pares: prompt focado preserva a precisão do Opus (lista
+        // longa demais degrada). Cada lote = 1 chamada/1 log publicado_match.
+        $out = [];
+        foreach (array_chunk($itens, 20, true) as $chunk) {
+            $out += $this->julgarLoteMesmoFato($juiz, $chunk, $rotulo);
+        }
+
+        return $out;
+    }
+
+    /** @param  array<int,array{evento:string,evento_lead:string,alvo:string}>  $itens */
+    private function julgarLoteMesmoFato(JuizLlm $juiz, array $itens, string $rotulo): array
+    {
+        $fonte = $rotulo === 'site' ? 'JÁ PUBLICADO NO SITE' : 'JÁ PUBLICADO NO INSTAGRAM';
         $lista = '';
-        foreach ($pares as $n => $p) {
-            $lista .= sprintf("PAR %d\nPAUTA DO RADAR: %s\nJÁ PUBLICADO (%s): %s\n\n",
-                $n, trim($p['evento']), $rotulo, trim($p['alvo']));
+        foreach ($itens as $n => $it) {
+            $lead = $it['evento_lead'] !== '' ? "\nCONTEXTO DO RADAR: {$it['evento_lead']}" : '';
+            $lista .= sprintf("PAR %d\nPAUTA DO RADAR: %s%s\n%s: %s\n\n",
+                $n, trim($it['evento']), $lead, $fonte, trim($it['alvo']));
         }
         $prompt = <<<PROMPT
-        Você confere se o Jornal Razão JÁ PUBLICOU uma pauta. Para cada par abaixo, responda se os dois textos contam a MESMA HISTÓRIA (mesmo fato concreto, mesmas pessoas/lugar — manchete reformulada ou ângulo diferente do MESMO fato conta como mesma história; fato parecido em outra cidade/dia, desdobramento novo com fato novo, ou tema genérico em comum NÃO conta).
+        Você é o editor do Jornal Razão conferindo se uma pauta do radar é a MESMA notícia que o jornal JÁ PUBLICOU. Para cada par abaixo, responda se o evento do radar é o MESMO FATO que o post já publicado.
+
+        IMPORTANTE: as manchetes podem ser TOTALMENTE DIFERENTES, com nenhuma palavra em comum — compare o FATO concreto (o que aconteceu), as PESSOAS, o LUGAR e o momento, NÃO as palavras. Ex.: "Criança de 2 anos internada em UTI após suspeita de maus-tratos em SC" e "Criança de 2 anos é internada com lesões: caiu no banho, diz mãe" são o MESMO FATO (mesma criança, mesma internação, mesmo lugar) mesmo sem palavras iguais.
+
+        Responda MESMO=true só quando for o mesmo acontecimento concreto. Fato parecido em outra cidade/dia, outra vítima, ou desdobramento NOVO com fato novo = false. Tema genérico em comum (ex.: "dois acidentes diferentes") = false.
 
         RESPONDA APENAS com um array JSON, sem texto fora dele:
-        [{"par": <n>, "mesma": true|false}]
+        [{"par": <n>, "mesmo": true|false}]
 
         PARES:
 
         {$lista}
         PROMPT;
 
-        $arr = $juiz->completarJson($prompt, 'publicado_match', count($pares));
+        $arr = $juiz->completarJson($prompt, 'publicado_match', count($itens), $juiz->modeloFuncao('match_publicado'));
         $out = [];
         foreach ($arr as $v) {
             if (isset($v['par'])) {
-                $out[(int) $v['par']] = (bool) ($v['mesma'] ?? false);
+                $out[(int) $v['par']] = (bool) ($v['mesmo'] ?? false);
             }
         }
 
