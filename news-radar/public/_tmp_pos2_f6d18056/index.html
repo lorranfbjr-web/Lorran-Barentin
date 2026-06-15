@@ -472,4 +472,21 @@ https://portalrbv.com.br/…</div>
 14:40:25 [RadarNotificador] 2 já-publicado(s) barrado(s) no ATO (match síncrono)
 14:40:26 digest enviado: 4 novos — SEM 68-anos, SEM fogos</div>
 <div class="li">• Custo do ciclo: <b>US$ 2,07</b> (100% claude-opus-4-8). Paridade 122/122 · Feed/Fontes/Radar 200 · aceite (b)(c)(d) ok; (a) 1 item (#138868 Jorginho/tainha/Lula) que o Opus reconfirmou regional/quente legítimo (heurístico pega "Lula").</div>
+<div class="sp"></div>
+<h2>Canal Instagram direto ao juiz — 2026-06-15</h2>
+<div class="sp"></div>
+<p><b>Diagnóstico:</b> dos 143 itens origem=instagram, <b>127 nunca foram julgados</b> (eh_pauta null) — 88% do canal o juiz nem olhou. O gate coarse foi calibrado pra MANCHETE de portal; o scraper de IG salva a 1ª linha da LEGENDA como "título" (emoji/horário/frase solta), que quase nunca passa o coarse. O canal morria ANTES do juiz.</p>
+<div class="sp"></div>
+<div class="li">• <b>Roteamento:</b> em jrlink:juiz todo item origem=instagram não-julgado entra DIRETO no juiz, sem score coarse. Feed/WhatsApp seguem só pela via de cluster-rep — paridade 122/122 confirma o coarse intocado.</div>
+<div class="li">• <b>Juiz lê legenda:</b> aviso no INPUT do item quando origem=instagram (avalie o ASSUNTO, não o formato). Prompt BASE intocado (md5 <code>4c4e394b…</code>).</div>
+<div class="li">• <b>Guardas valem:</b> fato-velho no processarLotes p/ todo item; match já-publicado no notificador sobre todo enviável. Nova via <code>--ig-backlog</code> julga o backlog sem re-clusterizar.</div>
+<div class="sp"></div>
+<table>
+<tr><th></th><th>NULL</th><th>eh_pauta=0</th><th>eh_pauta=1</th></tr>
+<tr><td><b>ANTES</b></td><td>127</td><td>8</td><td>9</td></tr>
+<tr><td><b>DEPOIS</b></td><td><b>0</b></td><td>95</td><td><b>49</b></td></tr>
+</table>
+<div class="li">• Backlog: <b>127 IG julgados, 0 falhas, custo US$ 2,57</b> (Opus, few-shot 12). 22 viraram quente.</div>
+<div class="li">• Aprovados lendo a legenda: vereadores R$17mil → <b>quente 100</b> (indignação); pescador chora tainha → <b>89</b> (emoção, Bombinhas); resgate tartaruga → <b>88</b> (feel-good); Câmara São José R$33mi → <b>84</b>. Rejeitados (eh_pauta=0): "novo tempo movendo Palhoça" (institucional), "ixtepora tava brava 😂" (meme), "que coisa mais linda raça" (vago).</div>
+<div class="li">• <b>Guardas sobre IG:</b> só 1 dos 22 IG quentes notificou (messageId 3EB0556…) — 21 barrados por idade/já-publicado/já-notificado. Fato-velho rodou nos 127 (4 sinalizados). Feed/WhatsApp inalterados (mudança aditiva na seleção).</div>
 <div class="sp"></div></div></body></html>

@@ -560,3 +560,42 @@ Logs reais do ciclo (`laravel.log`):
 O match síncrono pegou **2 já-publicados NOVOS** no ato (além do caso-teste) que a corrida de 30min teria vazado. O digest das 14:40 saiu com 4 eventos legítimos, **sem os "68 anos"** (já marcado/notificado) e **sem a lei de fogos** (rebaixada a frio). **Custo do ciclo: US$ 2,07** (juiz US$ 0,56 · merge US$ 0,26 · match publicado US$ 1,25 — 10 chamadas/192 pares), 100% `claude-opus-4-8`.
 
 **Resumo:** caso "68 anos" casa e é bloqueado ✓ · lei de fogos rebaixada a frio ✓ · few-shot logando 12 exemplos em run real ✓ · janela do `publicados-sync` = 30 dias ✓ · paridade WhatsApp **122/122** ✓ · Feed/Fontes/Radar **200** ✓ · md5 do prompt BASE idêntico (`4c4e394b…`) ✓ · 1 ciclo do scheduler observado com digest **sem 68-anos e sem fogos** ✓. **Aceite Fase 2: (b)(c)(d) passam; (a) sinaliza 1 item** — #138868 *"Jorginho Mello critica veto à pesca da tainha e cobra governo Lula"* — que o **Opus re-julgou (de novo) como regional/quente legítimo** (governador de SC sobre a tainha de SC, DNA viral do perfil): não é vazamento nacional, é o heurístico do teste pegando a palavra "Lula" numa pauta regional verdadeira; veredito do Opus mantido, não falsificado.
+
+---
+
+## Canal Instagram direto ao juiz — 2026-06-15
+
+**Diagnóstico:** dos 143 itens `origem=instagram`, **127 nunca foram julgados** (`eh_pauta` null) — 88% do canal o juiz nem olhou. Causa-raiz: o gate coarse foi calibrado pra **manchete de portal**, e o scraper de IG salva a 1ª linha da **legenda** como "título" (`"06:30 am Praia da Tainha"`, `"PQ FOGEM DO POVO?"`, `"A ixtepora tava brava 😂"`), que quase nunca passa o coarse — o canal morria **antes** do juiz. Não era o juiz penalizando IG; era o coarse cegando o canal (dos 17 que passavam, 9 viravam pauta — taxa boa).
+
+**Correção (só na seleção do juiz — feed/WhatsApp intocados):**
+1. **Roteamento por origem:** em `jrlink:juiz`, todo item `origem=instagram` não-julgado entra **direto no juiz**, sem exigir score coarse. Feed/WhatsApp continuam só pela via de cluster-rep (coarse → cluster → juiz no representante) — **paridade WhatsApp 122/122** confirma que o classificador coarse não foi tocado. Dedup do display segue por cluster (radar mostra 1 card por evento).
+2. **Juiz lê legenda, não manchete:** aviso curto **no INPUT do item** quando `origem=instagram` (*"é a legenda de um post de Instagram, pode começar com emoji/horário/frase solta — avalie o ASSUNTO, não o formato"*). O **prompt BASE do juiz não muda** (md5 `4c4e394bd59107f53c0c82b826533a26`, few-shot OFF, idêntico).
+3. **Guardas continuam valendo:** o `FatoVelho` roda no `processarLotes` para **todo** item (inclusive IG); o match já-publicado (`PublicadoMatcher`) roda no `planejar()` do notificador sobre **todo** enviável. IG de fato já publicado ou de fato velho não vaza.
+
+Nova via `jrlink:juiz --ig-backlog` julga o backlog de IG (itens mais antigos que a janela, que o clustering pesado de 168h não alcança — estourava memória) **direto, sem re-clusterizar** (os itens já têm `cluster_id`). O loop de julgamento foi extraído pra `processarLotes`, compartilhado entre o ciclo normal e o backlog.
+
+### Antes/depois (canal Instagram julgado)
+
+| | NULL (não julgado) | eh_pauta=0 (não-pauta) | eh_pauta=1 (pauta) |
+|---|---|---|---|
+| **ANTES** | 127 | 8 | 9 |
+| **DEPOIS** | **0** | 95 | **49** |
+
+Backlog: **127 IG julgados, 0 falhas, 4 com guarda de fato-velho, custo US$ 2,57** (100% `claude-opus-4-8`, few-shot 12 exemplos). **22 IG viraram quente.**
+
+### Exemplos reais de IG julgados
+
+Pautas que o juiz **aprovou** lendo a legenda:
+- *"Com salários superiores a R$ 17 mil e vale-alimentação…"* → **quente 100** (indignação): "política local com indignação direta — o que mais engaja".
+- *"Um morador de Quatro Ilhas chorou ao ver o peixe passar…"* → **quente 89** (emoção, Bombinhas): "pescador chora pela tainha — DNA exato de comoção".
+- *"Resgate da tartaruga nos 150 metros ✌🏼"* → **quente 88** (feel-good, Florianópolis).
+- *"Câmara de São José que CUSTA AOS COFRES PÚBLICOS MAIS DE R$ 33.000.000"* → **quente 84** (indignação).
+
+Legendas que o juiz **rejeitou** (eh_pauta=0): *"Um novo tempo está movendo Palhoça…"* → "propaganda institucional, sem fato"; *"A ixtepora tava brava 😂"* → "meme de humor, sem fato jornalístico"; *"Que coisa mais linda raça"* → "legenda vaga feel-good, sem pauta". O juiz lê a legenda e decide bem.
+
+### Guardas cobrindo IG
+- **Já-publicado:** o notificador confronta IG quente contra `jr_publicado` no ato de notificar (mesmo `PublicadoMatcher` do feed). No backlog, **só 1 dos 22 IG quentes foi notificado** (`messageId 3EB055602FEC0A638D26DB`) — os outros 21 barrados por idade (>12h), já-notificado ou já-publicado. Nenhum IG já-publicado/fato-velho vazou pro digest.
+- **Fato-velho:** rodou nos 127 (4 sinalizados), igual feed/WhatsApp.
+
+### Feed/WhatsApp inalterados
+A mudança é **aditiva na seleção do juiz** — só acrescenta itens de IG à fila. Feed e WhatsApp seguem a rota de sempre (coarse → cluster → juiz no representante). Paridade **122/122**, Feed/Fontes/Radar **200**, md5 do prompt base idêntico.
