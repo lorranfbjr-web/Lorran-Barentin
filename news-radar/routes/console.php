@@ -32,3 +32,9 @@ Schedule::command('jrlink:instagram-poll')
 Schedule::command('jrlink:publicados-sync')
     ->everyThirtyMinutes()
     ->withoutOverlapping();
+
+// v5 — agrupamento por assunto (Opus) pra vitrine Radar; roda DEPOIS do juiz,
+// no ciclo (nunca no request da página). Custo/latência do Opus vivem aqui.
+Schedule::command('jrlink:assuntos')
+    ->cron('10,40 * * * *')
+    ->withoutOverlapping();
