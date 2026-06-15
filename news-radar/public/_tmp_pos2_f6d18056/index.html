@@ -447,4 +447,29 @@ https://atualfm.com.br/… · https://clickxaxim.com.br/… · https://visornoti
 Santa Catarina proíbe fogos de artifício com estampido em todo o estado
 https://portalrbv.com.br/…</div>
 <div class="li">• 5 portais da MESMA história = <b>1 bloco</b>; evento de 1 portal simples; <b>criança de 2 anos fora</b> (já-publicado, criança no plano: false).</div>
+<div class="sp"></div>
+<h2>Match no ato + fato-velho + few-shot — 2026-06-15</h2>
+<div class="sp"></div>
+<h3>A — match no ATO de notificar (corrige já-publicado vazando)</h3>
+<div class="sp"></div>
+<div class="li">• Causa: <code>publicados-sync</code> (30min) só confronta o lote quente do momento; o juiz julgou o evento "68 anos" quente às 13:35 (após o snapshot das 13:31) e o digest disparou às 13:37 — ninguém reconferiu no ato.</div>
+<div class="li">• Correção: o <code>RadarNotificador</code> confronta cada enviável contra <code>jr_publicado</code> (30 dias) AGORA, antes de enviar — motor compartilhado <code>PublicadoMatcher</code> (pré-filtro largo + Opus) com tokens numéricos fortes ("68 anos"). Match → marca o cluster e não notifica.</div>
+<div class="li">• Prova (evento real, transação): "68 anos" → <b>bloqueados_publicado=1, enviaveis=0</b>, casou com <code>homem-e-condenado-a-mais-de-68-anos-…</code> (13/06). E no ciclo real das 14:40 o match síncrono barrou <b>2 já-publicados NOVOS</b> (assalto R$350 mil Chapecó; condenado estupro São João Batista).</div>
+<div class="sp"></div>
+<h3>B — guarda de fato-velho-redatado</h3>
+<div class="sp"></div>
+<div class="li">• <code>App\Services\Jr\FatoVelho</code>: detecta barato marco legislativo (lei sancionada/em vigor), efeméride/retrospectiva, ou data interna >40d antes do published_at — suprimindo quando o título é desfecho fresco (condenado/preso/morre).</div>
+<div class="li">• O sinal entra pelo INPUT do item (prompt BASE intocado, md5 <code>4c4e394b…</code>) E rebaixa deterministicamente a frio no aplicarVeredito (o LLM não consegue datar a sanção).</div>
+<div class="li">• Prova: lei de fogos (sancionada 20/03) — Opus achou "lei nova", guarda sobrepôs → <b>frio, eh_pauta=0</b>. Só 3/60 quentes sinalizados (68-anos retorna null, é defendido pelo match).</div>
+<div class="sp"></div>
+<h3>C — few-shot: ativo, mas era silencioso</h3>
+<div class="sp"></div>
+<div class="li">• Não estava quebrado — só não logava. <code>JRLINK_JUIZ_FEWSHOT=true</code>, 55 votos, 12 exemplos (2167 chars) no input. Add <code>JuizLlm::fewShotInfo()</code> + log real: <b>"Few-shot: LIGADO — 12 exemplos injetados"</b> (visto no ciclo 14:35). Prompt BASE byte a byte idêntico.</div>
+<div class="sp"></div>
+<div class="li" style="font-family:monospace;white-space:pre-wrap">14:31:10 jrlink:publicados-sync .. 4m 1s DONE (30 dias, Opus)
+14:35:13 jrlink:juiz --hours=48 . 5m 13s DONE
+14:35:38 [JrLinkJuiz] Few-shot: LIGADO — 12 exemplos injetados
+14:40:25 [RadarNotificador] 2 já-publicado(s) barrado(s) no ATO (match síncrono)
+14:40:26 digest enviado: 4 novos — SEM 68-anos, SEM fogos</div>
+<div class="li">• Custo do ciclo: <b>US$ 2,07</b> (100% claude-opus-4-8). Paridade 122/122 · Feed/Fontes/Radar 200 · aceite (b)(c)(d) ok; (a) 1 item (#138868 Jorginho/tainha/Lula) que o Opus reconfirmou regional/quente legítimo (heurístico pega "Lula").</div>
 <div class="sp"></div></div></body></html>

@@ -498,3 +498,65 @@ https://portalrbv.com.br/…
 ```
 
 Confirma o objetivo: 5 portais da MESMA história viraram **1 bloco** ("🔥 5 portais cobrindo"), o evento de 1 portal ficou simples, e a **criança de 2 anos não entrou** (já-publicado, fora do plano — `criança no plano: false`).
+
+---
+
+## Match no ato + fato-velho + few-shot — 2026-06-15
+
+Três falhas reais provadas pelo editor no digest do WhatsApp, com correção e prova de cada uma.
+
+### A — por que o match dos "68 anos" falhou, e como o ATO-DE-NOTIFICAR resolve
+
+O evento *"Homem que matou ex-companheira e namorado dela na frente do filho é condenado a 68 anos de prisão em SC"* vazou pro digest **mesmo o post já estando em `jr_publicado` duas vezes** (slugs `homem-e-condenado-a-mais-de-68-anos-…` 13/06 e `pai-mata-ex-e-o-namorado-…` 14/06). Causa-raiz, confirmada no journal: o `publicados-sync` (30min) confronta o **lote quente do momento**; o juiz julgou esse evento **quente às 13:35**, *depois* do snapshot do sync das 13:31, e o digest disparou **às 13:37** — antes de qualquer recomparação. Ninguém reconferia no instante do envio.
+
+**Correção:** o `RadarNotificador` agora faz uma **checagem síncrona no ATO de notificar** — antes de enviar QUALQUER evento, confronta cada enviável contra `jr_publicado` (janela de **30 dias**, `publicados.janela_match_dias`) com o mesmo motor do sync (pré-filtro largo + decisão do Opus), agora num serviço compartilhado `PublicadoMatcher` com **tokens numéricos fortes** ("68 anos", "33 mi") no pré-filtro. Match → marca `ja_publicado_em` no cluster e **não notifica**.
+
+**Prova (evento real de hoje, simulando a corrida numa transação):**
+```
+evento: Homem que matou ex-companheira e namorado dela… score=95
+enviaveis: 0 | bloqueados_publicado: 1
+68 anos em ENVIAVEIS (vazaria): false
+68 anos em BLOQUEADOS_PUBLICADO (barrado): true
+casou com post: homem-e-condenado-a-mais-de-68-anos-…-diante-do-filho (2026-06-13 10:21:28)
+```
+O evento é barrado no plano do digest e casado ao post de 13/06. Janela do confronto esticada de 72h → **30 dias**.
+
+### B — guarda de fato-velho-redatado
+
+*"Santa Catarina proíbe fogos de artifício com estampido"* entrou como **quente fresca** (score 69), mas a lei foi sancionada **20/03/2026**: um portal re-noticiou e o `published_at` veio recente, então o decaimento achou que era nova. O corpo nem traz a data — descreve como "nova legislação… sancionou a lei… passa a valer". O Opus, sem a data, insiste que é lei nova.
+
+**Correção:** novo `App\Services\Jr\FatoVelho` detecta barato (regex) o fato central antigo: **marco legislativo** (lei sancionada/em vigor/aprovada), **efeméride/retrospectiva**, ou **data interna >40 dias** antes do `published_at` — e **suprime** quando o título já anuncia desfecho fresco (condenado/preso/morre/acidente), pra não pegar crime de 2025 julgado agora. O sinal:
+1. entra pelo **INPUT do item** do juiz (o prompt BASE não muda — md5 `4c4e394b…` idêntico);
+2. **rebaixa deterministicamente a frio** no `aplicarVeredito` (o LLM não consegue datar a sanção, então a heurística é a autoridade pra esse sinal).
+
+**Prova (lei de fogos re-julgada pelo código real):** o Opus disse `eh_pauta=true` (achou a lei nova), mas o guarda sobrepôs → persistido **`temperatura_juiz=frio`, `eh_pauta=0`**, motivo `FATO ANTIGO re-noticiado (marco legislativo…)`. Falso-positivo controlado: só **3/60** dos quentes recentes são sinalizados (o caso "68 anos", por ter título de desfecho fresco, retorna `null` — é defendido pelo match, não pelo guarda).
+
+### C — few-shot: estava ativo, mas silencioso
+
+O grep voltava vazio porque **não havia log** — não porque estava quebrado. Diagnóstico: `JRLINK_JUIZ_FEWSHOT=true`, 55 votos (≥30), e o `blocoCalibracao()` injeta **12 exemplos** reais (2167 chars) no input do juiz. Adicionado `JuizLlm::fewShotInfo()` e o log explícito no `jrlink:juiz`:
+```
+Few-shot: LIGADO — 12 exemplos do feedback injetados no input do juiz.
+```
+O **prompt BASE** segue byte a byte idêntico (md5 `4c4e394bd59107f53c0c82b826533a26`, len 4220, com few-shot OFF) — a calibração entra como bloco de INPUT, não reescreve o template.
+
+### Validação
+
+**Ciclo real do scheduler observado (14:30–14:40, código novo):**
+```
+14:30:19 news-radar:dispatch .. 478ms DONE
+14:30:20 jrlink:bridge-news ......... 2s DONE
+14:30:23 jrlink:instagram-poll ..... 47s DONE
+14:31:10 jrlink:publicados-sync .. 4m 1s DONE   (confronto 30 dias, Opus)
+14:35:13 jrlink:juiz --hours=48 . 5m 13s DONE   (few-shot + fato-velho)
+```
+Logs reais do ciclo (`laravel.log`):
+```
+14:35:38 [JrLinkJuiz] Few-shot: LIGADO — 12 exemplos do feedback injetados no input do juiz.
+14:40:25 [RadarNotificador] barrado já-publicado: "Empresário é rendido… R$ 350 mil rou…" ← empresario-perde-350-mil-assalto-relampago-chapeco
+14:40:25 [RadarNotificador] barrado já-publicado: "Homem condenado a 20 anos por estupro de vulnerável é preso…" ← condenado-estupro-vulneravel-preso-…-sao-joao-batista
+14:40:25 [RadarNotificador] 2 evento(s) já-publicado(s) barrado(s) no ATO de notificar (match síncrono)
+14:40:26 [RadarNotificador] digest enviado: 4 novos (4 na mensagem) messageId=3EB07057B8FFC374F068F2
+```
+O match síncrono pegou **2 já-publicados NOVOS** no ato (além do caso-teste) que a corrida de 30min teria vazado. O digest das 14:40 saiu com 4 eventos legítimos, **sem os "68 anos"** (já marcado/notificado) e **sem a lei de fogos** (rebaixada a frio). **Custo do ciclo: US$ 2,07** (juiz US$ 0,56 · merge US$ 0,26 · match publicado US$ 1,25 — 10 chamadas/192 pares), 100% `claude-opus-4-8`.
+
+**Resumo:** caso "68 anos" casa e é bloqueado ✓ · lei de fogos rebaixada a frio ✓ · few-shot logando 12 exemplos em run real ✓ · janela do `publicados-sync` = 30 dias ✓ · paridade WhatsApp **122/122** ✓ · Feed/Fontes/Radar **200** ✓ · md5 do prompt BASE idêntico (`4c4e394b…`) ✓ · 1 ciclo do scheduler observado com digest **sem 68-anos e sem fogos** ✓. **Aceite Fase 2: (b)(c)(d) passam; (a) sinaliza 1 item** — #138868 *"Jorginho Mello critica veto à pesca da tainha e cobra governo Lula"* — que o **Opus re-julgou (de novo) como regional/quente legítimo** (governador de SC sobre a tainha de SC, DNA viral do perfil): não é vazamento nacional, é o heurístico do teste pegando a palavra "Lula" numa pauta regional verdadeira; veredito do Opus mantido, não falsificado.
