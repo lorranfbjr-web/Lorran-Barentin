@@ -112,6 +112,14 @@ class JrLinkJuiz extends Command
         $juiz = new JuizLlm(null, $this->option('driver') ?: null);
         $this->info(sprintf('Driver: %s · modelo: %s', $juiz->driver(), $juiz->modelo()));
 
+        // ── few-shot (calibração do editor): prova explícita de que entra no input ──
+        $fs = $juiz->fewShotInfo();
+        $msgFs = $fs['enabled']
+            ? sprintf('Few-shot: LIGADO — %d exemplos do feedback injetados no input do juiz.', $fs['exemplos'])
+            : 'Few-shot: desligado (JRLINK_JUIZ_FEWSHOT).';
+        $this->info($msgFs);
+        \Illuminate\Support\Facades\Log::info('[JrLinkJuiz] ' . $msgFs);
+
         // ── merge assistido por LLM: pares limítrofes que a similaridade não decide ──
         $fundidos = $this->mergeLlmClusters($clusterer, $byId, $juiz);
         if ($fundidos > 0) {
@@ -121,14 +129,29 @@ class JrLinkJuiz extends Command
         // ── camada 3: juiz LLM nos pendentes ──
 
         $clf = new PautaClassifier();
+        $fatoVelho = new \App\Services\Jr\FatoVelho();
         $julgados = 0;
         $falhas = 0;
+        $velhoPorId = [];
         foreach (array_chunk($pendentes, $lote) as $chunk) {
-            $itens = array_map(fn ($r) => [
-                'id' => (int) $r->id,
-                'titulo' => (string) $r->titulo,
-                'lead' => $clf->corpoFromMarkdown($r->markdown),
-            ], $chunk);
+            $itens = array_map(function ($r) use ($clf, $fatoVelho, &$velhoPorId) {
+                $lead = $clf->corpoFromMarkdown($r->markdown);
+                // GUARDA DE FATO-VELHO: a instrução entra pelo INPUT do item (o
+                // prompt BASE do juiz não muda). Heurística barata sinaliza no
+                // input pro Opus raciocinar E rebaixa de forma determinística no
+                // aplicarVeredito (o corpo às vezes afirma "lei nova" e o LLM não
+                // tem como datar a sanção — a heurística é a autoridade aqui).
+                $sinal = $fatoVelho->analisar((string) $r->titulo, (string) $r->markdown, $r->data_pub ?: $r->created_at);
+                if ($sinal !== null) {
+                    $velhoPorId[(int) $r->id] = $sinal;
+                    $lead .= "\n\n[ALERTA EDITORIAL — possível FATO ANTIGO apenas re-noticiado: {$sinal}. "
+                        . 'Se o acontecimento central NÃO for recente (lei já em vigor há tempo, efeméride, '
+                        . 'retrospectiva, recapitulação de fato anterior), marque eh_pauta=false mesmo que a '
+                        . 'data de publicação seja recente.]';
+                }
+
+                return ['id' => (int) $r->id, 'titulo' => (string) $r->titulo, 'lead' => $lead];
+            }, $chunk);
 
             try {
                 $vereditos = $juiz->julgarLote($itens);
@@ -139,7 +162,7 @@ class JrLinkJuiz extends Command
             }
 
             foreach ($chunk as $r) {
-                $this->aplicarVeredito($r, $vereditos[(int) $r->id], $juiz, $promptVersao, $cfg);
+                $this->aplicarVeredito($r, $vereditos[(int) $r->id], $juiz, $promptVersao, $cfg, $velhoPorId[(int) $r->id] ?? null);
                 $julgados++;
             }
             $this->line(sprintf('  julgados %d/%d…', $julgados, count($pendentes)));
@@ -150,6 +173,9 @@ class JrLinkJuiz extends Command
         $this->newLine();
         $this->info(sprintf('Juiz concluído: %d julgados · %d lotes com falha · custo (últimos 30min): US$ %.4f',
             $julgados, $falhas, (float) $custo));
+        if (count($velhoPorId) > 0) {
+            $this->info(sprintf('Guarda fato-velho: %d item(ns) sinalizados (alerta no input + rebaixados a frio se vinham quentes).', count($velhoPorId)));
+        }
         $this->tabelaTemperaturas();
 
         // ── notificação (digest de quentes novos pro Raspador; kill switch por env) ──
@@ -328,7 +354,7 @@ class JrLinkJuiz extends Command
     }
 
     /** Aplica âncora GA4 + regras de temperatura e grava o veredito. */
-    private function aplicarVeredito(object $r, array $v, JuizLlm $juiz, string $promptVersao, array $cfg): void
+    private function aplicarVeredito(object $r, array $v, JuizLlm $juiz, string $promptVersao, array $cfg, ?string $sinalVelho = null): void
     {
         $path = (string) parse_url((string) $r->url, PHP_URL_PATH);
         $tema = TituloFeatures::extract((string) $r->titulo, $path)['tema'];
@@ -336,6 +362,9 @@ class JrLinkJuiz extends Command
         $ajusteTema = (int) ($cfg['ajuste_tema'][$tema] ?? 0);
         $ajusteGancho = (int) ($cfg['ajuste_gancho'][$v['tipo_gancho']] ?? 0);
         $scoreFinal = max(0, min(100, $v['score_llm'] + $ajusteTema + $ajusteGancho));
+
+        $ehPauta = $v['eh_pauta'];
+        $motivo = $v['motivo'];
 
         if (! $v['eh_pauta'] || $v['escopo'] === 'nacional') {
             $temperatura = 'frio';
@@ -345,16 +374,26 @@ class JrLinkJuiz extends Command
             $temperatura = $scoreFinal >= (int) $cfg['corte_quente_final'] ? 'quente' : 'frio';
         }
 
+        // GUARDA DE FATO-VELHO (determinística): o LLM às vezes não consegue datar
+        // o fato (corpo afirma "lei nova" sem dizer quando sancionou). Se a
+        // heurística sinalizou fato antigo, rebaixa pra frio independente do
+        // veredito/score — o radar é de pauta NOVA.
+        if ($sinalVelho !== null && $temperatura === 'quente') {
+            $temperatura = 'frio';
+            $ehPauta = false;
+            $motivo = 'FATO ANTIGO re-noticiado (' . $sinalVelho . '). ' . $motivo;
+        }
+
         DB::table('jr_link_extracao')->where('id', $r->id)->update([
             'escopo' => $v['escopo'],
-            'eh_pauta' => $v['eh_pauta'],
+            'eh_pauta' => $ehPauta,
             'tipo_gancho' => $v['tipo_gancho'],
             'cidade_llm' => $v['cidade'],
             'score_llm' => $v['score_llm'],
             'score_editorial' => $scoreFinal,
             'tema_ga4' => $tema,
             'temperatura_juiz' => $temperatura,
-            'juiz_motivo' => $v['motivo'],
+            'juiz_motivo' => mb_substr($motivo, 0, 400),
             'juiz_modelo' => $juiz->modelo(),
             'juiz_prompt_versao' => $promptVersao,
             'juiz_julgado_em' => now(),

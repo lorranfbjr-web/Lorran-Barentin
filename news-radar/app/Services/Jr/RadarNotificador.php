@@ -3,6 +3,7 @@
 namespace App\Services\Jr;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -61,7 +62,7 @@ class RadarNotificador
      * publicação original (> notificacao.max_idade_horas — catch-up de matéria
      * velha não vira WhatsApp). Já-publicado no site NUNCA entra (v4.1).
      *
-     * @return array{enviaveis: \Illuminate\Support\Collection, bloqueados_idade: \Illuminate\Support\Collection}
+     * @return array{enviaveis: Collection, bloqueados_idade: Collection, bloqueados_publicado: Collection, match_pub: array}
      */
     public function planejar(): array
     {
@@ -85,7 +86,42 @@ class RadarNotificador
             return $idade === null || $idade <= $maxIdade;
         });
 
-        return ['enviaveis' => $enviaveis->values(), 'bloqueados_idade' => $velhos->values()];
+        // CHECAGEM SÍNCRONA NO ATO DE NOTIFICAR (corrige a corrida do publicados-
+        // sync de 30min): confronta cada enviável contra jr_publicado AGORA — não
+        // confia que o sync já marcou. Match → sai do digest (e é marcado no DB
+        // por notificarNovos).
+        $matchPub = $this->confirmarPublicados($enviaveis->values());
+        [$publicados, $enviaveis] = $enviaveis->partition(fn ($r) => isset($matchPub[$r->id]));
+
+        return [
+            'enviaveis' => $enviaveis->values(),
+            'bloqueados_idade' => $velhos->values(),
+            'bloqueados_publicado' => $publicados->values(),
+            'match_pub' => $matchPub,
+        ];
+    }
+
+    /**
+     * Match síncrono dos eventos prestes a notificar contra jr_publicado (janela
+     * de DIAS): pré-filtro largo + decisão do Opus (PublicadoMatcher), o mesmo
+     * motor do publicados-sync. Retorna [evento_id => post casado].
+     *
+     * @return array<int,object>
+     */
+    private function confirmarPublicados(Collection $eventos): array
+    {
+        if ($eventos->isEmpty()) {
+            return [];
+        }
+        $dias = (int) config('jrlink.publicados.janela_match_dias', 30);
+        $cap = (int) config('jrlink.publicados.llm_cap_notificar', 40);
+        $alvos = DB::table('jr_publicado')
+            ->where('publicado_em', '>=', Carbon::now()->subDays($dias)->toDateTimeString())
+            ->get(['slug', 'titulo', 'publicado_em'])
+            ->map(fn ($p) => (object) ['chave' => $p->slug, 'titulo' => $p->titulo,
+                'quando' => $p->publicado_em, 'extra' => $p->slug]);
+
+        return (new PublicadoMatcher())->casar($eventos, $alvos, new JuizLlm(), $cap, 'site');
     }
 
     /** Idade em horas de um datetime string heterogêneo; null se imprestável. */
@@ -117,6 +153,14 @@ class RadarNotificador
 
         $plano = $this->planejar();
         $novos = $plano['enviaveis'];
+
+        // JÁ PUBLICADO detectado NO ATO (a corrida que o sync de 30min perdia):
+        // marca ja_publicado_em no cluster inteiro e NÃO notifica.
+        if ($plano['bloqueados_publicado']->isNotEmpty()) {
+            $this->marcarPublicados($plano['bloqueados_publicado'], $plano['match_pub']);
+            Log::info(sprintf('[RadarNotificador] %d evento(s) já-publicado(s) barrado(s) no ATO de notificar (match síncrono)',
+                $plano['bloqueados_publicado']->count()));
+        }
 
         // Velho demais = tratado (marca sem enviar) — não acumula no candidato
         // de todo ciclo nem nunca vira WhatsApp. Mesma semântica de digest.
@@ -262,6 +306,32 @@ class RadarNotificador
         }
 
         return null;
+    }
+
+    /**
+     * Marca como já-publicado (cluster inteiro) os eventos casados no ATO de
+     * notificar — mesmo efeito do publicados-sync, mas síncrono. Some do Radar
+     * e nunca mais entra no digest.
+     *
+     * @param  array<int,object>  $matchPub  evento_id => post casado
+     */
+    private function marcarPublicados(Collection $eventos, array $matchPub): void
+    {
+        foreach ($eventos as $r) {
+            $alvo = $matchPub[$r->id] ?? null;
+            if (! $alvo) {
+                continue;
+            }
+            $q = $r->cluster_id
+                ? DB::table('jr_link_extracao')->where('cluster_id', $r->cluster_id)
+                : DB::table('jr_link_extracao')->where('id', $r->id);
+            $q->whereNull('ja_publicado_em')->update([
+                'ja_publicado_em' => $alvo->quando,
+                'ja_publicado_slug' => $alvo->extra,
+            ]);
+            Log::info(sprintf('[RadarNotificador] barrado já-publicado: "%s" ← %s',
+                mb_strimwidth((string) $r->titulo, 0, 60), $alvo->extra));
+        }
     }
 
     /** Marca os selecionados E os membros dos clusters deles (história inteira). */

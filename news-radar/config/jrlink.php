@@ -580,9 +580,16 @@ return [
     */
     'publicados' => [
         'endpoint' => 'https://controle.jornalrazao.com/graphql',
-        'janela_horas' => 72,     // posts do WP puxados por ciclo
+        'janela_horas' => 72,     // posts do WP puxados do WPGraphQL por ciclo (mantém o espelho fresco)
         'janela_eventos_horas' => 168, // estoque de eventos quentes confrontado
+        // v4.3: o CONFRONTO de match é contra a tabela jr_publicado (acumulada)
+        // nos últimos N dias — condenações/desdobramentos saem dias depois do
+        // fato; janela curta perdia o "já publicamos isso semana passada".
+        'janela_match_dias' => 30,
         'llm_cap_pares' => 80,    // pares evento×post julgados pelo LLM por ciclo (0 desliga)
+        // Cap específico da checagem SÍNCRONA no ato de notificar (poucos eventos
+        // por digest — generoso pra nunca deixar passar).
+        'llm_cap_notificar' => 40,
         // Pré-filtro (gerador de candidatos): generoso de propósito — o LLM é
         // quem corta. min_overlap baixo + janela de candidatos por entidade rara.
         'prefiltro_overlap_min' => 0.12, // sobreposição idf mínima evento×post

@@ -2,12 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Services\Jr\EventClusterer;
 use App\Services\Jr\JuizLlm;
-use App\Services\Jr\PautaClassifier;
+use App\Services\Jr\PublicadoMatcher;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -80,16 +78,29 @@ class JrPublicadosSync extends Command
 
         $capLlm = (int) $cfg['llm_cap_pares'];
         $juiz = new JuizLlm();
+        $matcher = new PublicadoMatcher();
 
-        // ── 3. confronto WP × eventos (usa o lote recém-buscado — funciona
-        // também no --dry, que não grava em jr_publicado) ──
-        $matchesWp = $this->casar(
-            $eventos->whereNull('ja_publicado_em')->values(),
-            collect($posts)->map(fn ($p) => (object) [
-                'chave' => $p['slug'], 'titulo' => $p['titulo'],
-                'quando' => $p['publicado_em'], 'extra' => $p['slug'],
-            ]),
-            $juiz, $capLlm, 'site'
+        // ── 3. confronto eventos × jr_publicado (TABELA acumulada, janela de
+        // match em DIAS — não só o lote recém-buscado: condenação/desdobramento
+        // sai dias depois do fato). No --dry usa o lote recém-buscado + a tabela. ──
+        $diasMatch = (int) ($cfg['janela_match_dias'] ?? 30);
+        $alvosSite = DB::table('jr_publicado')
+            ->where('publicado_em', '>=', Carbon::now()->subDays($diasMatch)->toDateTimeString())
+            ->get(['slug', 'titulo', 'publicado_em'])
+            ->map(fn ($p) => (object) ['chave' => $p->slug, 'titulo' => $p->titulo,
+                'quando' => $p->publicado_em, 'extra' => $p->slug]);
+        if ($dry && $posts) {
+            // no dry os posts buscados podem ainda não estar na tabela — soma-os.
+            $jaTem = $alvosSite->pluck('chave')->flip();
+            $alvosSite = $alvosSite->concat(collect($posts)
+                ->reject(fn ($p) => isset($jaTem[$p['slug']]))
+                ->map(fn ($p) => (object) ['chave' => $p['slug'], 'titulo' => $p['titulo'],
+                    'quando' => $p['publicado_em'], 'extra' => $p['slug']]))->values();
+        }
+        $this->info(sprintf('Confronto: %d eventos quentes × %d posts publicados (%d dias).',
+            $eventos->whereNull('ja_publicado_em')->count(), $alvosSite->count(), $diasMatch));
+        $matchesWp = $matcher->casar(
+            $eventos->whereNull('ja_publicado_em')->values(), $alvosSite, $juiz, $capLlm, 'site'
         );
 
         // ── 4. confronto IG × eventos (legenda = 1ª linha como título) ──
@@ -103,7 +114,7 @@ class JrPublicadosSync extends Command
                     'quando' => $p->postado_em, 'extra' => $p->shortcode];
             })
             ->filter(fn ($p) => mb_strlen($p->titulo) >= 20)->values();
-        $matchesIg = $this->casar($eventos->whereNull('ja_ig_em')->values(), $alvosIg, $juiz, $capLlm, 'instagram');
+        $matchesIg = $matcher->casar($eventos->whereNull('ja_ig_em')->values(), $alvosIg, $juiz, $capLlm, 'instagram');
 
         // ── 5. efeitos ──
         $nWp = $this->marcar($matchesWp, 'ja_publicado_em', 'ja_publicado_slug', $dry, '✅ site');
@@ -160,217 +171,6 @@ class JrPublicadosSync extends Command
                 break;
             }
             $after = (string) $r->json('data.posts.pageInfo.endCursor');
-        }
-
-        return $out;
-    }
-
-    /**
-     * Casa eventos × alvos (posts WP ou IG). PRÉ-FILTRO largo gera candidatos
-     * (top-K posts por evento por overlap idf título×título + slug); a DECISÃO
-     * de cada candidato é SEMPRE do LLM (Opus) em lote.
-     *
-     * @return array<int,object> evento_id => alvo (com quando/extra/titulo)
-     */
-    private function casar($eventos, $alvos, JuizLlm $juiz, int $capLlm, string $rotulo): array
-    {
-        if ($eventos->isEmpty() || $alvos->isEmpty()) {
-            return [];
-        }
-
-        $cfg = config('jrlink.publicados');
-        $overlapMin = (float) ($cfg['prefiltro_overlap_min'] ?? 0.12);
-        $maxCand = (int) ($cfg['prefiltro_max_cand_por_evento'] ?? 6);
-        $clusterer = new EventClusterer();
-
-        // Tokens: eventos pelo título; alvos pelo título + palavras do SLUG
-        // (carregam cidade/ângulo que o título às vezes omite). DF/IDF sobre o
-        // corpus combinado pra ponderar entidade rara > vocabulário comum.
-        $evTokens = [];
-        foreach ($eventos as $i => $e) {
-            $evTokens[$i] = $clusterer->tokens((string) $e->titulo);
-        }
-        $alTokens = [];
-        $alExtraTxt = [];
-        foreach ($alvos as $j => $a) {
-            $slugTxt = $rotulo === 'site' ? ' ' . str_replace('-', ' ', (string) $a->extra) : '';
-            $alTokens[$j] = $clusterer->tokens(((string) $a->titulo) . $slugTxt);
-            $alExtraTxt[$j] = trim(str_replace('-', ' ', $rotulo === 'site' ? (string) $a->extra : ''));
-        }
-
-        $df = [];
-        $docs = 0;
-        foreach ([$evTokens, $alTokens] as $conj) {
-            foreach ($conj as $tks) {
-                $docs++;
-                foreach (array_keys($tks) as $t) {
-                    $df[$t] = ($df[$t] ?? 0) + 1;
-                }
-            }
-        }
-        $idf = [];
-        foreach ($df as $t => $d) {
-            $idf[$t] = log(1 + $docs / $d);
-        }
-
-        // Índice invertido nos tokens dos alvos (só compara pares que partilham token).
-        $inv = [];
-        foreach ($alTokens as $j => $tks) {
-            foreach (array_keys($tks) as $t) {
-                $inv[$t][] = $j;
-            }
-        }
-
-        // Candidatos generosos: top-K alvos por evento acima do overlap mínimo.
-        $pares = [];
-        foreach ($eventos as $i => $e) {
-            $somaE = 0.0;
-            foreach (array_keys($evTokens[$i]) as $t) {
-                $somaE += $idf[$t] ?? 0;
-            }
-            if ($somaE <= 0) {
-                continue;
-            }
-            $cand = [];
-            $vistosJ = [];
-            foreach (array_keys($evTokens[$i]) as $t) {
-                foreach ($inv[$t] ?? [] as $j) {
-                    if (isset($vistosJ[$j])) {
-                        continue;
-                    }
-                    $vistosJ[$j] = true;
-                    $shared = 0.0;
-                    $somaA = 0.0;
-                    foreach (array_keys($alTokens[$j]) as $ta) {
-                        $somaA += $idf[$ta] ?? 0;
-                    }
-                    foreach (array_keys($evTokens[$i]) as $te) {
-                        if (isset($alTokens[$j][$te])) {
-                            $shared += $idf[$te] ?? 0;
-                        }
-                    }
-                    $ov = ($somaA > 0) ? $shared / min($somaE, $somaA) : 0.0;
-                    if ($ov >= $overlapMin) {
-                        $cand[$j] = $ov;
-                    }
-                }
-            }
-            arsort($cand);
-            foreach (array_slice(array_keys($cand), 0, $maxCand, true) as $j) {
-                $pares[] = ['ei' => $i, 'aj' => $j, 'overlap' => round($cand[$j], 3)];
-            }
-        }
-
-        // Cache de "não" (7d) evita re-perguntar o mesmo par a cada ciclo de 30min.
-        $pares = array_values(array_filter($pares, function ($p) use ($eventos, $alvos) {
-            return Cache::get($this->chavePar((int) $eventos[$p['ei']]->id, $alvos[$p['aj']])) !== false;
-        }));
-
-        // Ordena por overlap desc e aplica o cap por ciclo (os mais promissores primeiro).
-        usort($pares, fn ($a, $b) => $b['overlap'] <=> $a['overlap']);
-        if ($capLlm > 0 && count($pares) > $capLlm) {
-            $pares = array_slice($pares, 0, $capLlm);
-        }
-
-        $matches = [];
-        if ($pares && $capLlm > 0) {
-            $itens = [];
-            foreach ($pares as $n => $p) {
-                $e = $eventos[$p['ei']];
-                $a = $alvos[$p['aj']];
-                $itens[$n] = [
-                    'evento' => (string) $e->titulo,
-                    'evento_lead' => $this->lead($e),
-                    'alvo' => (string) $a->titulo . ($alExtraTxt[$p['aj']] !== '' ? ' (' . $alExtraTxt[$p['aj']] . ')' : ''),
-                ];
-            }
-            $vereditos = $this->julgarMesmoFato($juiz, $itens, $rotulo);
-            foreach ($pares as $n => $p) {
-                $eid = (int) $eventos[$p['ei']]->id;
-                $alvo = $alvos[$p['aj']];
-                if ($vereditos[$n] ?? false) {
-                    if (! isset($matches[$eid])) {
-                        $matches[$eid] = $alvo;
-                    }
-                    Log::info(sprintf('[PublicadosSync] LLM confirmou MESMO FATO (%s): "%s" = "%s"',
-                        $rotulo, mb_strimwidth((string) $eventos[$p['ei']]->titulo, 0, 70), mb_strimwidth((string) $alvo->titulo, 0, 70)));
-                } elseif (array_key_exists($n, $vereditos)) {
-                    Cache::put($this->chavePar($eid, $alvo), false, now()->addDays(7));
-                }
-            }
-        }
-
-        return $matches;
-    }
-
-    /** Lead curto do evento (1ª frase real do markdown) pra dar contexto ao LLM. */
-    private function lead(object $e): string
-    {
-        if (empty($e->markdown)) {
-            return '';
-        }
-        $corpo = (new PautaClassifier())->corpoFromMarkdown((string) $e->markdown);
-
-        return mb_substr(trim(preg_replace('/\s+/u', ' ', $corpo)), 0, 240);
-    }
-
-    private function chavePar(int $eventoId, object $alvo): string
-    {
-        return 'jrpub:nao:' . $eventoId . ':' . md5((string) $alvo->chave);
-    }
-
-    /**
-     * Lote LLM "MESMO FATO? sim/não" — prompt PRÓPRIO deste comando (o prompt do
-     * juiz não muda). A decisão compara fato/pessoas/lugar, NÃO as palavras das
-     * manchetes. Roda no modelo da função match_publicado (Opus). Logado via
-     * completarJson como publicado_match.
-     *
-     * @param  array<int,array{evento:string,evento_lead:string,alvo:string}>  $itens
-     * @return array<int,bool> por índice
-     */
-    private function julgarMesmoFato(JuizLlm $juiz, array $itens, string $rotulo): array
-    {
-        // Lotes de 20 pares: prompt focado preserva a precisão do Opus (lista
-        // longa demais degrada). Cada lote = 1 chamada/1 log publicado_match.
-        $out = [];
-        foreach (array_chunk($itens, 20, true) as $chunk) {
-            $out += $this->julgarLoteMesmoFato($juiz, $chunk, $rotulo);
-        }
-
-        return $out;
-    }
-
-    /** @param  array<int,array{evento:string,evento_lead:string,alvo:string}>  $itens */
-    private function julgarLoteMesmoFato(JuizLlm $juiz, array $itens, string $rotulo): array
-    {
-        $fonte = $rotulo === 'site' ? 'JÁ PUBLICADO NO SITE' : 'JÁ PUBLICADO NO INSTAGRAM';
-        $lista = '';
-        foreach ($itens as $n => $it) {
-            $lead = $it['evento_lead'] !== '' ? "\nCONTEXTO DO RADAR: {$it['evento_lead']}" : '';
-            $lista .= sprintf("PAR %d\nPAUTA DO RADAR: %s%s\n%s: %s\n\n",
-                $n, trim($it['evento']), $lead, $fonte, trim($it['alvo']));
-        }
-        $prompt = <<<PROMPT
-        Você é o editor do Jornal Razão conferindo se uma pauta do radar é a MESMA notícia que o jornal JÁ PUBLICOU. Para cada par abaixo, responda se o evento do radar é o MESMO FATO que o post já publicado.
-
-        IMPORTANTE: as manchetes podem ser TOTALMENTE DIFERENTES, com nenhuma palavra em comum — compare o FATO concreto (o que aconteceu), as PESSOAS, o LUGAR e o momento, NÃO as palavras. Ex.: "Criança de 2 anos internada em UTI após suspeita de maus-tratos em SC" e "Criança de 2 anos é internada com lesões: caiu no banho, diz mãe" são o MESMO FATO (mesma criança, mesma internação, mesmo lugar) mesmo sem palavras iguais.
-
-        Responda MESMO=true só quando for o mesmo acontecimento concreto. Fato parecido em outra cidade/dia, outra vítima, ou desdobramento NOVO com fato novo = false. Tema genérico em comum (ex.: "dois acidentes diferentes") = false.
-
-        RESPONDA APENAS com um array JSON, sem texto fora dele:
-        [{"par": <n>, "mesmo": true|false}]
-
-        PARES:
-
-        {$lista}
-        PROMPT;
-
-        $arr = $juiz->completarJson($prompt, 'publicado_match', count($itens), $juiz->modeloFuncao('match_publicado'));
-        $out = [];
-        foreach ($arr as $v) {
-            if (isset($v['par'])) {
-                $out[(int) $v['par']] = (bool) ($v['mesmo'] ?? false);
-            }
         }
 
         return $out;

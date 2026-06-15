@@ -59,6 +59,24 @@ class JuizLlm
             ?? 'claude-opus-4-8');
     }
 
+    /**
+     * Diagnóstico do few-shot (calibração do editor): se está ligado e quantos
+     * exemplos REAIS entram no input do juiz. O bloco é injetado por
+     * blocoCalibracao() dentro de montarPrompt — aqui só medimos pra logar.
+     *
+     * @return array{enabled:bool, exemplos:int}
+     */
+    public function fewShotInfo(): array
+    {
+        $fs = $this->cfg['fewshot'] ?? [];
+        if (! ($fs['enabled'] ?? false)) {
+            return ['enabled' => false, 'exemplos' => 0];
+        }
+        $bloco = $this->blocoCalibracao();
+
+        return ['enabled' => true, 'exemplos' => substr_count($bloco, 'editor avaliou')];
+    }
+
     /** Modelo "principal" (juiz) — pro display antes de qualquer chamada. */
     public function modelo(): string
     {
