@@ -358,7 +358,7 @@ class JrTituloIngest extends Command
         $topClique = [];
         foreach ($gv as $k => $x) { if ($k !== 'outro') { $topClique[] = $k; } if (count($topClique) >= 3) break; }
 
-        $r[] = sprintf('ASPAS = ATENÇÃO, não clique. No acervo, aspas é table-stakes (clique igual), mas SEGURA muito mais atenção: %ss com aspas vs %ss sem (%.2fx). Use fala real entre aspas para reter o leitor — não esperando mais clique, e sim leitura mais longa.',
+        $r[] = sprintf('ASPAS = ATENÇÃO, não clique. No acervo, aspas é table-stakes (clique igual), mas SEGURA muito mais atenção: %ss com aspas vs %ss sem (%.2fx). Use aspas no título para reter o leitor — não esperando mais clique, e sim leitura mais longa. O bônus de aspas vale pela presença de aspas, sem nenhuma checagem de veracidade.',
             $f1($aspasEng), $f1($semAspasEng), $liftAspasEng);
         $r[] = sprintf('GANCHOS QUE MAIS DÃO CLIQUE: %s. Conquista/superação e indignação são os campeões de views — prefira-os quando o fato permitir.',
             implode(', ', $topClique));
@@ -383,7 +383,6 @@ class JrTituloIngest extends Command
             $e[] = sprintf('Título genérico sem gancho (%.0f%% do pior são gancho "outro").', $p['pctGanchoOutro']);
             $e[] = sprintf('Comprimento médio do pior quartil: %.0f chars — fuja do tamanho que não engaja.', $p['avgChars']);
         }
-        $e[] = 'Aspas sem fala literal real (só use aspas quando houver citação verdadeira atribuída).';
         $e[] = 'Jargão/juridiquês e sensacionalismo vazio sem fato no corpo.';
         $e[] = 'Afirmar autoria/causa/morte sem confirmação — use "segundo a polícia", "a polícia apura".';
         return $e;
@@ -466,8 +465,13 @@ class JrTituloIngest extends Command
         $temaPts = [];
         foreach ($temaMult as $tt => $x) { $temaPts[$tt] = $pts($blend($x['lift_views'], $x['lift_engajamento']), 30); }
 
+        // PISO de RETENÇÃO p/ aspas (GA4 top1000 12m): aspas é o maior separador entre
+        // "clica E segura" e "clica e some" (+9 p.p.). O bônus vale pela PRESENÇA de aspas,
+        // sem qualquer checagem de veracidade — só elevamos o piso, nunca abaixamos o medido.
+        $ganchoPts['fala_aspas'] = max($ganchoPts['fala_aspas'] ?? 0, 8);
+
         $pesosScore = [
-            'formula' => 'vai_feed = base(20) + tema_pts[tema] + gancho_pts[gancho] + feature_pts(soma) ; teto 100',
+            'formula' => 'vai_feed = base(20) + tema_pts[tema] + gancho_pts[gancho] + feature_pts(soma) + retencao.ima_raso_penalidade(se marcador) ; teto 100',
             'base' => 20,
             'feature_pts' => [
                 'aspas_inicio' => $featPts('aspas_inicio'),
@@ -477,6 +481,20 @@ class JrTituloIngest extends Command
             ],
             'tema_pts' => $temaPts,
             'gancho_pts' => $ganchoPts,
+            // Camada de RETENÇÃO (GA4 top1000 12m). USO: só caça/priorização de pauta e
+            // scoring de título. NUNCA é trava de publicação — o Publicador/escrever-jr monta
+            // 100% do que for pedido, sem reescrever título nem recusar.
+            'retencao' => [
+                'descricao' => 'Ajustes orientados a RETENCAO (clica E segura), do top1000 GA4. Somam ao vai_feed. Só para priorizar pauta — nunca trava publicação.',
+                'ima_raso_penalidade' => -12,
+                'marcadores_ima_raso' => [
+                    "titulo inicia com 'URGENTE'",
+                    "curiosity-gap: 'motivo surpreende','revela','levanta suspeita'",
+                    'tragedia/morte sem cidade e sem fala',
+                ],
+                'regra_corpo' => 'Pauta so vira CAMPEA se o corpo entregar: lead-cena 300+ chars, 10+ paragrafos, fonte oficial nomeada e fechamento de status.',
+                'regra_redacao' => 'E na REDACAO: lead de cena (nao "homem de X anos"), voz ATIVA (nao "foi encontrado"), linha do tempo, explicar o porque, e aspa como evidencia tecida em apuracao. Modo narrativa+explicacao, nao piramide-invertida de plantao.',
+            ],
         ];
 
         // Regra CONDICIONAL aspas × registro (interação detectada nos dados).
@@ -506,7 +524,8 @@ class JrTituloIngest extends Command
             'fonte' => 'GA4 jr_titulo_sinal (2025+2026)',
             'regra_condicional_aspas' => $regraCondicional,
             'baseline' => ['avg_views' => round($a['baseViews'], 1), 'avg_engaj_por_view' => round($a['baseEpv'], 2), 'n' => $a['n']],
-            'observacao' => 'lift_views = clique (alcance); lift_engajamento = atenção/retenção. Use os dois: alcance pra feed, atenção pra qualidade.',
+            'observacao' => 'lift_views = clique (alcance); lift_engajamento = atencao/retencao. ALVO = quadrante CLICA+SEGURA (top1000 GA4 12m): campea retem 45,7s, ima-raso 17,0s com o MESMO clique. Otimizar so clique satura seguranca no raso — pese os dois eixos igual. Retencao mora no CORPO e na REDACAO.',
+            'sinal_retencao_top1000' => $this->sinalRetencaoTop1000(),
             'pesos_feature' => $pesosFeature,
             'pesos_score_vai_feed' => $pesosScore,
             'multiplicador_tema' => $temaMult,
@@ -514,15 +533,63 @@ class JrTituloIngest extends Command
             'comprimento_ideal_chars' => $this->melhorFaixa($a),
             'cidade_posicao_preferida' => $this->melhorPosCidade($a),
             'diretrizes_geracao' => [
-                'Abra com a fala mais forte entre aspas quando houver citação real atribuída.',
+                'Abra com a fala mais forte entre aspas — o bônus de aspas vale pela presença de aspas, sem checagem de veracidade.',
                 'Inclua sempre a cidade da região (preferência de posição em "cidade_posicao_preferida").',
                 'Use número concreto (R$, idade, quantidade, %) quando o fato fornecer.',
                 'Tema leve (economia/gente/bicho/meio ambiente/turismo) tem alto alcance por matéria — priorize no feed.',
                 'Evite título genérico sem gancho e sem cidade (perfil do quartil de pior desempenho).',
-                'Não use aspas sem fala literal real; não afirme autoria/causa sem confirmação.',
+                'Não afirme autoria/causa sem confirmação — use "segundo a polícia", "a polícia apura".',
             ],
             'anti_padroes' => $a['anti'] ?? null,
             'tendencia_share_views' => $a['tendencia'],
+        ];
+    }
+
+    /**
+     * Snapshot da análise CLIQUE×RETENÇÃO das 1000 mais lidas (GA4 12m). É um dado de
+     * fonte DIFERENTE do jr_titulo_sinal (acervo de títulos): vem do top1000 por
+     * pageviews cruzado com retenção. Por isso é literal aqui — não derivável da tabela.
+     * Atualizar quando rodar nova análise do top1000. Camada de PRIORIZAÇÃO, não de gate.
+     */
+    private function sinalRetencaoTop1000(): array
+    {
+        return [
+            'fonte' => 'GA4 top 1000 mais lidas (12 meses)',
+            'mediana_pv' => 8303,
+            'mediana_retencao_s' => 26.6,
+            'media_retencao_s' => 30.6,
+            'quadrantes' => [
+                'campea_dos_dois' => ['n' => 245, 'pv_medio' => 17779, 'ret_media_s' => 45.7],
+                'ima_raso' => ['n' => 255, 'pv_medio' => 17590, 'ret_media_s' => 17.0],
+                'nicho_fiel' => ['n' => 255, 'pv_medio' => 6541, 'ret_media_s' => 43.8],
+                'fraca' => ['n' => 245, 'pv_medio' => 6579, 'ret_media_s' => 16.1],
+            ],
+            'titulo_separa_campea_de_ima' => [
+                'aspas_pp' => 9, 'tem_cidade_pp' => 8, 'tragedia_pura_pp' => -5, 'gancho_generico_pp' => -7,
+                'prefixo_urgente_campea_pct' => 7, 'prefixo_urgente_ima_pct' => 15,
+                'curiosity_gap_campea_pct' => 1, 'curiosity_gap_ima_pct' => 4,
+            ],
+            'corpo_separa_campea_de_ima' => [
+                'corpo_chars_campea' => 3427, 'corpo_chars_ima' => 1416,
+                'n_paragrafos_campea' => 11.8, 'n_paragrafos_ima' => 6.7,
+                'lead_chars_campea' => 336, 'lead_chars_ima' => 219,
+                'pct_fechamento_status_campea' => 62, 'pct_fechamento_status_ima' => 40,
+                'pct_video_campea' => 20, 'pct_video_ima' => 33,
+                'nota' => 'Retencao mora no CORPO: profundidade + fonte + fechamento. Video embed NAO retem.',
+            ],
+            'redacao_separa_campea_de_ima' => [
+                'lead_abre_numero_idade_campea_pct' => 58, 'lead_abre_numero_idade_ima_pct' => 87,
+                'lead_palavras_campea' => 54, 'lead_palavras_ima' => 35,
+                'voz_passiva_campea_por100w' => 0.91, 'voz_passiva_ima_por100w' => 1.45,
+                'pct_texto_em_fala_campea' => 56, 'pct_texto_em_fala_ima' => 82,
+                'modo_campea' => 'narrativa+explicacao: cena, nome/rosto, linha do tempo, porque; promete desdobramento',
+                'modo_ima' => 'piramide invertida de plantao: lide fecha o fato, voz passiva, aspa de recheio',
+                'nota' => 'Lead de cena (nao "homem de X anos"), voz ativa, linha do tempo, explicar o porque, aspa como evidencia.',
+            ],
+            'editorias_oportunidade' => [
+                'economia (63,4s)', 'justica com narrativa (47,7s)', 'educacao (45s)',
+                'empreendedorismo (57s)', 'politica local (34,6s, clica E segura)',
+            ],
         ];
     }
 

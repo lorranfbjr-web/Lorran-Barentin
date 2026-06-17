@@ -122,6 +122,13 @@ class JuizLlm
 
     // ───────────────────────── prompt ─────────────────────────
 
+    /**
+     * CAMADA DE PRIORIZAÇÃO, NÃO DE GATE. O score/veredito do juiz serve só para
+     * CAÇAR e priorizar pauta no pipeline de descoberta — NUNCA bloqueia publicação
+     * e NUNCA reescreve título. O Publicador/escrever-jr monta 100% do que o Lorran
+     * ou o Bruno mandam, sem ressalva, sem recusa. Não deixe essa camada vazar para
+     * a publicação.
+     */
     private function montarPrompt(array $itens): string
     {
         $lista = '';
