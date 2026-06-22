@@ -161,6 +161,7 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
       <button class="tab" data-origem="feed">Portais</button>
       <button class="tab" data-origem="whatsapp">WhatsApp</button>
       <button class="tab" data-origem="instagram">Instagram</button>
+      @if(($key ?? '') !== '')<a class="tab" style="margin-left:auto;text-decoration:none" href="/radar/verificar?key={{ urlencode($key) }}">🔍 Verificar pauta</a>@endif
     </div>
     <div class="row">
       <input type="search" id="busca" placeholder="Buscar no título, cidade…" autocomplete="off">

@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // não por sessão de browser — isentos de CSRF como os de api.php.
         $middleware->validateCsrfTokens(except: [
             'radar/assunto/*',
+            'radar/verificar',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

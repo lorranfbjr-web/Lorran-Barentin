@@ -18,6 +18,10 @@ Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
         ->where('assuntoId', '[ai]\w+');
     Route::post('/radar/assunto/{assuntoId}/reescrever', [\App\Http\Controllers\JrReescritaController::class, 'reescrever'])
         ->where('assuntoId', '[ai]\w+');
+
+    // Goal 4 — verificador de pauta (cola texto/link → veredito + lacunas + quem publicou).
+    Route::get('/radar/verificar', [\App\Http\Controllers\JrVerificadorController::class, 'form']);
+    Route::post('/radar/verificar', [\App\Http\Controllers\JrVerificadorController::class, 'verificar']);
 });
 
 Route::get('/{any?}', function () {
