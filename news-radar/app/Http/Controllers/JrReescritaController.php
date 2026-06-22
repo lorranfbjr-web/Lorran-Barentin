@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\Jr\PautaGate;
-use App\Services\Jr\PautaReescritor;
+use App\Services\Jr\RadarAssunto;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
 
 /**
  * Goal 3 — ferramenta de DECISÃO/PRODUÇÃO do Radar JR.
@@ -24,12 +24,10 @@ use Illuminate\Support\Facades\DB;
  */
 class JrReescritaController extends Controller
 {
-    public function __construct(private PautaReescritor $reescritor, private PautaGate $gate) {}
-
     /** Container: texto dos portais + links + reescrita existente (sem LLM). */
     public function mostrar(string $assuntoId): JsonResponse
     {
-        $membros = $this->membrosDoAssunto($assuntoId);
+        $membros = RadarAssunto::membros($assuntoId);
         if ($membros->isEmpty()) {
             return response()->json(['error' => 'assunto não encontrado'], 404);
         }
@@ -57,114 +55,65 @@ class JrReescritaController extends Controller
         ]);
     }
 
-    /** Reescreve unificando os portais (LLM). Manual + atrás de chave. */
+    /**
+     * Dispara a reescrita+entrega ASSÍNCRONA. Responde NA HORA ("mandando pro
+     * grupo JR Rascunhos…") e o trabalho (og:image + Opus + envio Z-API) roda em
+     * background (jrpauta:entregar via nohup). Manual + atrás de chave; NÃO
+     * publica nada. O Opus continua sendo 1 chamada por clique.
+     */
     public function reescrever(Request $request, string $assuntoId): JsonResponse
     {
-        $membros = $this->membrosDoAssunto($assuntoId);
+        $membros = RadarAssunto::membros($assuntoId);
         if ($membros->isEmpty()) {
             return response()->json(['error' => 'assunto não encontrado'], 404);
         }
-
         $comTexto = $membros->filter(fn ($m) => trim((string) $m->markdown) !== '')->values();
         if ($comTexto->isEmpty()) {
             return response()->json(['error' => 'nenhum portal com texto extraído pra reescrever'], 422);
         }
 
-        // Trava DURA solidariedade/vaquinha/Pix: NUNCA vira pauta automática —
-        // vai pra fila humana (política JR). Crime/morte PASSA (é rascunho manual
-        // de decisão, não auto-publicação; o radar é cheio de segurança legítima).
-        $textotodo = $comTexto->map(fn ($m) => $m->titulo . "\n" . $m->markdown)->implode("\n\n");
-        [$gateRes, $gateMotivo] = $this->gate->avaliar($textotodo);
-        if ($gateRes === PautaGate::FILA_SOLIDARIEDADE) {
-            DB::table('jr_pauta_reescrita')->updateOrInsert(
-                ['assunto_id' => $assuntoId],
-                [
-                    'cluster_ids' => json_encode($membros->pluck('cluster_id')->filter()->unique()->values()),
-                    'fontes' => json_encode($comTexto->map(fn ($m) => ['host' => $m->host, 'url' => $m->url])->values()),
-                    'n_portais' => $comTexto->count(),
-                    'cidade' => null, 'editoria' => null,
-                    'titulos' => json_encode([]), 'titulo_principal' => null, 'linha_fina' => null,
-                    'materia' => '', 'tags' => json_encode([]),
-                    'lacunas' => json_encode([$gateMotivo, 'Solidariedade/vaquinha NÃO entra no automático — fila humana.']),
-                    'modelo' => null, 'custo_usd' => 0, 'gate' => $gateRes,
-                    'gerado_em' => Carbon::now(), 'updated_at' => Carbon::now(), 'created_at' => Carbon::now(),
-                ]
-            );
-
+        // Anti duplo-clique: se já está sendo montada agora (<2min), não dispara de novo.
+        $atual = DB::table('jr_pauta_reescrita')->where('assunto_id', $assuntoId)->first();
+        if ($atual && ($atual->entrega_status ?? null) === 'pendente' && $atual->updated_at
+            && Carbon::parse($atual->updated_at)->gt(Carbon::now()->subSeconds(120))) {
             return response()->json([
-                'gate' => $gateRes,
-                'motivo' => $gateMotivo,
-                'reescrita' => null,
-                'aviso' => 'Bloqueado pela trava de solidariedade/vaquinha — vai pra fila humana, não reescreve no automático.',
-            ], 200);
+                'status' => 'enviando',
+                'mensagem' => '📤 já estou montando essa pauta — chega no grupo JR Rascunhos em instantes.',
+            ]);
         }
 
-        $cidade = $comTexto->pluck('cidade_llm')->filter()->first();
-        $portais = $comTexto->map(fn ($m) => [
-            'host'   => (string) $m->host,
-            'titulo' => (string) $m->titulo,
-            'texto'  => (string) $m->markdown,
-        ])->all();
-
-        try {
-            $r = $this->reescritor->reescreverUnificado($portais, $cidade);
-        } catch (\Throwable $e) {
-            return response()->json(['error' => 'falha na reescrita: ' . $e->getMessage()], 500);
-        }
-
-        $custo = (float) DB::table('jr_juiz_log')->where('operation', 'reescrita_unificada')
-            ->where('created_at', '>=', Carbon::now()->subMinutes(5))->sum('custo_usd');
-
+        // Semeia a linha 'pendente' (NOT NULL preenchidos); o background atualiza.
         DB::table('jr_pauta_reescrita')->updateOrInsert(
             ['assunto_id' => $assuntoId],
             [
                 'cluster_ids' => json_encode($membros->pluck('cluster_id')->filter()->unique()->values()),
                 'fontes' => json_encode($comTexto->map(fn ($m) => ['host' => $m->host, 'url' => $m->url])->values()),
                 'n_portais' => $comTexto->count(),
-                'cidade' => $r['cidade'], 'editoria' => $r['editoria'],
-                'titulos' => json_encode($r['titulos'], JSON_UNESCAPED_UNICODE),
-                'titulo_principal' => $r['titulo_principal'],
-                'linha_fina' => $r['linha_fina'],
-                'materia' => $r['materia'],
-                'tags' => json_encode($r['tags'], JSON_UNESCAPED_UNICODE),
-                'lacunas' => json_encode($r['lacunas'], JSON_UNESCAPED_UNICODE),
-                'modelo' => $r['modelo'], 'custo_usd' => $custo, 'gate' => 'ok',
+                'titulos' => json_encode([]), 'materia' => '', 'tags' => json_encode([]), 'lacunas' => json_encode([]),
+                'gate' => 'ok', 'entrega_status' => 'pendente', 'entrega_erro' => null,
                 'gerado_em' => Carbon::now(), 'updated_at' => Carbon::now(), 'created_at' => Carbon::now(),
             ]
         );
 
-        $reescrita = DB::table('jr_pauta_reescrita')->where('assunto_id', $assuntoId)->first();
+        $this->dispararBackground($assuntoId);
 
         return response()->json([
-            'gate' => 'ok',
-            'custo_usd' => $custo,
-            'reescrita' => $this->formatarReescrita($reescrita),
+            'status' => 'enviando',
+            'mensagem' => '📤 Mandando pro grupo JR Rascunhos… a pauta (com fotos) chega em ~30s.',
         ]);
     }
 
-    /**
-     * Membros (linhas) de um assunto: 'a...' = assunto_id; 'i<id>' = item solto.
-     */
-    private function membrosDoAssunto(string $assuntoId)
+    /** nohup artisan jrpauta:entregar — fire-and-forget, responde imediato. */
+    private function dispararBackground(string $assuntoId): void
     {
-        if (str_starts_with($assuntoId, 'i')) {
-            $id = (int) substr($assuntoId, 1);
-
-            return DB::table('jr_link_extracao')->where('id', $id)
-                ->get(['id', 'cluster_id', 'host', 'fonte_tipo', 'url', 'titulo', 'markdown', 'char_len', 'cidade_llm', 'score']);
-        }
-
-        $clusterIds = DB::table('jr_link_extracao')->where('assunto_id', $assuntoId)
-            ->whereNotNull('cluster_id')->distinct()->pluck('cluster_id');
-        if ($clusterIds->isEmpty()) {
-            return collect();
-        }
-
-        return DB::table('jr_link_extracao')->whereIn('cluster_id', $clusterIds)
-            ->where('duplicada', false)
-            ->orderByDesc('score')
-            ->get(['id', 'cluster_id', 'host', 'fonte_tipo', 'url', 'titulo', 'markdown', 'char_len', 'cidade_llm', 'score'])
-            ->unique('url')->values();
+        $cmd = sprintf(
+            'nohup %s %s jrpauta:entregar %s >> %s 2>&1 &',
+            escapeshellarg(PHP_BINARY),
+            escapeshellarg(base_path('artisan')),
+            escapeshellarg($assuntoId),
+            escapeshellarg(storage_path('logs/jrpauta-entregar.log'))
+        );
+        Process::path(base_path())->run($cmd);
     }
 
     private function formatarReescrita(object $r): array
@@ -181,10 +130,13 @@ class JrReescritaController extends Controller
             'cidade'           => $r->cidade,
             'editoria'         => $r->editoria,
             'fontes'           => $dec($r->fontes),
+            'fotos'            => $dec($r->fotos ?? null),
             'n_portais'        => (int) $r->n_portais,
             'modelo'           => $r->modelo,
             'custo_usd'        => (float) $r->custo_usd,
             'gate'             => $r->gate,
+            'entrega_status'   => $r->entrega_status ?? null,
+            'entregue_em'      => $r->entregue_em ?? null,
             'gerado_em'        => $r->gerado_em,
         ];
     }

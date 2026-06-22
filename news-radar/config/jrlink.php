@@ -529,6 +529,23 @@ return [
     ],
 
     /*
+    |---------------------------------------------------------------------------
+    | RASCUNHOS — entrega da pauta reescrita (Montar pauta /radar) no WhatsApp
+    |---------------------------------------------------------------------------
+    | Grupo PRÓPRIO "JR Rascunhos" (NÃO o Raspador, NÃO os 56 de produção, NÃO o
+    | dispatcher n8n). Reusa as MESMAS credenciais Z-API. Kill switch: grupo
+    | vazio = desligado (cai pra não enviar). Disparo MANUAL, 1 clique = 1 pauta.
+    */
+    'rascunhos' => [
+        'instance' => env('JRLINK_ALERT_ZAPI_INSTANCE', ''),
+        'token' => env('JRLINK_ALERT_ZAPI_TOKEN', ''),
+        'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
+        'grupo' => env('JRLINK_RASCUNHOS_GROUP', ''),       // grupo "JR Rascunhos"
+        'og_timeout' => (int) env('JRLINK_RASCUNHOS_OG_TIMEOUT', 7), // s por portal
+        'max_fotos' => (int) env('JRLINK_RASCUNHOS_MAX_FOTOS', 6),
+    ],
+
+    /*
     | ANTI-LOOP da captura: mensagem que a PRÓPRIA instância manda pro Raspador
     | não pode voltar pro pipeline como "link do WhatsApp". Corta na coleta
     | (jrlink:extract > coletarUrls), nunca no armazenamento bruto.

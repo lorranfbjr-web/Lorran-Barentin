@@ -285,17 +285,18 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
     }
 
     var btn=document.createElement('button');btn.className='btn-rw';
-    btn.textContent=d.reescrita?'✍️ Reescrever de novo (Opus)':'✍️ Reescrever unificando os portais (Opus)';
+    btn.textContent=d.reescrita?'✍️ Reescrever e mandar pro grupo (Opus)':'✍️ Reescrever unificando + mandar pro grupo JR Rascunhos';
     btn.addEventListener('click',function(){
-      btn.disabled=true;btn.textContent='Reescrevendo… (~30s, 1 chamada Opus)';
+      btn.disabled=true;btn.textContent='📤 enviando…';
+      var old=box.querySelector('.sent');if(old)old.remove();
       fetch('/radar/assunto/'+box.dataset.assunto+'/reescrever?key='+encodeURIComponent(KEY),{method:'POST',headers:{'Accept':'application/json'}})
         .then(function(r){return r.json();})
         .then(function(rr){
-          btn.disabled=false;btn.textContent='✍️ Reescrever de novo (Opus)';
-          var old=box.querySelector('.res');if(old)old.remove();
-          if(rr.aviso){var w=document.createElement('div');w.className='note';w.textContent='🚫 '+rr.aviso;box.appendChild(w);return;}
-          if(rr.error){var e=document.createElement('div');e.className='note';e.textContent='Erro: '+rr.error;box.appendChild(e);return;}
-          if(rr.reescrita) renderResultado(box, rr.reescrita);
+          btn.disabled=false;btn.textContent='✍️ Reescrever e mandar de novo';
+          var w=document.createElement('div');w.className='note sent';
+          if(rr.error){w.textContent='Erro: '+rr.error;}
+          else{w.textContent=rr.mensagem||'📤 Mandando pro grupo JR Rascunhos…';w.style.color='#1f8a4c';w.style.background='#e6f7ec';w.style.borderColor='#bfe6cd';}
+          box.appendChild(w);
         }).catch(function(){btn.disabled=false;btn.textContent='✍️ Reescrever (tentar de novo)';});
     });
     box.appendChild(btn);
