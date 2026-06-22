@@ -79,6 +79,85 @@ class PautaReescritor
         ];
     }
 
+    /**
+     * REESCRITA UNIFICADA (Radar JR, Goal 3): junta o texto de TODOS os portais
+     * que cobriram um assunto e gera UMA pauta no padrão JR — ~12 títulos, linha
+     * fina, matéria, 8 tags, lacunas. Concorrente é fonte pra CONFIRMAR o fato,
+     * nunca texto pra copiar (anti-plágio). Reusa completarJson() (claude-cli
+     * Opus), SEM tocar o prompt do juiz.
+     *
+     * @param  array<int,array{host:string,titulo:string,texto:string}>  $portais
+     * @return array{titulos:array,titulo_principal:string,linha_fina:string,materia:string,tags:array,cidade:?string,editoria:string,lacunas:array,modelo:string}
+     *
+     * @throws \RuntimeException se a reescrita falhar/voltar inválida
+     */
+    public function reescreverUnificado(array $portais, ?string $cidade): array
+    {
+        $modelo = 'claude-opus-4-8';
+        $prompt = $this->promptUnificado($portais, $cidade);
+        $arr = $this->juiz->completarJson($prompt, 'reescrita_unificada', count($portais), $modelo);
+
+        $r = $arr[0] ?? null;
+        if (! is_array($r) || empty($r['materia']) || empty($r['titulos'])) {
+            throw new \RuntimeException('Reescrita unificada voltou vazia/inválida.');
+        }
+
+        $limpaLista = function ($v): array {
+            return is_array($v) ? array_values(array_filter(array_map(fn ($x) => trim((string) $x), $v))) : [];
+        };
+        $titulos = $limpaLista($r['titulos'] ?? []);
+        $tags = $limpaLista($r['tags'] ?? []);
+        $lac = $limpaLista($r['lacunas'] ?? []);
+
+        return [
+            'titulos'          => array_slice($titulos, 0, 12),
+            'titulo_principal' => $titulos[0] ?? '',
+            'linha_fina'       => trim((string) ($r['linha_fina'] ?? '')),
+            'materia'          => trim((string) $r['materia']),
+            'tags'             => array_slice($tags, 0, 8),
+            'cidade'           => isset($r['cidade']) && $r['cidade'] !== '' ? trim((string) $r['cidade']) : $cidade,
+            'editoria'         => strtolower(trim((string) ($r['editoria'] ?? 'geral'))),
+            'lacunas'          => $lac,
+            'modelo'           => $modelo,
+        ];
+    }
+
+    /**
+     * @param  array<int,array{host:string,titulo:string,texto:string}>  $portais
+     */
+    private function promptUnificado(array $portais, ?string $cidade): string
+    {
+        $cidadeTxt = $cidade ? $cidade : '(deduza do texto; se não houver, null)';
+        $blocos = '';
+        foreach (array_values($portais) as $i => $p) {
+            $n = $i + 1;
+            $txt = trim((string) ($p['texto'] ?? ''));
+            $txt = mb_substr($txt, 0, 4000); // teto por portal pra caber no contexto
+            $blocos .= "### PORTAL {$n} — {$p['host']}\nTÍTULO: {$p['titulo']}\nTEXTO:\n{$txt}\n\n";
+        }
+
+        return <<<PROMPT
+Você é editor do Jornal Razão, jornal regional de Tijucas/SC (litoral e Vale do Itajaí). Abaixo estão as COBERTURAS de VÁRIOS portais concorrentes sobre o MESMO fato. Sua tarefa: APURAR o fato cruzando as fontes e ESCREVER UMA matéria nova no padrão JR — do zero, com suas palavras.
+
+REGRAS DE OURO (inquebráveis):
+- Concorrente é fonte pra CONFIRMAR o fato, NUNCA texto pra copiar. NÃO parafraseie frase a frase nem reaproveite trechos. Reescreva de verdade. (anti-plágio)
+- Fato é fato, versão é versão: o que for afirmação de alguém vai ATRIBUÍDO ("segundo a polícia", "conforme a prefeitura", "de acordo com testemunhas", "a polícia apura"). Não afirme como certo o que ainda está sob apuração.
+- NUNCA invente nome, data, número, fala, causa ou conclusão que não esteja em PELO MENOS uma das fontes. Se um dado essencial não aparece ou as fontes divergem, NÃO chute — registre em "lacunas".
+- Cidade de SC correta: use exatamente a que as fontes indicam (sugestão: "{$cidadeTxt}"). Nunca invente município.
+- materia: PROSA CORRIDA em parágrafos curtos (4 a 7), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde). Os blocos (lead, contexto, atribuição, desdobramento, status) são CHECKLIST INTERNO — não escreva rótulos no texto. Sem markdown, sem subtítulos. Separe parágrafos com \\n\\n.
+- titulos: 12 opções de título na VOZ JR — sentence case (só 1ª maiúscula + nomes próprios), informativo, sem ALL CAPS, sem ponto final, sem clickbait raso.
+- linha_fina: 1 frase (máx ~200 caracteres) que complementa o título principal sem repeti-lo.
+- tags: exatamente 8 termos relevantes (cidade, tema, entidades citadas), minúsculas.
+- editoria: UMA destas: seguranca, politica, economia, saude, educacao, transito, infraestrutura, meioambiente, cultura, esporte, entretenimento, turismo, tecnologia, geral.
+
+RESPONDA APENAS com um array JSON de UM objeto, sem markdown e sem texto fora do JSON:
+[{"titulos":["t1",...,"t12"],"linha_fina":"...","materia":"...","tags":["...x8"],"cidade":"..."|null,"editoria":"...","lacunas":["..."]}]
+
+COBERTURAS DOS PORTAIS:
+{$blocos}
+PROMPT;
+    }
+
     /** @return array{0:string,1:string} [titulo_derivado, lead_derivado] */
     private function tituloLead(string $texto): array
     {

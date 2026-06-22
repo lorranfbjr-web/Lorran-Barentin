@@ -15,7 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Endpoints JSON do Radar (Goal 3) são autenticados por chave (JrPanelKey),
+        // não por sessão de browser — isentos de CSRF como os de api.php.
+        $middleware->validateCsrfTokens(except: [
+            'radar/assunto/*',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

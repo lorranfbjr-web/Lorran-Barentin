@@ -9,6 +9,17 @@ use Illuminate\Support\Facades\Route;
 // ANTES do catch-all do SPA pra não ser engolida.
 Route::get('/radar', [\App\Http\Controllers\JrVitrineController::class, 'index']);
 
+// Goal 3 — ferramenta de produção. Container (texto dos portais + links, sem
+// LLM) e reescrita unificada (LLM, manual). ATRÁS de JrPanelKey: expõe texto de
+// concorrente e dispara LLM — privado do Lorran (chave do painel). NÃO publica
+// nada, só lê o banco e grava jr_pauta_reescrita.
+Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
+    Route::get('/radar/assunto/{assuntoId}', [\App\Http\Controllers\JrReescritaController::class, 'mostrar'])
+        ->where('assuntoId', '[ai]\w+');
+    Route::post('/radar/assunto/{assuntoId}/reescrever', [\App\Http\Controllers\JrReescritaController::class, 'reescrever'])
+        ->where('assuntoId', '[ai]\w+');
+});
+
 Route::get('/{any?}', function () {
     return view('app');
 })->where('any', '.*');

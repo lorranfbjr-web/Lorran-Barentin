@@ -12,7 +12,8 @@
         if ($h === null) return '';
         return $h < 1 ? 'agora' : ($h < 48 ? round($h) . 'h' : round($h / 24) . 'd');
     };
-    $renderCard = function (array $a) use ($titulo, $idadeTxt) {
+    $temKey = ($key ?? '') !== '';
+    $renderCard = function (array $a) use ($titulo, $idadeTxt, $temKey) {
         $velho = $a['idade_horas'] !== null && $a['idade_horas'] >= 24;
         $scoreCls = $a['score_atual'] >= 80 ? 's-hot' : ($a['score_atual'] >= 60 ? 's-warm' : 's-mid');
         $cidadeChip = $a['cidade'] ? '<span class="chip cidade">' . e($a['cidade']) . '</span>' : '';
@@ -27,7 +28,12 @@
             $portais = '<details class="portais"><summary>🔥 ' . $a['n_portais'] . ' portais cobrindo</summary><ul>' . $lis . '</ul></details>';
         }
 
+        $btnPauta = $temKey
+            ? '<button type="button" class="btn-pauta" data-assunto="' . e($a['assunto_id']) . '">📝 Montar pauta</button>'
+            : '';
+
         return '<article class="card"'
+            . ' data-assunto="' . e($a['assunto_id']) . '"'
             . ' data-origens="' . e(implode(' ', $a['origens'])) . '"'
             . ' data-cidade="' . e($a['cidade'] ?? '') . '"'
             . ' data-editoria="' . e($a['editoria']) . '"'
@@ -43,7 +49,7 @@
             . '</div>'
             . '<h3 class="titulo"><a href="' . e($a['url']) . '" target="_blank" rel="noopener">' . e($titulo($a['n_frentes'] > 1 ? $a['label'] : $a['titulo'])) . '</a></h3>'
             . $motivo
-            . '<div class="card-bot"><span class="host">' . e($a['host']) . '</span>' . $portais . '</div>'
+            . '<div class="card-bot"><span class="host">' . e($a['host']) . '</span>' . $portais . $btnPauta . '</div>'
             . '</article>';
     };
 @endphp
@@ -112,6 +118,27 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
 .portais summary::-webkit-details-marker{display:none}
 .portais ul{margin:7px 0 0;padding-left:16px}
 .portais li{font-size:12.5px;margin:3px 0}
+.btn-pauta{margin-left:auto;border:1px solid var(--royal);background:#eef4ff;color:var(--royal);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.btn-pauta:hover{background:var(--royal);color:#fff}
+.pauta-box{margin-top:4px;border-top:1px dashed var(--line);padding-top:10px;font-size:13px}
+.pauta-box .pb-load{color:var(--mut);font-size:12.5px}
+.pauta-box h4{margin:10px 0 4px;font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.3px}
+.pauta-box .src{font-size:12px;margin:3px 0}
+.pauta-box .src a{font-weight:600}
+.pauta-box details.psrc{margin:4px 0;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fafbff}
+.pauta-box details.psrc summary{cursor:pointer;font-weight:700;font-size:12px;color:var(--navy);list-style:none}
+.pauta-box details.psrc summary::-webkit-details-marker{display:none}
+.pauta-box .ptxt{white-space:pre-wrap;font-size:12.5px;color:#2a3550;margin-top:6px;max-height:240px;overflow:auto}
+.pauta-box .note{font-size:11.5px;color:#b06a00;background:#fff4e0;border-radius:7px;padding:5px 8px;margin:6px 0}
+.pauta-box .btn-rw{border:none;background:var(--navy);color:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;margin-top:6px}
+.pauta-box .btn-rw:disabled{opacity:.6;cursor:wait}
+.pauta-box .res{margin-top:10px;background:#f7f9ff;border:1px solid var(--line);border-radius:10px;padding:10px}
+.pauta-box .res .copy{float:right;border:1px solid var(--line);background:#fff;border-radius:6px;font-size:11px;font-weight:700;padding:2px 7px;cursor:pointer;color:var(--royal)}
+.pauta-box .res ul{margin:4px 0;padding-left:18px}
+.pauta-box .res li{margin:2px 0;font-size:12.5px}
+.pauta-box .res .mat{white-space:pre-wrap;font-size:13px;line-height:1.55;color:#16203a}
+.pauta-box .res .tag{display:inline-block;background:#eef4ff;color:var(--royal);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin:2px 3px 0 0}
+.pauta-box .res .lac{color:#b06a00}
 .empty{text-align:center;color:var(--mut);padding:40px 0;font-weight:600}
 .foot{margin-top:30px;text-align:center;font-size:11.5px;color:#9aa3b5}
 </style>
@@ -202,5 +229,92 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
   apply();
 })();
 </script>
+
+@if(($key ?? '') !== '')
+<script>
+// Goal 3 — Montar pauta: container (texto dos portais + links) + reescrita
+// unificada. Tudo atrás da chave; a página não chama LLM, só os endpoints.
+(function(){
+  var KEY = @json($key);
+  function esc(s){var d=document.createElement('div');d.textContent=(s==null?'':String(s));return d.innerHTML;}
+  function copyBtn(text){
+    var b=document.createElement('button');b.className='copy';b.textContent='copiar';
+    b.addEventListener('click',function(){navigator.clipboard.writeText(text).then(function(){b.textContent='copiado ✓';setTimeout(function(){b.textContent='copiar';},1500);});});
+    return b;
+  }
+  function renderResultado(box, r){
+    var div=document.createElement('div');div.className='res';
+    var full=(r.titulo_principal?('TÍTULO: '+r.titulo_principal+'\n'):'')
+      +(r.linha_fina?('LINHA FINA: '+r.linha_fina+'\n\n'):'')+(r.materia||'')
+      +'\n\nTAGS: '+(r.tags||[]).join(', ');
+    var html='<h4>Pauta reescrita (padrão JR)';
+    if(r.editoria||r.cidade) html+=' <span style="font-weight:600;color:#5b6680;text-transform:none">· '+esc([r.editoria,r.cidade].filter(Boolean).join(' · '))+'</span>';
+    html+='</h4>';
+    html+='<div><b>Títulos sugeridos:</b><ul>'+(r.titulos||[]).map(function(t){return '<li>'+esc(t)+'</li>';}).join('')+'</ul></div>';
+    if(r.linha_fina) html+='<div style="margin:6px 0"><b>Linha fina:</b> '+esc(r.linha_fina)+'</div>';
+    html+='<div style="margin:6px 0"><b>Matéria:</b><div class="mat">'+esc(r.materia)+'</div></div>';
+    html+='<div style="margin:6px 0">'+(r.tags||[]).map(function(t){return '<span class="tag">'+esc(t)+'</span>';}).join('')+'</div>';
+    if((r.lacunas||[]).length) html+='<div class="lac" style="margin-top:6px"><b>⚠ Lacunas (confirmar antes de publicar):</b><ul>'+r.lacunas.map(function(l){return '<li>'+esc(l)+'</li>';}).join('')+'</ul></div>';
+    if(r.modelo) html+='<div style="font-size:11px;color:#9aa3b5;margin-top:6px">gerado por '+esc(r.modelo)+(r.gerado_em?(' · '+esc(r.gerado_em)):'')+'</div>';
+    div.innerHTML=html;
+    div.insertBefore(copyBtn(full), div.firstChild);
+    box.appendChild(div);
+  }
+  function renderBox(box, d){
+    box.innerHTML='';
+    var srcWrap=document.createElement('div');
+    srcWrap.innerHTML='<h4>Portais que cobriram ('+d.n_portais+')</h4>';
+    (d.portais||[]).forEach(function(p){
+      var det=document.createElement('details');det.className='psrc';
+      det.innerHTML='<summary>'+esc(p.host)+(p.tem_texto?'':' (sem texto extraído)')+' — <a href="'+esc(p.url)+'" target="_blank" rel="noopener">abrir ↗</a></summary>'
+        +(p.tem_texto?'<div class="ptxt">'+esc(p.texto)+'</div>':'');
+      srcWrap.appendChild(det);
+    });
+    box.appendChild(srcWrap);
+
+    var linksTxt=(d.links_fontes||[]).join('\n');
+    var lk=document.createElement('div');lk.className='src';
+    lk.innerHTML='<b>Links das matérias</b> (abra pra pegar as fotos na fonte) ';
+    lk.appendChild(copyBtn(linksTxt));
+    box.appendChild(lk);
+    if(d.sem_imagem_no_extrato){
+      var note=document.createElement('div');note.className='note';
+      note.textContent='O extrato não guarda imagem — as fotos se pegam abrindo cada portal acima.';
+      box.appendChild(note);
+    }
+
+    var btn=document.createElement('button');btn.className='btn-rw';
+    btn.textContent=d.reescrita?'✍️ Reescrever de novo (Opus)':'✍️ Reescrever unificando os portais (Opus)';
+    btn.addEventListener('click',function(){
+      btn.disabled=true;btn.textContent='Reescrevendo… (~30s, 1 chamada Opus)';
+      fetch('/radar/assunto/'+box.dataset.assunto+'/reescrever?key='+encodeURIComponent(KEY),{method:'POST',headers:{'Accept':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(function(rr){
+          btn.disabled=false;btn.textContent='✍️ Reescrever de novo (Opus)';
+          var old=box.querySelector('.res');if(old)old.remove();
+          if(rr.aviso){var w=document.createElement('div');w.className='note';w.textContent='🚫 '+rr.aviso;box.appendChild(w);return;}
+          if(rr.error){var e=document.createElement('div');e.className='note';e.textContent='Erro: '+rr.error;box.appendChild(e);return;}
+          if(rr.reescrita) renderResultado(box, rr.reescrita);
+        }).catch(function(){btn.disabled=false;btn.textContent='✍️ Reescrever (tentar de novo)';});
+    });
+    box.appendChild(btn);
+    if(d.reescrita) renderResultado(box, d.reescrita);
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('.btn-pauta');if(!b)return;
+    var card=b.closest('.card');var assunto=b.dataset.assunto;
+    var box=card.querySelector('.pauta-box');
+    if(box){box.style.display=box.style.display==='none'?'':'none';return;}
+    box=document.createElement('div');box.className='pauta-box';box.dataset.assunto=assunto;
+    box.innerHTML='<div class="pb-load">Carregando portais…</div>';
+    card.appendChild(box);
+    fetch('/radar/assunto/'+assunto+'?key='+encodeURIComponent(KEY),{headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json();})
+      .then(function(d){if(d.error){box.innerHTML='<div class="note">Erro: '+esc(d.error)+'</div>';return;}renderBox(box,d);})
+      .catch(function(){box.innerHTML='<div class="note">Falha ao carregar.</div>';});
+  });
+})();
+</script>
+@endif
 </body>
 </html>
