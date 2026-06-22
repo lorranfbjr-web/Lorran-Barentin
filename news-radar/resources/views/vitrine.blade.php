@@ -16,6 +16,7 @@
         $velho = $a['idade_horas'] !== null && $a['idade_horas'] >= 24;
         $scoreCls = $a['score_atual'] >= 80 ? 's-hot' : ($a['score_atual'] >= 60 ? 's-warm' : 's-mid');
         $cidadeChip = $a['cidade'] ? '<span class="chip cidade">' . e($a['cidade']) . '</span>' : '';
+        $midiaChip = !empty($a['sem_midia']) ? '<span class="chip nomedia" title="Gancho viral/curiosidade sem vídeo ou câmera no título — confirmar mídia antes de priorizar">⚠ sem mídia</span>' : '';
         $motivo = $a['motivo'] ? '<p class="motivo">' . e($a['motivo']) . '</p>' : '';
         $portais = '';
         if ($a['n_portais'] >= 2) {
@@ -36,6 +37,7 @@
             . '<span class="score ' . $scoreCls . '">' . $a['score_atual'] . '</span>'
             . '<span class="chip ed" style="--c:' . e($a['editoria_cor']) . '">' . e($a['editoria']) . '</span>'
             . $cidadeChip
+            . $midiaChip
             . '<span class="chip origem o-' . e($a['origem']) . '">' . e($a['origem_label']) . '</span>'
             . '<span class="idade ' . ($velho ? 'velho' : '') . '">' . e($idadeTxt($a['idade_horas'])) . '</span>'
             . '</div>'
@@ -97,6 +99,7 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
 .chip.origem{background:#f0f2f7;color:var(--mut)}
 .chip.o-instagram{background:#fdeaf6;color:#b5258a}
 .chip.o-whatsapp{background:#e6f7ec;color:#1f8a4c}
+.chip.nomedia{background:#fff4e0;color:#b06a00;font-weight:700}
 .idade{margin-left:auto;font-size:12px;font-weight:700;color:var(--sky)}
 .idade.velho{color:#aab2c4}
 .titulo{margin:0;font-size:15.5px;font-weight:700;line-height:1.32}
@@ -178,7 +181,14 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
       s.style.display = vis ? '' : (s.querySelector('.empty')? '' : 'none');
     });
     var total=cards.filter(function(c){return c.style.display!=='none'}).length;
-    document.getElementById('vazio').style.display = total ? 'none' : '';
+    var vazio=document.getElementById('vazio');
+    vazio.style.display = total ? 'none' : '';
+    if(!total){
+      var labels={feed:'Portais',whatsapp:'WhatsApp',instagram:'Instagram'};
+      vazio.textContent = origem
+        ? ('Sem pauta de '+(labels[origem]||origem)+' na janela atual.')
+        : 'Nenhuma pauta com esses filtros.';
+    }
   }
   document.getElementById('tabs').addEventListener('click',function(e){
     var b=e.target.closest('.tab'); if(!b)return;

@@ -523,7 +523,9 @@ return [
         // WhatsApp — catch-up de matéria velha é bloqueado (e marcado como
         // tratado pra não acumular). Já-publicado no site também nunca notifica.
         'max_idade_horas' => 12,
-        'relatorio_url' => 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html',
+        // Vitrine /radar ao vivo (lê banco na hora, agrupa por assunto) — substitui
+        // o snapshot estático antigo _tmp_jrlink/extract.html (Goal radar 2.4).
+        'relatorio_url' => 'https://jornaldetijucas.com.br/radar',
     ],
 
     /*

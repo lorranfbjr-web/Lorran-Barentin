@@ -36,6 +36,32 @@ class JrVitrineController extends Controller
         'feed' => 'Portais', 'whatsapp' => 'WhatsApp', 'instagram' => 'Instagram',
     ];
 
+    /** Palavra forte de crime no título → editoria Segurança (regex sem acento-sensível). */
+    private static function pareceCrime(string $titulo): bool
+    {
+        $t = mb_strtolower($titulo);
+
+        return (bool) preg_match(
+            '/\b(assalt|roub|furt|latroc[ií]n|homic[ií]d|assassin|esfaque|balead|tiro|tiros|'
+            . 'a tiros|sequestr|estupr|feminic[ií]d|chacina|tortur|espancad|agress|'
+            . 'arma de fogo|encapuzad|mascarad|refém|ref[eé]ns)/u',
+            $t
+        );
+    }
+
+    /** Título indica mídia (vídeo/câmera/flagrante) que justifica gancho viral. */
+    private static function temMidia(string $titulo): bool
+    {
+        $t = mb_strtolower($titulo);
+
+        return (bool) preg_match(
+            '/\b(v[ií]deo|v[ií]deos|c[âa]mera|c[âa]meras|imagens|grava[çc][ãa]o|filmou|'
+            . 'filmad|flagr|assista|veja o momento|momento em que|registrou|gravou|'
+            . 'circula nas redes|viraliz)/u',
+            $t
+        );
+    }
+
     public function index(Request $request): View
     {
         $horas = min(168, max(6, (int) $request->query('horas', 48)));
@@ -71,7 +97,7 @@ class JrVitrineController extends Controller
                 });
             })
             ->get(['id', 'titulo', 'url', 'host', 'origem', 'cluster_id', 'assunto_id', 'assunto_label',
-                'score_editorial', 'cidade_llm', 'tema_ga4', 'juiz_motivo', 'data_pub', 'created_at']);
+                'score_editorial', 'cidade_llm', 'tema_ga4', 'tipo_gancho', 'juiz_motivo', 'data_pub', 'created_at']);
 
         // Portais (fontes distintas) por cluster — 1 query, sem N+1.
         $clusterIds = $reps->pluck('cluster_id')->filter()->unique()->values();
@@ -108,6 +134,19 @@ class JrVitrineController extends Controller
                     ->values();
 
             [$edLabel, $edCor] = self::EDITORIA[$lider->tema_ga4] ?? ['Geral', '#0061FF'];
+            // Correção determinística de editoria (NÃO toca o juiz): assalto a
+            // comércio etc. costuma cair em "economia_negocios"/"outros". Se o
+            // título tem palavra forte de crime e a editoria do juiz é
+            // economia/outros/geral, exibe Segurança. Não mexe em casos que o juiz
+            // já acertou (seguranca, politica…) nem reescreve o banco.
+            if (in_array($lider->tema_ga4, ['economia_negocios', 'outros', null], true)
+                && self::pareceCrime((string) $lider->titulo)) {
+                [$edLabel, $edCor] = self::EDITORIA['seguranca'];
+            }
+            // Sinal "viral sem mídia confirmada": gancho viral/curiosidade mas o
+            // título não indica vídeo/câmera/flagrante que justifique o hype.
+            $semMidia = in_array($lider->tipo_gancho, ['viral', 'curiosidade'], true)
+                && ! self::temMidia((string) $lider->titulo);
 
             return [
                 'assunto_id' => $lider->assunto_id ?: ('i' . $lider->id),
@@ -121,6 +160,7 @@ class JrVitrineController extends Controller
                 'editoria' => $edLabel,
                 'editoria_cor' => $edCor,
                 'tema' => $lider->tema_ga4,
+                'sem_midia' => $semMidia,
                 'motivo' => $lider->juiz_motivo,
                 'score' => (int) $lider->score_editorial,
                 'score_atual' => $lider->_atual,

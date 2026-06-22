@@ -258,7 +258,9 @@ class RadarNotificador
             $L[] = '';
         }
 
-        $L[] = 'Relatório: ' . ($this->cfg['relatorio_url'] ?? 'https://jornaldetijucas.com.br/_tmp_jrlink/extract.html');
+        // Vitrine /radar ao vivo (lê o banco na hora, agrupado por assunto) — não
+        // o snapshot estático antigo _tmp_jrlink/extract.html.
+        $L[] = 'Relatório: ' . ($this->cfg['relatorio_url'] ?? 'https://jornaldetijucas.com.br/radar');
 
         return implode("\n", $L);
     }
