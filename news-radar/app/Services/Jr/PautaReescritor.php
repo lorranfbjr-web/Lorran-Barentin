@@ -73,6 +73,7 @@ class PautaReescritor
             'materia'    => trim((string) $r['materia']),
             'tags'       => array_slice($tags, 0, 6),
             'cidade'     => isset($r['cidade']) && $r['cidade'] !== '' ? trim((string) $r['cidade']) : $cidade,
+            'editoria'   => strtolower(trim((string) ($r['editoria'] ?? 'geral'))),
             'lacunas'    => $lac,
             'modelo'     => $modelo,
         ];
@@ -110,9 +111,10 @@ REGRAS:
 - materia: prosa corrida em parágrafos curtos (3 a 6 parágrafos), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde), tom factual e sóbrio. Sem markdown, sem títulos internos. Separe parágrafos com \\n\\n.
 - tags: 3 a 6 termos relevantes (cidade, tema, entidades citadas), minúsculas.
 - cidade: a cidade principal da notícia (use "{$cidadeTxt}" se o release indicar; senão null).
+- editoria: classifique em UMA destas (a que melhor descreve o fato): seguranca, politica, economia, saude, educacao, transito, infraestrutura, meioambiente, cultura, esporte, entretenimento, turismo, tecnologia, geral.
 
 RESPONDA APENAS com um array JSON de UM objeto, sem markdown e sem texto fora do JSON:
-[{"titulo":"...","linha_fina":"...","materia":"...","tags":["...","..."],"cidade":"..."|null,"lacunas":["..."]}]
+[{"titulo":"...","linha_fina":"...","materia":"...","tags":["...","..."],"cidade":"..."|null,"editoria":"...","lacunas":["..."]}]
 
 RELEASE BRUTO:
 \"\"\"
