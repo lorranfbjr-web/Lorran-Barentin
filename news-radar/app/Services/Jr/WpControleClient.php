@@ -84,6 +84,106 @@ class WpControleClient
         ];
     }
 
+    /**
+     * PEÇA 3 — sobe a foto na biblioteca de mídia do controle e devolve o id.
+     * Crédito vai no caption (legenda visível) e no alt (acessibilidade) —
+     * preservar crédito de foto oficial é obrigatório.
+     *
+     * @return array{id:int, source_url:string}
+     *
+     * @throws \RuntimeException em falha HTTP
+     */
+    public function uploadMidia(string $absPath, string $filename, string $credito, string $altText): array
+    {
+        if (! is_file($absPath)) {
+            throw new \RuntimeException('arquivo de mídia não existe: ' . $absPath);
+        }
+        $bin = (string) file_get_contents($absPath);
+        $mime = function_exists('mime_content_type') ? (mime_content_type($absPath) ?: 'image/jpeg') : 'image/jpeg';
+
+        $resp = $this->req()
+            ->withHeaders([
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                'Content-Type' => $mime,
+            ])
+            ->withBody($bin, $mime)
+            ->post($this->base . '/wp/v2/media');
+
+        if (! $resp->successful()) {
+            throw new \RuntimeException('WP media upload falhou HTTP ' . $resp->status() . ': ' . mb_substr($resp->body(), 0, 300));
+        }
+        $id = (int) $resp->json('id');
+
+        // crédito no caption + alt + title (legenda visível e acessibilidade).
+        $leg = $credito ? ('Foto: ' . $credito) : '';
+        $this->req()->post($this->base . '/wp/v2/media/' . $id, [
+            'caption' => $leg,
+            'alt_text' => $altText !== '' ? $altText : $leg,
+            'title' => $altText !== '' ? $altText : $leg,
+            'description' => $leg,
+        ]);
+
+        return ['id' => $id, 'source_url' => (string) $resp->json('source_url')];
+    }
+
+    /** PEÇA 3 — seta a foto destacada do post. Mantém status=draft (não publica). */
+    public function setFeaturedMedia(int $postId, int $mediaId): void
+    {
+        $resp = $this->req()->post($this->base . '/wp/v2/posts/' . $postId, [
+            'featured_media' => $mediaId,
+        ]);
+        if (! $resp->successful()) {
+            throw new \RuntimeException('WP set featured_media falhou HTTP ' . $resp->status() . ': ' . mb_substr($resp->body(), 0, 300));
+        }
+    }
+
+    /** GET de um post (campos para o revisor pós-post — Peça 4). */
+    public function getPost(int $postId): array
+    {
+        $r = $this->req()->get($this->base . '/wp/v2/posts/' . $postId, [
+            'context' => 'edit',
+            '_fields' => 'id,status,title,content,excerpt,categories,featured_media',
+        ]);
+        if (! $r->successful()) {
+            throw new \RuntimeException('WP GET post falhou HTTP ' . $r->status());
+        }
+
+        return $r->json() ?? [];
+    }
+
+    /** Legenda (caption) de um item de mídia — pra o revisor checar o crédito. */
+    public function getMediaCaption(int $mediaId): string
+    {
+        $r = $this->req()->get($this->base . '/wp/v2/media/' . $mediaId, ['context' => 'edit', '_fields' => 'caption,alt_text']);
+        if (! $r->successful()) {
+            return '';
+        }
+
+        return trim(strip_tags((string) ($r->json('caption.rendered') ?? $r->json('caption.raw') ?? '')));
+    }
+
+    /**
+     * Atualiza o corpo (content) de um draft. Usado pra (a) inserir a linha de
+     * crédito da foto e (b) auto-fix seguro do revisor (Peça 4). Mantém draft.
+     */
+    public function atualizarConteudo(int $postId, string $rawContent): void
+    {
+        $resp = $this->req()->post($this->base . '/wp/v2/posts/' . $postId, [
+            'content' => $rawContent,
+        ]);
+        if (! $resp->successful()) {
+            throw new \RuntimeException('WP update content falhou HTTP ' . $resp->status() . ': ' . mb_substr($resp->body(), 0, 300));
+        }
+    }
+
+    /** Raw content (edit context) de um post. */
+    public function getRawContent(int $postId): string
+    {
+        $r = $this->req()->get($this->base . '/wp/v2/posts/' . $postId, ['context' => 'edit', '_fields' => 'content']);
+
+        return (string) ($r->json('content.raw') ?? '');
+    }
+
     /** Corpo HTML: matéria + rodapé de proveniência (rascunho interno). */
     private function montarCorpo(string $materia, array $lacunas, string $msgId, ?string $cidade): string
     {
