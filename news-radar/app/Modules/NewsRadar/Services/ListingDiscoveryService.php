@@ -134,18 +134,33 @@ class ListingDiscoveryService
     ): ?ListingItem {
         // Extract link
         $url = null;
-        foreach ($linkSelectors as $sel) {
-            try {
-                $link = $node->filter($sel)->first();
-                if ($link->count() > 0) {
-                    $href = $link->attr('href');
-                    if ($href) {
-                        $url = $this->urlNormalizer->resolveRelative($href, $baseUrl);
-                        break;
+
+        // 2026-06-23: fallback self-anchor. Se o próprio nó-item já é um <a href>, usa o
+        // href dele. Só dispara quando listing_item_selectors aponta pra um anchor (sites
+        // sem card-wrapper: Diarinho, RC FM, TJSC, MPSC, G1 SC, Oeste, Defesa Civil).
+        // Os portais com item=div/article nunca caem aqui (o nó nunca é <a>), então o
+        // seletor genérico dos 96 fica intocado — zero regressão.
+        if (strtolower($node->nodeName()) === 'a') {
+            $selfHref = $node->attr('href');
+            if ($selfHref) {
+                $url = $this->urlNormalizer->resolveRelative($selfHref, $baseUrl);
+            }
+        }
+
+        if (!$url) {
+            foreach ($linkSelectors as $sel) {
+                try {
+                    $link = $node->filter($sel)->first();
+                    if ($link->count() > 0) {
+                        $href = $link->attr('href');
+                        if ($href) {
+                            $url = $this->urlNormalizer->resolveRelative($href, $baseUrl);
+                            break;
+                        }
                     }
+                } catch (\Exception) {
+                    continue;
                 }
-            } catch (\Exception) {
-                continue;
             }
         }
         if (!$url || str_starts_with($url, 'javascript:') || $url === '#') return null;

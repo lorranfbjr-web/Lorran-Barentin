@@ -102,6 +102,15 @@ class HttpFetchService
         if ($charset && !in_array($charset, ['utf-8', 'utf8'])) {
             $converted = @mb_convert_encoding($body, 'UTF-8', $charset);
             if ($converted !== false) {
+                // 2026-06-23: o corpo agora é UTF-8, mas o <meta charset> antigo (ex.: Cruzeiro
+                // do Vale = iso-8859-1) faria o DomCrawler RE-converter e quebrar acentos
+                // ("rÃ¡pido"). Reescreve o charset declarado nas metas pra utf-8. Só roda em
+                // páginas que de fato foram convertidas — corpos UTF-8 saem byte-idênticos.
+                $converted = preg_replace(
+                    '/(<meta[^>]*charset=["\']?)[a-z0-9_-]+/i',
+                    '${1}utf-8',
+                    $converted
+                );
                 return $converted;
             }
         }
