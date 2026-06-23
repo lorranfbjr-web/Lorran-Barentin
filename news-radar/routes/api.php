@@ -15,6 +15,16 @@ use Illuminate\Support\Str;
 // Remover quando a inspeção terminar.
 // ====================================================================
 Route::post('/jr-pauta-capture', function (Request $request) {
+    // FILTRO DE PRIVACIDADE (Parte A): só mensagem de GRUPO permitido vira
+    // arquivo. Conversa individual e grupos da denylist (pessoais / #JRxx /
+    // 'Raspador' anti-loop) são descartados ANTES de tocar o disco — responde
+    // 200 igual pro Z-API não reenfileirar.
+    $isGroup  = filter_var($request->input('isGroup', false), FILTER_VALIDATE_BOOLEAN);
+    $chatName = $request->input('chatName');
+    if (! \App\Services\Jr\CapturaFiltro::aceita($chatName, $isGroup)) {
+        return response()->json(['ok' => true, 'skipped' => 'privacy_filter']);
+    }
+
     $dir = storage_path('app/jr-pauta-capture');
     if (! is_dir($dir)) {
         @mkdir($dir, 0775, true);

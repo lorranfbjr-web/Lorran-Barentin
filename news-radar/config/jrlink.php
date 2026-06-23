@@ -549,10 +549,48 @@ return [
     | ANTI-LOOP da captura: mensagem que a PRÓPRIA instância manda pro Raspador
     | não pode voltar pro pipeline como "link do WhatsApp". Corta na coleta
     | (jrlink:extract > coletarUrls), nunca no armazenamento bruto.
+    |
+    | FILTRO DE PRIVACIDADE (Parte A): a captura aceita SOMENTE mensagem de GRUPO
+    | (is_group=1) — conversa individual nunca é gravada nem ingerida. Além disso
+    | uma denylist NOMINAL de grupos pessoais/próprios e uma denylist por REGEX
+    | (os 56 grupos de distribuição "✍️ Jornal Razão #JRxx", que são a SAÍDA do
+    | disparador — capturá-los reengoliria o próprio conteúdo do JR). A defesa
+    | anti-loop continua sendo a denylist de chat ('Raspador'): o Z-API entrega
+    | mensagem própria com from_me=0, então NÃO se confia nesse flag — o nome do
+    | chat é a barreira. Aplicado em DOIS pontos: na rota /api/jr-pauta-capture
+    | (não grava em disco) e no jrpauta:ingest (não vira linha). Via App\Services\
+    | Jr\CapturaFiltro::aceita().
     */
     'captura' => [
         'ignorar_from_me' => true,
-        'ignorar_chats' => ['Raspador'],
+        // chats cortados SEMPRE (anti-loop + pessoais nominais). Casa por nome
+        // exato (case-insensitive). 'Raspador' = chat de saída (anti-loop).
+        'ignorar_chats' => [
+            'Raspador',
+            'Família Buscapé 🤪',
+            'Serviços Executados',
+            'Lesadas pela JANNA/ VIRTUOSA oficial',
+            'Ideias Mkt Alex',
+        ],
+        // só mensagem de grupo entra (Parte A — opção B).
+        'somente_grupo' => true,
+        // denylist por regex: os 56 grupos de distribuição do disparador.
+        'denylist_regex' => [
+            '/Jornal Raz[aã]o\s*#JR\d+/iu',
+        ],
+    ],
+
+    /*
+    | PONTE captura→Radar (Parte C): promove release de TEXTO de grupo (sem link
+    | http — link já é tratado por jrlink:extract) pra jr_link_extracao com
+    | origem=whatsapp. Janela pela HORA DA CAPTURA (momment), não pelo created_at,
+    | pra o backlog não inundar o juiz. O juiz roteia origem=whatsapp DIRETO
+    | (pula o gate coarse, calibrado pra manchete), igual ao canal Instagram.
+    */
+    'bridge_whatsapp' => [
+        'janela_horas' => (int) env('JRLINK_WA_BRIDGE_HORAS', 72),
+        'min_chars' => (int) env('JRLINK_WA_BRIDGE_MIN_CHARS', 60),
+        'cap_por_run' => (int) env('JRLINK_WA_BRIDGE_CAP', 200),
     ],
 
     /*

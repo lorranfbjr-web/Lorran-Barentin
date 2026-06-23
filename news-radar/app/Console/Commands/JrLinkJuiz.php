@@ -80,26 +80,31 @@ class JrLinkJuiz extends Command
             }
         }
 
-        // ── CANAL INSTAGRAM direto ao juiz ──
+        // ── CANAIS SOCIAIS (Instagram + WhatsApp) direto ao juiz ──
         // O gate coarse foi calibrado pra MANCHETE de portal; o scraper de IG
-        // salva a 1ª linha da LEGENDA como "título" (emoji/horário/frase solta),
-        // que quase nunca passa o coarse — 88% do canal morria antes do juiz.
-        // Aqui todo item origem=instagram (não-julgado) entra DIRETO, sem exigir
-        // score coarse. Feed/WhatsApp seguem só pela via de cluster-rep acima —
-        // esta via NÃO os toca. O juiz decide pauta lendo a legenda (aviso no
+        // salva a 1ª linha da LEGENDA como "título" (emoji/horário/frase solta)
+        // e o release de WhatsApp é texto de grupo sem cara de manchete — ambos
+        // quase nunca passam o coarse e morreriam antes do juiz. Aqui todo item
+        // origem=instagram OU origem=whatsapp (não-julgado) entra DIRETO, sem
+        // exigir score coarse. FEED segue só pela via de cluster-rep acima —
+        // esta via NÃO o toca. O juiz decide pauta lendo o texto (aviso no
         // input). Dedup do display segue por cluster (radar mostra 1 por evento).
         $igDireto = 0;
+        $waDireto = 0;
         if (! $this->option('ids')) {
             $jaNaLista = collect($aJulgar)->keyBy('id');
             foreach ($rows as $r) {
-                if ($r->origem === 'instagram' && ! $jaNaLista->has($r->id)) {
+                if (in_array($r->origem, ['instagram', 'whatsapp'], true) && ! $jaNaLista->has($r->id)) {
                     $aJulgar[] = $r;
-                    $igDireto++;
+                    $r->origem === 'whatsapp' ? $waDireto++ : $igDireto++;
                 }
             }
         }
         if ($igDireto > 0) {
             $this->info(sprintf('Canal Instagram: +%d posts de IG roteados direto ao juiz (sem gate coarse).', $igDireto));
+        }
+        if ($waDireto > 0) {
+            $this->info(sprintf('Canal WhatsApp: +%d release(s) de grupo roteados direto ao juiz (sem gate coarse).', $waDireto));
         }
 
         // --ids: re-julga itens específicos (calibração dirigida), sem clusterizar de novo.
@@ -366,6 +371,12 @@ class JrLinkJuiz extends Command
                 // entra pelo INPUT do item — o prompt BASE do juiz não muda.
                 if (($r->origem ?? null) === 'instagram') {
                     $lead = "[Este texto é a LEGENDA de um post de INSTAGRAM de um perfil regional — pode começar com emoji, horário ou frase solta, sem formato de manchete de jornal. Avalie o ASSUNTO da legenda como possível pauta, não o formato.]\n\n" . $lead;
+                }
+                // CANAL WHATSAPP: o texto é uma MENSAGEM de grupo de imprensa/
+                // release (prefeitura, polícia, assessoria) — sem formato de
+                // manchete. Aviso pelo INPUT do item; o prompt BASE não muda.
+                if (($r->origem ?? null) === 'whatsapp') {
+                    $lead = "[Este texto é uma MENSAGEM de um grupo de WhatsApp de imprensa/release (assessoria de prefeitura, polícia, órgão público ou veículo) — pode ser informal, sem formato de manchete de jornal. Avalie o ASSUNTO da mensagem como possível pauta, não o formato.]\n\n" . $lead;
                 }
                 // GUARDA DE FATO-VELHO: a instrução entra pelo INPUT do item (o
                 // prompt BASE do juiz não muda). Heurística barata sinaliza no
