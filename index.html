@@ -130,6 +130,84 @@ input[type="file"]::file-selector-button {
   .form-section { padding: 20px; }
 }
 @media (max-width: 480px) { .stories-grid { max-width: 100%; } }
+.plugins-section {
+  background: #16213e; border-radius: 16px; padding: 28px;
+  margin-bottom: 32px; box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+}
+.plugins-header {
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; user-select: none;
+}
+.plugins-header h2 {
+  font-weight: 900; font-size: 1rem; color: #18ADFE;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.plugins-header .toggle-icon {
+  font-size: 1.2rem; color: #18ADFE; transition: transform 0.2s;
+}
+.plugins-header .toggle-icon.open { transform: rotate(180deg); }
+.plugins-body { display: none; margin-top: 20px; }
+.plugins-body.open { display: block; }
+.plugin-load-row { display: flex; gap: 10px; margin-bottom: 16px; }
+.plugin-load-row input[type="text"] {
+  flex: 1; background: #0f3460; border: 2px solid #1a1a4e; border-radius: 10px;
+  color: #fff; font-family: 'Montserrat', sans-serif; font-weight: 800;
+  font-size: 0.85rem; padding: 10px 14px;
+}
+.plugin-load-row input[type="text"]:focus { outline: none; border-color: #0061FF; }
+.plugin-load-row input[type="text"]::placeholder { color: #555; }
+.btn-plugin {
+  background: #0061FF; color: #fff; font-family: 'Montserrat', sans-serif;
+  font-weight: 800; font-size: 0.8rem; padding: 10px 16px;
+  border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.btn-plugin:hover { background: #0050d4; }
+.btn-plugin.secondary { background: #1a1a4e; }
+.btn-plugin.secondary:hover { background: #2a2a5e; }
+.models-list { list-style: none; }
+.models-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid #1a1a4e;
+}
+.models-list li:last-child { border-bottom: none; }
+.model-info { display: flex; align-items: center; gap: 10px; }
+.model-info .model-name { font-weight: 800; font-size: 0.85rem; }
+.model-info .model-badge {
+  font-size: 0.7rem; color: #888; background: #1a1a4e;
+  padding: 2px 8px; border-radius: 4px;
+}
+.model-toggle {
+  position: relative; width: 40px; height: 22px;
+  background: #1a1a4e; border-radius: 11px; cursor: pointer; border: none;
+  transition: background 0.2s;
+}
+.model-toggle.active { background: #0061FF; }
+.model-toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; background: #fff; border-radius: 50%;
+  transition: left 0.2s;
+}
+.model-toggle.active::after { left: 21px; }
+.plugin-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #0f3460; border-radius: 8px; padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.plugin-item .plugin-meta { display: flex; align-items: center; gap: 8px; }
+.plugin-item .plugin-name { font-weight: 800; font-size: 0.85rem; }
+.plugin-item .plugin-version { font-size: 0.7rem; color: #888; }
+.btn-remove {
+  background: #e74c3c; color: #fff; font-family: 'Montserrat', sans-serif;
+  font-weight: 800; font-size: 0.7rem; padding: 4px 10px;
+  border: none; border-radius: 4px; cursor: pointer;
+}
+.btn-remove:hover { background: #c0392b; }
+.custom-tags-row { display: flex; gap: 10px; margin-top: 16px; }
+.section-label {
+  font-weight: 800; font-size: 0.8rem; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #18ADFE; margin-bottom: 10px; margin-top: 16px;
+}
+.section-label:first-child { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -171,6 +249,31 @@ input[type="file"]::file-selector-button {
     </div>
     <button class="btn-generate" id="btnGenerate" onclick="generateStories()">Gerar Stories</button>
   </div>
+  <div class="plugins-section">
+    <div class="plugins-header" onclick="togglePluginsPanel()">
+      <h2>Plugins &amp; Modelos</h2>
+      <span class="toggle-icon" id="pluginsToggleIcon">&#9660;</span>
+    </div>
+    <div class="plugins-body" id="pluginsBody">
+      <div class="section-label">Carregar plugin</div>
+      <div class="plugin-load-row">
+        <input type="text" id="pluginUrl" placeholder="URL do arquivo JS do plugin...">
+        <button class="btn-plugin" onclick="JR.loadPluginFromURL(document.getElementById('pluginUrl').value)">Carregar</button>
+      </div>
+      <div class="plugin-load-row">
+        <input type="file" id="pluginFile" accept=".js" style="flex:1">
+        <button class="btn-plugin secondary" onclick="JR.loadPluginFromFile(document.getElementById('pluginFile').files[0])">Carregar arquivo</button>
+      </div>
+      <div id="pluginsList"></div>
+      <div class="section-label">Modelos registrados</div>
+      <ul class="models-list" id="modelsList"></ul>
+      <div class="section-label">Adicionar tag personalizada</div>
+      <div class="custom-tags-row">
+        <input type="text" id="customTagInput" placeholder="Nome da tag..." style="flex:1;background:#0f3460;border:2px solid #1a1a4e;border-radius:10px;color:#fff;font-family:'Montserrat',sans-serif;font-weight:800;font-size:0.85rem;padding:10px 14px;">
+        <button class="btn-plugin" onclick="JR.addCustomTag()">Adicionar</button>
+      </div>
+    </div>
+  </div>
   <div class="loading" id="loading">
     <div class="spinner"></div>
     <p>Gerando stories...</p>
@@ -186,10 +289,230 @@ input[type="file"]::file-selector-button {
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <img id="lightboxImg" alt="Story ampliado">
 </div>
-<div class="footer">Jornal Razão &copy; 2026 — Ferramenta interna &mdash; v4</div>
+<div class="footer">Jornal Razão &copy; 2026 — Ferramenta interna &mdash; v5 (plugins)</div>
 <script>
 // ─── VERSION ───────────────────────────────────────────────────
-console.log('[JR Stories] v4 - adicionado modelo Capa de Video');
+console.log('[JR Stories] v5 - sistema de plugins');
+
+// ─── PLUGIN SYSTEM ─────────────────────────────────────────────
+const JR = {
+  _models: [],
+  _plugins: [],
+  _defaultTags: [
+    'SEGURANÇA','TRÂNSITO','POLÍTICA','ECONOMIA','ACIDENTE',
+    'ESPORTE','MEIO AMBIENTE','GERAL','INCÊNDIO','JUSTIÇA',
+    'EDUCAÇÃO','OBITUÁRIO'
+  ],
+  _customTags: [],
+
+  registerModel: function(config) {
+    if (!config.id || !config.name || !config.render) {
+      console.error('[JR Plugin] registerModel: id, name, and render are required');
+      return;
+    }
+    var existing = this._models.findIndex(function(m) { return m.id === config.id; });
+    if (existing >= 0) {
+      this._models[existing] = Object.assign(this._models[existing], config);
+      console.log('[JR Plugin] Model updated: ' + config.name);
+    } else {
+      config.enabled = config.enabled !== false;
+      config.source = config.source || 'plugin';
+      config.file = config.file || ('story_' + config.id + '.png');
+      config.requiresPhoto = config.requiresPhoto !== false;
+      this._models.push(config);
+      console.log('[JR Plugin] Model registered: ' + config.name);
+    }
+    this._refreshModelsUI();
+  },
+
+  unregisterModel: function(id) {
+    this._models = this._models.filter(function(m) { return m.id !== id; });
+    this._refreshModelsUI();
+  },
+
+  getEnabledModels: function() {
+    return this._models.filter(function(m) { return m.enabled !== false; });
+  },
+
+  toggleModel: function(id) {
+    var model = this._models.find(function(m) { return m.id === id; });
+    if (model) {
+      model.enabled = !model.enabled;
+      this._refreshModelsUI();
+    }
+  },
+
+  registerTag: function(tag) {
+    tag = tag.toUpperCase().trim();
+    if (!tag) return;
+    if (this._defaultTags.indexOf(tag) >= 0 || this._customTags.indexOf(tag) >= 0) return;
+    this._customTags.push(tag);
+    this._refreshTagsUI();
+    console.log('[JR Plugin] Tag registered: ' + tag);
+  },
+
+  registerPlugin: function(plugin) {
+    if (!plugin.id || !plugin.name) {
+      console.error('[JR Plugin] registerPlugin: id and name are required');
+      return;
+    }
+    this._plugins.push({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version || '1.0',
+      description: plugin.description || ''
+    });
+    if (plugin.models) {
+      var self = this;
+      plugin.models.forEach(function(m) {
+        m.source = plugin.name;
+        self.registerModel(m);
+      });
+    }
+    if (plugin.tags) {
+      var self = this;
+      plugin.tags.forEach(function(t) { self.registerTag(t); });
+    }
+    this._refreshPluginsUI();
+    console.log('[JR Plugin] Plugin loaded: ' + plugin.name + ' v' + (plugin.version || '1.0'));
+  },
+
+  unregisterPlugin: function(pluginId) {
+    var plugin = this._plugins.find(function(p) { return p.id === pluginId; });
+    if (!plugin) return;
+    var pluginName = plugin.name;
+    this._models = this._models.filter(function(m) { return m.source !== pluginName; });
+    this._plugins = this._plugins.filter(function(p) { return p.id !== pluginId; });
+    this._refreshPluginsUI();
+    this._refreshModelsUI();
+    console.log('[JR Plugin] Plugin removed: ' + pluginName);
+  },
+
+  loadPluginFromURL: function(url) {
+    if (!url || !url.trim()) { alert('Digite a URL do plugin.'); return; }
+    url = url.trim();
+    var script = document.createElement('script');
+    script.src = url;
+    script.onload = function() {
+      console.log('[JR Plugin] Script loaded from: ' + url);
+      document.getElementById('pluginUrl').value = '';
+    };
+    script.onerror = function() {
+      alert('Erro ao carregar plugin de: ' + url);
+    };
+    document.head.appendChild(script);
+  },
+
+  loadPluginFromFile: function(file) {
+    if (!file) { alert('Selecione um arquivo JS.'); return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var fn = new Function(e.target.result);
+        fn();
+        console.log('[JR Plugin] Script loaded from file: ' + file.name);
+        document.getElementById('pluginFile').value = '';
+      } catch (err) {
+        alert('Erro ao executar plugin: ' + err.message);
+        console.error('[JR Plugin] Error:', err);
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  addCustomTag: function() {
+    var input = document.getElementById('customTagInput');
+    var tag = input.value.trim();
+    if (!tag) return;
+    this.registerTag(tag);
+    input.value = '';
+  },
+
+  _refreshModelsUI: function() {
+    var list = document.getElementById('modelsList');
+    if (!list) return;
+    list.innerHTML = '';
+    this._models.forEach(function(m) {
+      var li = document.createElement('li');
+      var info = document.createElement('div');
+      info.className = 'model-info';
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'model-name';
+      nameSpan.textContent = m.name;
+      info.appendChild(nameSpan);
+      if (m.source) {
+        var badge = document.createElement('span');
+        badge.className = 'model-badge';
+        badge.textContent = m.source;
+        info.appendChild(badge);
+      }
+      if (m.requiresPhoto === false) {
+        var badge2 = document.createElement('span');
+        badge2.className = 'model-badge';
+        badge2.textContent = 'sem foto';
+        info.appendChild(badge2);
+      }
+      var toggle = document.createElement('button');
+      toggle.className = 'model-toggle' + (m.enabled !== false ? ' active' : '');
+      toggle.onclick = function() { JR.toggleModel(m.id); };
+      li.appendChild(info);
+      li.appendChild(toggle);
+      list.appendChild(li);
+    });
+  },
+
+  _refreshPluginsUI: function() {
+    var container = document.getElementById('pluginsList');
+    if (!container) return;
+    container.innerHTML = '';
+    this._plugins.forEach(function(p) {
+      if (p.source === 'built-in') return;
+      var item = document.createElement('div');
+      item.className = 'plugin-item';
+      var meta = document.createElement('div');
+      meta.className = 'plugin-meta';
+      var name = document.createElement('span');
+      name.className = 'plugin-name';
+      name.textContent = p.name;
+      var ver = document.createElement('span');
+      ver.className = 'plugin-version';
+      ver.textContent = 'v' + p.version;
+      meta.appendChild(name);
+      meta.appendChild(ver);
+      var btn = document.createElement('button');
+      btn.className = 'btn-remove';
+      btn.textContent = 'Remover';
+      btn.onclick = function() { JR.unregisterPlugin(p.id); };
+      item.appendChild(meta);
+      item.appendChild(btn);
+      container.appendChild(item);
+    });
+  },
+
+  _refreshTagsUI: function() {
+    var select = document.getElementById('tag');
+    if (!select) return;
+    var currentVal = select.value;
+    select.innerHTML = '';
+    var allTags = this._defaultTags.concat(this._customTags);
+    allTags.forEach(function(t) {
+      var opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      select.appendChild(opt);
+    });
+    if (allTags.indexOf(currentVal) >= 0) select.value = currentVal;
+  },
+
+  helpers: {}
+};
+
+function togglePluginsPanel() {
+  var body = document.getElementById('pluginsBody');
+  var icon = document.getElementById('pluginsToggleIcon');
+  body.classList.toggle('open');
+  icon.classList.toggle('open');
+}
 
 // ─── roundRect polyfill ────────────────────────────────────────
 if (!CanvasRenderingContext2D.prototype.roundRect) {
@@ -720,6 +1043,67 @@ function renderModelCapa(title, logos) {
   return canvas;
 }
 
+// ─── Expose helpers for plugins ─────────────────────────────────
+JR.helpers = {
+  loadImage: loadImage,
+  autoCropCanvas: autoCropCanvas,
+  recolorCanvas: recolorCanvas,
+  resizeCanvas: resizeCanvas,
+  cropBlackBars: cropBlackBars,
+  drawPhotoCropped: drawPhotoCropped,
+  drawCircularLogo: drawCircularLogo,
+  wrapText: wrapText,
+  drawTag: drawTag,
+  drawTitle: drawTitle,
+  W: W,
+  H: H
+};
+
+// ─── Register built-in models ───────────────────────────────────
+JR.registerModel({
+  id: 'diagonal_azul',
+  name: 'Diagonal Azul',
+  file: 'story_diagonal_azul.png',
+  requiresPhoto: true,
+  source: 'built-in',
+  render: function(params) {
+    return renderModel1(params.photo, params.title, params.tag, params.logos);
+  }
+});
+
+JR.registerModel({
+  id: 'diagonal_branco',
+  name: 'Diagonal Branco',
+  file: 'story_diagonal_branco.png',
+  requiresPhoto: true,
+  source: 'built-in',
+  render: function(params) {
+    return renderModel2(params.photo, params.title, params.tag, params.logos);
+  }
+});
+
+JR.registerModel({
+  id: 'foto_total',
+  name: 'Foto Total',
+  file: 'story_foto_total.png',
+  requiresPhoto: true,
+  source: 'built-in',
+  render: function(params) {
+    return renderModel3(params.photo, params.title, params.tag, params.logos);
+  }
+});
+
+JR.registerModel({
+  id: 'capa_video',
+  name: 'Capa de Vídeo',
+  file: 'story_capa_video.png',
+  requiresPhoto: false,
+  source: 'built-in',
+  render: function(params) {
+    return renderModelCapa(params.title, params.logos);
+  }
+});
+
 // ─── Canvas to Blob ─────────────────────────────────────────────
 function canvasToBlob(canvas) {
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
@@ -768,27 +1152,23 @@ async function generateStories() {
       console.log('[JR] Photo after crop: ' + photo.width + 'x' + photo.height);
     }
 
-    // Generate models
-    console.log('[JR] Rendering models...');
+    // Generate models from plugin registry
+    console.log('[JR] Rendering models from registry...');
     var models = [];
+    var enabledModels = JR.getEnabledModels();
+    var renderParams = { photo: photo, title: title, tag: tag, logos: logos, W: W, H: H };
 
-    // Story models only if photo was provided
-    if (photo) {
-      var canvas1 = renderModel1(photo, title, tag, logos);
-      var canvas2 = renderModel2(photo, title, tag, logos);
-      var canvas3 = renderModel3(photo, title, tag, logos);
-      var blob1 = await canvasToBlob(canvas1);
-      var blob2 = await canvasToBlob(canvas2);
-      var blob3 = await canvasToBlob(canvas3);
-      models.push({ name: 'Diagonal Azul', file: 'story_diagonal_azul.png', blob: blob1 });
-      models.push({ name: 'Diagonal Branco', file: 'story_diagonal_branco.png', blob: blob2 });
-      models.push({ name: 'Foto Total', file: 'story_foto_total.png', blob: blob3 });
+    for (var mi = 0; mi < enabledModels.length; mi++) {
+      var modelDef = enabledModels[mi];
+      if (modelDef.requiresPhoto && !photo) continue;
+      try {
+        var canvas = modelDef.render(renderParams);
+        var blob = await canvasToBlob(canvas);
+        models.push({ name: modelDef.name, file: modelDef.file, blob: blob });
+      } catch (err) {
+        console.error('[JR] Error rendering model ' + modelDef.name + ':', err);
+      }
     }
-
-    // Capa de Video always generates (no photo needed)
-    var canvas4 = renderModelCapa(title, logos);
-    var blob4 = await canvasToBlob(canvas4);
-    models.push({ name: 'Capa de Vídeo', file: 'story_capa_video.png', blob: blob4 });
 
     console.log('[JR] Models rendered: ' + models.length);
 
