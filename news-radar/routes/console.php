@@ -83,3 +83,20 @@ Schedule::command('jr:dom-oportunidades --lote=8')
 Schedule::command('jr:dom-retroativo --chunks=1')
     ->cron('10,40 * * * *')
     ->withoutOverlapping(600);
+
+// ── RADAR CÍVICO Fase 2 — CÂMARAS (SAPL) — proposições legislativas ──
+// ADITIVO/ISOLADO (não toca DOM/juiz/captura). Só 2 das 5 câmaras com SAPL são
+// vivas (São Bento do Sul, Rio do Sul); nelas o forward pega proposição nova, nas
+// stale vira no-op (esperado). Grade /5 do timer + withoutOverlapping.
+//
+// (1) FORWARD — de hora em hora puxa o ano corrente de cada câmara e PARA por
+//     tipo ao bater no que já temos (early-stop). Raro mudar => cadência leve.
+Schedule::command('jr:camara-ingest --parar-vistos=20')
+    ->cron('25 * * * *')
+    ->withoutOverlapping(600);
+
+// (2) FARO — pontua só as proposições novas (whereNull score) com Sonnet
+//     (dual-lens 🔴/🟢, lente câmara). Offset pra rodar logo após o forward.
+Schedule::command('jr:camara-score')
+    ->cron('35 * * * *')
+    ->withoutOverlapping(600);
