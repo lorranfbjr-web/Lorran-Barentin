@@ -31,6 +31,19 @@ class DomController extends Controller
         'todas'            => ['cat' => null, 'mod' => null],
     ];
 
+    /**
+     * CINCATARINA — Consórcio Interfederativo Santa Catarina (codigoEntidade 363),
+     * o maior gastador do estado. Já é capturado pelo crawler do DOM (executivo);
+     * aqui só damos DESTAQUE/pin (badge no card + filtro). Casa pelo órgão (o snippet
+     * grava o nome do consórcio, não o código).
+     */
+    private const CINCA_ORGAO = 'Interfederativo Santa Catarina';
+
+    private function ehCinca(?string $orgao): bool
+    {
+        return $orgao !== null && mb_stripos($orgao, self::CINCA_ORGAO) !== false;
+    }
+
     // ───────────────────────── dedup + fornecedor (OBJ4/OBJ6) ─────────────────────────
 
     /** Assinatura de conteúdo p/ colapsar republicações (mesma entidade+objeto+data). */
@@ -200,6 +213,7 @@ HTML;
                 'valor' => $a->valor !== null ? (float) $a->valor : null,
                 'fornecedor' => $a->fornecedor,
                 'forn_reps' => $fornReps, // nº municípios se recorrente (>=2), senão null
+                'cinca' => $this->ehCinca($a->orgao), // 🏛️ CINCATARINA (maior gastador do estado)
                 'data_pub' => $a->data_pub,
                 'texto' => (string) ($a->texto_bruto ?: ''),
                 'url_fonte' => $a->url_fonte,
@@ -223,6 +237,7 @@ HTML;
         $total = DB::table('jr_dom_atos')->count();
         $nFisc = count(array_filter($dados, fn ($d) => $d['tipo'] === 'fiscalizacao'));
         $nServ = count(array_filter($dados, fn ($d) => $d['tipo'] === 'servico'));
+        $nCinca = count(array_filter($dados, fn ($d) => $d['cinca']));
         $json = json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $body = <<<HTML
@@ -245,6 +260,7 @@ HTML;
   <button type="button" class="lb on" data-tipo="">Tudo</button>
   <button type="button" class="lb" data-tipo="fiscalizacao">🔴 Fiscalização <b>{$nFisc}</b></button>
   <button type="button" class="lb" data-tipo="servico">🟢 Serviço <b>{$nServ}</b></button>
+  <button type="button" class="lb cinca" id="bcinca">🏛️ CINCATARINA <b>{$nCinca}</b></button>
   <label class="fchk"><input type="checkbox" id="fornrec"> só fornecedor recorrente</label>
 </div>
 <div class="muted small">{$totalScored} atos analisados · {$total} ingeridos · a página enche sozinha conforme o scoring termina</div>
@@ -275,6 +291,7 @@ function card(d){
   // OBJ6 — marcador de lente (🔴 fiscalização / 🟢 serviço) e badges
   const lens=d.tipo==='fiscalizacao'?'<span class="lens-dot" title="fiscalização — red flag a apurar">🔴</span>':(d.tipo==='servico'?'<span class="lens-dot" title="serviço / 1ª-mão">🟢</span>':'');
   const fr=d.forn_reps?'<span class="frec" title="'+esc(d.fornecedor||"")+'">👷 fornecedor recorrente · '+d.forn_reps+' municípios</span>':'';
+  const cinca=d.cinca?'<span class="frec cinca" title="Consórcio Interfederativo Santa Catarina — maior gastador do estado">🏛️ CINCATARINA</span>':'';
   const reps=(d._reps>1)?'<span class="frec rep">republicado ×'+d._reps+'</span>':'';
   return '<div class="card">'+
     '<div class="face">'+
@@ -283,7 +300,7 @@ function card(d){
         '<div class="l1">'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
         '<div class="l2">'+modtag+esc(d.objeto||"")+'</div>'+
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
-        ((fr||reps)?'<div class="badges">'+fr+reps+'</div>':'')+
+        ((cinca||fr||reps)?'<div class="badges">'+cinca+fr+reps+'</div>':'')+
       '</div>'+
     '</div>'+
     '<details><summary>ver detalhes</summary><div class="det">'+
@@ -300,7 +317,7 @@ function card(d){
     '</div></details>'+
   '</div>';
 }
-let tipoSel="";
+let tipoSel="",soCinca=false;
 function render(){
   const q=document.getElementById("q").value.toLowerCase().trim();
   const mod=document.getElementById("mod").value,ord=document.getElementById("ord").value;
@@ -308,6 +325,7 @@ function render(){
   const soForn=document.getElementById("fornrec").checked;
   let arr=DADOS.filter(d=>{
     if(tipoSel&&d.tipo!==tipoSel)return false;
+    if(soCinca&&!d.cinca)return false;
     if(soForn&&!d.forn_reps)return false;
     if(mod&&d.modalidade!==mod)return false;
     if(vmin&&!(d.valor>=vmin))return false;
@@ -321,9 +339,12 @@ function render(){
   document.getElementById("count").textContent=arr.length+" itens";
   document.getElementById("lista").innerHTML=arr.length?arr.map(card).join(""):'<div class="empty">Nenhum ato bate os filtros.</div>';
 }
-document.querySelectorAll(".lb").forEach(b=>b.addEventListener("click",()=>{
-  document.querySelectorAll(".lb").forEach(x=>x.classList.remove("on"));
+document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".lb[data-tipo]").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");tipoSel=b.dataset.tipo;render();}));
+// CINCATARINA é filtro de ENTIDADE (ortogonal à lente 🔴/🟢): toggle próprio.
+document.getElementById("bcinca").addEventListener("click",e=>{
+  soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
 ["q","mod","ord","vmin","fornrec"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 render();
 </script>
@@ -554,6 +575,8 @@ td.muni .reg{display:block;margin-top:1px}
 .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
 .frec{font-size:11px;font-weight:700;color:#7a3f12;background:#fdf0e1;border:1px solid #f3d9bf;border-radius:999px;padding:2px 9px}
 .frec.rep{color:var(--muted);background:#eef1f8;border-color:var(--line)}
+.frec.cinca{color:#fff;background:var(--navy);border-color:var(--navy)}
+.lb.cinca.on{background:var(--amber);color:#1c1408;border-color:var(--amber)}
 .oque{font-size:13.5px;margin:2px 0 4px}
 .why{font-size:13px;color:#333;background:#f8f9fc;border-left:3px solid var(--navy);padding:7px 10px;border-radius:0 8px 8px 0;margin:2px 0 8px}
 .why .lab{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:2px}
