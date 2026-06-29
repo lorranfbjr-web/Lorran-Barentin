@@ -34,6 +34,9 @@ Route::get('/dom-busca', [\App\Http\Controllers\DomController::class, 'busca']);
 // RADAR CÍVICO DE SC — Fase 7: une DOM + Câmaras + MPSC + TCE num radar só
 // (filtro por fonte + dual-lens + busca). Server-rendered, lê as tabelas ao vivo.
 Route::get('/radar-civico', [\App\Http\Controllers\RadarCivicoController::class, 'index']);
+// Fase 2 — íntegra do ato (lazy, read-only): texto_bruto do trecho daquele assunto.
+Route::get('/radar-civico/ato/{source}/{id}', [\App\Http\Controllers\RadarCivicoController::class, 'ato'])
+    ->where('source', 'dom|camara|mpsc|tce')->where('id', '\d+');
 
 // MESA DE PAUTA — Fase 1: triagem + fila de produção server-side (cross-device).
 // ATRÁS de JrPanelKey (cookie do painel, mesma chave do Radar): a fila é do

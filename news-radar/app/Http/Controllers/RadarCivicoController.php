@@ -57,6 +57,41 @@ class RadarCivicoController extends Controller
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
+    /** Fonte → tabela (whitelist; usado pela íntegra do ato, Fase 2). */
+    private const TABELAS = [
+        'dom' => 'jr_dom_atos',
+        'camara' => 'jr_camara_proposicoes',
+        'mpsc' => 'jr_mpsc_extratos',
+        'tce' => 'jr_tce_decisoes',
+    ];
+
+    /**
+     * FASE 2 — íntegra do ato (lazy). Lê texto_bruto (o trecho específico daquele
+     * assunto, já parseado na ingestão) da tabela-fonte e devolve em JSON pro
+     * container inline. Read-only, público como o radar. Mantém o PDF como link
+     * secundário ("abrir original").
+     */
+    public function ato(string $source, int $id)
+    {
+        $tabela = self::TABELAS[$source] ?? null;
+        if (! $tabela) {
+            return response()->json(['error' => 'fonte inválida'], 404);
+        }
+
+        $cols = DB::getSchemaBuilder()->getColumnListing($tabela);
+        $sel = array_values(array_intersect(['texto_bruto', 'url_pdf', 'url_fonte'], $cols));
+        $row = DB::table($tabela)->where('id', $id)->first($sel);
+        if (! $row) {
+            return response()->json(['error' => 'ato não encontrado'], 404);
+        }
+
+        return response()->json([
+            'texto' => trim((string) ($row->texto_bruto ?? '')) ?: null,
+            'url_pdf' => $row->url_pdf ?? null,
+            'url_fonte' => $row->url_fonte ?? null,
+        ]);
+    }
+
     // ───────────────────────── fontes → forma comum ─────────────────────────
 
     private function dom(): array
@@ -255,6 +290,14 @@ summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}deta
 .angulo{font-size:13px;font-style:italic;color:#334;margin:6px 0}
 .links{margin-top:9px}.srcl{display:inline-block;font-size:12.5px;font-weight:700;color:#fff;background:var(--navy);padding:7px 13px;border-radius:9px;text-decoration:none}
 .srcl.pdf{background:#fff;color:var(--navy);border:1px solid var(--navy);margin-left:6px}
+.srcl.integra-btn{border:none;cursor:pointer;font:inherit}
+.srcl.integra-btn.on{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+.integra-box{display:none;margin-top:8px}.integra-box.open{display:block}
+.integra-txt{white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.5;color:#222;background:#f8f9fc;border:1px solid var(--line);border-left:3px solid var(--navy);border-radius:0 8px 8px 0;padding:10px 12px;max-height:340px;overflow:auto}
+.integra-load{font-size:12px;color:var(--muted);padding:8px 2px}
+.origs{margin-top:9px;display:flex;gap:14px;flex-wrap:wrap}
+.origs a{font-size:11.5px;color:var(--muted);font-weight:700;text-decoration:none}
+.origs a:hover{color:var(--navy);text-decoration:underline}
 .empty{text-align:center;color:var(--muted);padding:36px 16px}
 footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
 </style></head><body>
@@ -318,8 +361,14 @@ function card(d){
       (d.extra?'<div class="extra">'+esc(d.extra)+'</div>':'')+
       (apurar?'<div class="lab">o que apurar</div><ul class="apurar">'+apurar+'</ul>':'')+
       (d.angulo?'<div class="angulo">Ângulo: '+esc(d.angulo)+'</div>':'')+
-      '<div class="links"><a class="srcl" href="'+esc(d.url_fonte)+'" target="_blank" rel="noopener">Ver na fonte</a>'+
-        (d.url_pdf?'<a class="srcl pdf" href="'+esc(d.url_pdf)+'" target="_blank" rel="noopener">PDF</a>':'')+'</div>'+
+      '<div class="links">'+
+        '<button type="button" class="srcl integra-btn" data-ref="'+esc(d.ato_ref)+'">📄 Ler a íntegra do ato</button>'+
+        '<div class="integra-box"></div>'+
+        '<div class="origs">'+
+          (d.url_fonte?'<a href="'+esc(d.url_fonte)+'" target="_blank" rel="noopener">ver na fonte ↗</a>':'')+
+          (d.url_pdf?'<a href="'+esc(d.url_pdf)+'" target="_blank" rel="noopener">abrir PDF original ↗</a>':'')+
+        '</div>'+
+      '</div>'+
     '</div></details>'+
   '</div>';
 }
@@ -349,6 +398,24 @@ document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 // ★ selecionar pra Mesa de Pauta (delegação — os cards são re-renderizados)
 document.getElementById("lista").addEventListener("click",async e=>{
+  // Fase 2 — abrir/fechar a íntegra do ato (lazy)
+  const ib=e.target.closest(".integra-btn");
+  if(ib){
+    const box=ib.parentElement.querySelector(".integra-box");
+    if(box.classList.contains("open")){box.classList.remove("open");ib.classList.remove("on");return;}
+    box.classList.add("open");ib.classList.add("on");
+    if(!box.dataset.loaded){
+      box.innerHTML='<div class="integra-load">carregando a íntegra…</div>';
+      try{
+        const r=await fetch("/radar-civico/ato/"+ib.dataset.ref.replace(":","/"));
+        const j=await r.json();
+        box.dataset.loaded="1";
+        box.innerHTML=j.texto?('<div class="integra-txt">'+esc(j.texto)+'</div>')
+          :'<div class="integra-load">(sem texto integral capturado pra este ato — use o original)</div>';
+      }catch(_){box.innerHTML='<div class="integra-load">não consegui carregar agora.</div>';}
+    }
+    return;
+  }
   const b=e.target.closest(".star");if(!b)return;
   const ref=b.dataset.ref;const d=DADOS.find(x=>x.ato_ref===ref);if(!d)return;
   if(SEL.has(ref)){window.location.href="/mesa";return;}   // já na fila → abre a Mesa
