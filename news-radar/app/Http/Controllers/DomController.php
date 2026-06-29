@@ -507,6 +507,7 @@ HTML;
     private function chrome(string $ativo, string $titulo, string $sub, string $body)
     {
         $nav = collect([
+            'civico' => ['/radar-civico', '🛰️ Cívico'],
             'todos' => ['/dom-todos', '📜 Todos'],
             'radar' => ['/dom-radar', '📡 Radar'],
             'busca' => ['/dom-busca', '🔎 Busca'],
