@@ -176,6 +176,45 @@ class DomConector
     }
 
     /**
+     * SONDA DE RECÊNCIA por entidade (OBJ3 — mapa de cobertura). Busca a 1ª página
+     * do RSS da entidade (q=*:*, recente-primeiro) e devolve a data de publicação
+     * MAIS RECENTE — independente de janela. Serve pra dizer se a Prefeitura/Câmara
+     * ainda publica no DOM (ATIVO) ou saiu (FORA, ex.: Itajaí desde 2020). 1 request.
+     */
+    public function ultimaPublicacaoEntidade(int $codigoEntidade): ?string
+    {
+        try {
+            $resp = Http::withHeaders(['User-Agent' => $this->ua])
+                ->timeout(40)->retry(2, 1500, throw: false)
+                ->get($this->base . '/', [
+                    'r' => 'site/portal',
+                    'codigoEntidade' => $codigoEntidade,
+                    'q' => '*:*',
+                    'view' => 'rss',
+                    'AtoASolrDocument_page' => 1,
+                ]);
+            $xml = $resp->ok() ? $resp->body() : '';
+        } catch (\Throwable $e) {
+            return null;
+        }
+        if ($this->pausa > 0) {
+            usleep((int) ($this->pausa * 1_000_000));
+        }
+        if ($xml === '') {
+            return null;
+        }
+        $max = null;
+        foreach ($this->parseRss($xml) as $it) {
+            $d = $it['data_pub'];
+            if ($d !== null && ($max === null || $d > $max)) {
+                $max = $d;
+            }
+        }
+
+        return $max;
+    }
+
+    /**
      * Parseia os <item> do RSS por entidade. Cada item: title, link/guid (id:N),
      * pubDate, category, author ("Município - Secretaria"), enclosure (PDF),
      * description (texto). Reaproveita os parsers de campo do listing.
