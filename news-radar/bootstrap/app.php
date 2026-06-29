@@ -20,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'radar/assunto/*',
             'radar/verificar',
+            'mesa/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

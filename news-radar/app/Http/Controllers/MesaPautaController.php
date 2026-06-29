@@ -1,0 +1,303 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * MESA DE PAUTA — Fase 1. Triagem + fila de produção server-side do Radar Cívico.
+ *
+ *   POST /mesa/selecionar  ← botão ★ de cada card do radar (upsert por ato_ref)
+ *   GET  /mesa             → página da fila do Lorran (cross-device, lê o banco)
+ *   POST /mesa/{id}        → muda status e/ou nota (em-apuracao|feita|nova)
+ *   POST /mesa/{id}/remover→ tira da fila
+ *
+ * Tudo gated por JrPanelKey (cookie do painel) e isento de CSRF (mesa/*). NÃO
+ * publica nada, NÃO toca juiz/dispatcher/captura. ISOLADO e ADITIVO.
+ */
+class MesaPautaController extends Controller
+{
+    /** Rótulos de status (ordem = ciclo de produção). */
+    private const STATUS = [
+        'nova' => 'Nova',
+        'em-apuracao' => 'Em apuração',
+        'feita' => 'Feita',
+        'rascunho-gerado' => 'Rascunho gerado',
+    ];
+
+    /** Nome curto da fonte (badge). */
+    private const SRCN = [
+        'dom' => 'DOM', 'camara' => 'Câmara', 'mpsc' => 'MPSC', 'tce' => 'TCE', 'tjsc' => 'TJSC',
+    ];
+
+    // ───────────────────────────── escrita ─────────────────────────────
+
+    /** Botão ★ do radar: grava (ou atualiza o snapshot de) uma pauta na fila. */
+    public function selecionar(Request $r)
+    {
+        $d = $r->validate([
+            'ato_ref' => ['required', 'string', 'max:64', 'regex:/^(dom|camara|mpsc|tce|tjsc):\d+$/'],
+            'source' => ['required', 'string', 'max:16'],
+            'municipio' => ['nullable', 'string', 'max:120'],
+            'regiao' => ['nullable', 'string', 'max:120'],
+            'objeto' => ['nullable', 'string', 'max:2000'],
+            'gancho_curto' => ['nullable', 'string', 'max:500'],
+            'score' => ['nullable', 'integer', 'between:0,100'],
+            'url_fonte' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $now = Carbon::now();
+        $ja = DB::table('jr_pauta_fila')->where('ato_ref', $d['ato_ref'])->first();
+
+        if ($ja) {
+            // já estava na fila — só refresca o snapshot, preserva status/nota
+            DB::table('jr_pauta_fila')->where('id', $ja->id)->update([
+                'municipio' => $d['municipio'] ?? null,
+                'regiao' => $d['regiao'] ?? null,
+                'objeto' => $d['objeto'] ?? null,
+                'gancho_curto' => $d['gancho_curto'] ?? null,
+                'score' => $d['score'] ?? null,
+                'url_fonte' => $d['url_fonte'] ?? null,
+                'updated_at' => $now,
+            ]);
+
+            return response()->json(['ok' => true, 'id' => $ja->id, 'novo' => false, 'status' => $ja->status]);
+        }
+
+        $id = DB::table('jr_pauta_fila')->insertGetId([
+            'ato_ref' => $d['ato_ref'],
+            'source' => $d['source'],
+            'municipio' => $d['municipio'] ?? null,
+            'regiao' => $d['regiao'] ?? null,
+            'objeto' => $d['objeto'] ?? null,
+            'gancho_curto' => $d['gancho_curto'] ?? null,
+            'score' => $d['score'] ?? null,
+            'url_fonte' => $d['url_fonte'] ?? null,
+            'status' => 'nova',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return response()->json(['ok' => true, 'id' => $id, 'novo' => true, 'status' => 'nova']);
+    }
+
+    /** Atualiza status e/ou nota de uma pauta. */
+    public function atualizar(Request $r, int $id)
+    {
+        $d = $r->validate([
+            'status' => ['nullable', 'string', 'in:' . implode(',', array_keys(self::STATUS))],
+            'nota' => ['nullable', 'string', 'max:4000'],
+        ]);
+
+        $patch = ['updated_at' => Carbon::now()];
+        if (array_key_exists('status', $d) && $d['status'] !== null) {
+            $patch['status'] = $d['status'];
+        }
+        if ($r->has('nota')) {
+            $patch['nota'] = $d['nota'] ?? null;
+        }
+
+        $n = DB::table('jr_pauta_fila')->where('id', $id)->update($patch);
+
+        return response()->json(['ok' => (bool) $n]);
+    }
+
+    /** Remove uma pauta da fila. */
+    public function remover(int $id)
+    {
+        $n = DB::table('jr_pauta_fila')->where('id', $id)->delete();
+
+        return response()->json(['ok' => (bool) $n]);
+    }
+
+    // ───────────────────────────── leitura ─────────────────────────────
+
+    /** Quantas pautas há na fila (badge do radar). */
+    public function contagem()
+    {
+        return response()->json(['total' => DB::table('jr_pauta_fila')->count()]);
+    }
+
+    public function index()
+    {
+        $rows = DB::table('jr_pauta_fila')->orderByDesc('updated_at')->get();
+
+        $itens = $rows->map(fn ($p) => [
+            'id' => (int) $p->id,
+            'ato_ref' => $p->ato_ref,
+            'source' => $p->source,
+            'src_nome' => self::SRCN[$p->source] ?? strtoupper($p->source),
+            'municipio' => $p->municipio,
+            'regiao' => $p->regiao,
+            'objeto' => $p->objeto,
+            'gancho_curto' => $p->gancho_curto,
+            'score' => $p->score !== null ? (int) $p->score : null,
+            'url_fonte' => $p->url_fonte,
+            'status' => $p->status,
+            'nota' => $p->nota,
+            'data' => $p->created_at ? Carbon::parse($p->created_at)->format('d/m H:i') : '',
+        ])->all();
+
+        $cont = ['total' => count($itens)];
+        foreach (array_keys(self::STATUS) as $k) {
+            $cont[$k] = 0;
+        }
+        foreach ($itens as $it) {
+            $cont[$it['status']] = ($cont[$it['status']] ?? 0) + 1;
+        }
+
+        $json = json_encode($itens, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $statusJson = json_encode(self::STATUS, JSON_UNESCAPED_UNICODE);
+
+        return response($this->html($json, $statusJson, $cont))
+            ->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    private function html(string $json, string $statusJson, array $c): string
+    {
+        $gerado = Carbon::now()->format('d/m/Y H:i');
+        $t = $c['total'];
+        $nova = $c['nova'] ?? 0;
+        $apur = $c['em-apuracao'] ?? 0;
+        $feita = $c['feita'] ?? 0;
+
+        return <<<HTML
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Mesa de Pauta · Radar Cívico</title>
+<style>
+:root{--navy:#0D2481;--red:#E63946;--green:#2D6A4F;--amber:#D4A373;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa;--card:#fff;
+  --c-dom:#0D2481;--c-camara:#7c3aed;--c-mpsc:#b45309;--c-tce:#0f766e;--c-tjsc:#9d174d}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
+header{background:var(--navy);color:#fff;padding:16px 16px 12px}
+header h1{margin:0;font-size:19px;font-weight:800}header .sub{font-size:12px;opacity:.85;margin-top:3px}
+header a.back{color:#fff;opacity:.9;font-size:12px;text-decoration:none;font-weight:700}
+.wrap{max-width:940px;margin:0 auto;padding:12px}
+.bar{position:sticky;top:0;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px;display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
+.bar input,.bar select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink)}
+.bar input[type=search]{flex:1 1 160px;min-width:130px}
+.fl{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}
+.fb{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
+.fb.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.fb b{opacity:.75;margin-left:3px}
+.count{margin-left:auto;font-size:12px;color:var(--muted)}
+main{display:flex;flex-direction:column;gap:9px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px;display:flex;gap:11px}
+.score{flex:0 0 auto;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff;background:var(--green)}
+.score.hi{background:var(--red)}.score.mid{background:var(--navy)}.score.lo{background:var(--amber)}.score.na{background:var(--muted)}
+.bd{flex:1;min-width:0}
+.l1{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.src-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:999px;color:#fff}
+.src-dom{background:var(--c-dom)}.src-camara{background:var(--c-camara)}.src-mpsc{background:var(--c-mpsc)}.src-tce{background:var(--c-tce)}.src-tjsc{background:var(--c-tjsc)}
+.muni{font-weight:800;font-size:15px}.reg{font-weight:600;color:var(--muted);font-size:12px}
+.when{margin-left:auto;font-size:11px;color:var(--muted)}
+.obj{font-size:13.5px;margin:4px 0;color:#222}
+.hook{font-size:13.5px;font-weight:700;color:var(--navy);font-style:italic}
+.st{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:999px;margin-top:6px}
+.st-nova{background:#eef1f8;color:var(--navy)}.st-em-apuracao{background:#fff7ed;color:#9a3412}
+.st-feita{background:#ecfdf5;color:#065f46}.st-rascunho-gerado{background:#f3e8ff;color:#6b21a8}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+.acts button,.acts a{font:inherit;font-size:12px;font-weight:700;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--navy);cursor:pointer;text-decoration:none}
+.acts button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.acts .del{color:var(--red);border-color:#f3c6ca;margin-left:auto}
+.acts .src{color:#fff;background:var(--navy);border-color:var(--navy)}
+.nota{margin-top:8px}
+.nota textarea{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;resize:vertical;min-height:38px;background:#fcfcfe;color:var(--ink)}
+.nota .save{font-size:11px;color:var(--muted);margin-top:3px;height:14px}
+.empty{text-align:center;color:var(--muted);padding:42px 16px}
+footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
+</style></head><body>
+<header>
+  <a class="back" href="/radar-civico">‹ Radar Cívico</a>
+  <h1>📌 Mesa de Pauta</h1>
+  <div class="sub">A fila de produção — selecione no radar, acompanhe aqui do PC ou do celular</div>
+</header>
+<div class="wrap">
+<div class="fl">
+  <button type="button" class="fb on" data-st="">Tudo <b>{$t}</b></button>
+  <button type="button" class="fb" data-st="nova">Novas <b>{$nova}</b></button>
+  <button type="button" class="fb" data-st="em-apuracao">Em apuração <b>{$apur}</b></button>
+  <button type="button" class="fb" data-st="feita">Feitas <b>{$feita}</b></button>
+</div>
+<div class="bar">
+  <input type="search" id="q" placeholder="🔎 cidade, objeto, gancho, nota…">
+  <select id="src"><option value="">Todas as fontes</option><option value="dom">DOM</option><option value="camara">Câmara</option><option value="mpsc">MPSC</option><option value="tce">TCE</option><option value="tjsc">TJSC</option></select>
+  <span class="count" id="count"></span>
+</div>
+<main id="lista"></main>
+</div>
+<footer>Mesa de Pauta · Radar Cívico de SC · gerado em {$gerado} · uso editorial interno</footer>
+<script>
+let DADOS={$json};
+const STN={$statusJson};
+const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const cls=s=>s==null?"na":s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
+let stSel="",srcSel="";
+async function post(url,body){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(body||{})});
+  if(!r.ok)throw new Error(r.status);return r.json();
+}
+function card(d){
+  const reg=d.regiao?'<span class="reg"> · '+esc(d.regiao)+'</span>':'';
+  const sc=d.score==null?'—':d.score;
+  const srcl=d.url_fonte?'<a class="src" href="'+esc(d.url_fonte)+'" target="_blank" rel="noopener">fonte</a>':'';
+  let btns='';
+  for(const k in STN){const on=d.status===k?' on':'';btns+='<button class="setst'+on+'" data-k="'+k+'">'+esc(STN[k])+'</button>';}
+  return '<div class="card" data-id="'+d.id+'">'+
+    '<div class="score '+cls(d.score)+'">'+sc+'</div>'+
+    '<div class="bd">'+
+      '<div class="l1"><span class="src-badge src-'+d.source+'">'+esc(d.src_nome)+'</span>'+
+        '<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+
+        '<span class="when">'+esc(d.data)+'</span></div>'+
+      (d.objeto?'<div class="obj">'+esc(d.objeto)+'</div>':'')+
+      (d.gancho_curto?'<div class="hook">'+esc(d.gancho_curto)+'</div>':'')+
+      '<div><span class="st st-'+d.status+'">'+esc(STN[d.status]||d.status)+'</span></div>'+
+      '<div class="acts">'+btns+srcl+'<button class="del">remover</button></div>'+
+      '<div class="nota"><textarea placeholder="anotação livre…">'+esc(d.nota||"")+'</textarea><div class="save"></div></div>'+
+    '</div>'+
+  '</div>';
+}
+function render(){
+  const q=document.getElementById("q").value.toLowerCase().trim();
+  let arr=DADOS.filter(d=>{
+    if(stSel&&d.status!==stSel)return false;
+    if(srcSel&&d.source!==srcSel)return false;
+    if(q){const h=((d.municipio||"")+" "+(d.regiao||"")+" "+(d.objeto||"")+" "+(d.gancho_curto||"")+" "+(d.nota||"")).toLowerCase();if(!h.includes(q))return false;}
+    return true;});
+  document.getElementById("count").textContent=arr.length+" pautas";
+  const m=document.getElementById("lista");
+  m.innerHTML=arr.length?arr.map(card).join(""):'<div class="empty">Nenhuma pauta na fila ainda.<br>Selecione com ★ no <a href="/radar-civico">Radar Cívico</a>.</div>';
+}
+function obj(id){return DADOS.find(d=>d.id==id);}
+document.getElementById("lista").addEventListener("click",async e=>{
+  const cardEl=e.target.closest(".card");if(!cardEl)return;const id=+cardEl.dataset.id;const d=obj(id);
+  if(e.target.classList.contains("setst")){
+    const k=e.target.dataset.k;try{await post("/mesa/"+id,{status:k});d.status=k;render();}catch(_){alert("falhou");}
+  }else if(e.target.classList.contains("del")){
+    if(!confirm("Remover da fila?"))return;
+    try{await post("/mesa/"+id+"/remover",{});DADOS=DADOS.filter(x=>x.id!==id);render();}catch(_){alert("falhou");}
+  }
+});
+let notaTimer={};
+document.getElementById("lista").addEventListener("input",e=>{
+  if(e.target.tagName!=="TEXTAREA")return;
+  const cardEl=e.target.closest(".card");const id=+cardEl.dataset.id;const d=obj(id);
+  const val=e.target.value;const saveEl=cardEl.querySelector(".save");
+  clearTimeout(notaTimer[id]);saveEl.textContent="…";
+  notaTimer[id]=setTimeout(async()=>{
+    try{await post("/mesa/"+id,{nota:val});d.nota=val;saveEl.textContent="salvo ✓";setTimeout(()=>saveEl.textContent="",1500);}
+    catch(_){saveEl.textContent="erro";}
+  },650);
+});
+document.querySelectorAll(".fb").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".fb").forEach(x=>x.classList.remove("on"));b.classList.add("on");stSel=b.dataset.st;render();}));
+document.getElementById("src").addEventListener("change",e=>{srcSel=e.target.value;render();});
+document.getElementById("q").addEventListener("input",render);
+render();
+</script>
+</body></html>
+HTML;
+    }
+}

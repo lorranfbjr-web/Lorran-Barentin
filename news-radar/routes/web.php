@@ -35,6 +35,19 @@ Route::get('/dom-busca', [\App\Http\Controllers\DomController::class, 'busca']);
 // (filtro por fonte + dual-lens + busca). Server-rendered, lê as tabelas ao vivo.
 Route::get('/radar-civico', [\App\Http\Controllers\RadarCivicoController::class, 'index']);
 
+// MESA DE PAUTA — Fase 1: triagem + fila de produção server-side (cross-device).
+// ATRÁS de JrPanelKey (cookie do painel, mesma chave do Radar): a fila é do
+// Lorran. ISENTA de CSRF (mesa/* em bootstrap/app.php). NÃO publica nada.
+// O botão ★ do /radar-civico só funciona depois de armar o cookie visitando
+// /mesa?key=<JRLINK_PANEL_KEY> uma vez (cookie de 90 dias, path '/').
+Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
+    Route::get('/mesa', [\App\Http\Controllers\MesaPautaController::class, 'index']);
+    Route::get('/mesa/contagem', [\App\Http\Controllers\MesaPautaController::class, 'contagem']);
+    Route::post('/mesa/selecionar', [\App\Http\Controllers\MesaPautaController::class, 'selecionar']);
+    Route::post('/mesa/{id}', [\App\Http\Controllers\MesaPautaController::class, 'atualizar'])->where('id', '\d+');
+    Route::post('/mesa/{id}/remover', [\App\Http\Controllers\MesaPautaController::class, 'remover'])->where('id', '\d+');
+});
+
 Route::get('/{any?}', function () {
     return view('app');
 })->where('any', '.*');

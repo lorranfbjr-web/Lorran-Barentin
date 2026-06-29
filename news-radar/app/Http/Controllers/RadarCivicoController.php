@@ -45,7 +45,15 @@ class RadarCivicoController extends Controller
         $stats = $this->stats($itens);
         $json = json_encode($itens, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return response($this->html($json, $stats))
+        // já-na-fila: marca as estrelas que já estão na Mesa de Pauta (se a tabela
+        // existir — a Mesa é aditiva e pode ainda não ter sido migrada).
+        $selecionados = [];
+        if (DB::getSchemaBuilder()->hasTable('jr_pauta_fila')) {
+            $selecionados = DB::table('jr_pauta_fila')->pluck('ato_ref')->all();
+        }
+        $selJson = json_encode($selecionados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return response($this->html($json, $stats, $selJson))
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -131,6 +139,7 @@ class RadarCivicoController extends Controller
     {
         return [
             'source' => $source,
+            'ato_ref' => $source . ':' . $a->id,   // chave estável p/ a Mesa de Pauta (★)
             'municipio' => $a->municipio,
             'regiao' => DomGeografia::regiao($a->municipio),
             'objeto' => $a->objeto_limpo ?: null,
@@ -182,7 +191,7 @@ class RadarCivicoController extends Controller
         return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca];
     }
 
-    private function html(string $json, array $s): string
+    private function html(string $json, array $s, string $selJson): string
     {
         $gerado = Carbon::now()->format('d/m/Y H:i');
         $p = $s['por'];
@@ -195,8 +204,9 @@ class RadarCivicoController extends Controller
 :root{--navy:#0D2481;--red:#E63946;--green:#2D6A4F;--amber:#D4A373;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa;--card:#fff;
   --c-dom:#0D2481;--c-camara:#7c3aed;--c-mpsc:#b45309;--c-tce:#0f766e}
 *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
-header{background:var(--navy);color:#fff;padding:16px 16px 12px}
+header{background:var(--navy);color:#fff;padding:16px 16px 12px;position:relative}
 header h1{margin:0;font-size:19px;font-weight:800}header .sub{font-size:12px;opacity:.85;margin-top:3px}
+header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12px;font-weight:800;text-decoration:none;background:rgba(255,255,255,.15);padding:6px 11px;border-radius:999px}
 .disc{background:#fff7ed;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:11.5px;padding:7px 16px}
 .wrap{max-width:940px;margin:0 auto;padding:12px}
 .bar{position:sticky;top:0;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px;display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
@@ -217,6 +227,9 @@ main{display:flex;flex-direction:column;gap:9px}
 .face{display:flex;gap:11px;padding:13px}
 .score{flex:0 0 auto;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#fff;background:var(--green)}
 .score.hi{background:var(--red)}.score.mid{background:var(--navy)}.score.lo{background:var(--amber)}
+.star{flex:0 0 auto;align-self:flex-start;font-size:20px;line-height:1;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:#fff;color:#cbd0db;cursor:pointer;padding:0;transition:transform .08s}
+.star:active{transform:scale(.88)}
+.star.on{color:#f4b400;border-color:#f4d27a;background:#fffbeb}
 .hd{flex:1;min-width:0}
 .l1{line-height:1.25;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .src-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:999px;color:#fff}
@@ -245,7 +258,7 @@ summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}deta
 .empty{text-align:center;color:var(--muted);padding:36px 16px}
 footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
 </style></head><body>
-<header><h1>🛰️ Radar Cívico de SC</h1>
+<header><a class="mesa-link" href="/mesa">📌 Mesa de Pauta ›</a><h1>🛰️ Radar Cívico de SC</h1>
 <div class="sub">DOM · Câmaras · MPSC · TCE — fato público + lead pra apurar, num radar só</div></header>
 <div class="disc">⚖️ Cada item é um <b>FATO</b> público e um <b>LEAD pra apurar</b> — não uma acusação.</div>
 <div class="wrap">
@@ -273,6 +286,7 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <footer>Radar Cívico de SC · gerado em {$gerado} · fontes: DOM/SC (FECAM/CIGA) · Câmaras (SAPL) · MPSC · TCE-SC · Jornal Razão — uso editorial interno</footer>
 <script>
 const DADOS={$json};
+const SEL=new Set({$selJson});
 const SRCN={dom:"DOM",camara:"Câmara",mpsc:"MPSC",tce:"TCE"};
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -294,6 +308,7 @@ function card(d){
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
         (cinca?'<div class="badges">'+cinca+'</div>':'')+
       '</div>'+
+      '<button type="button" class="star'+(SEL.has(d.ato_ref)?' on':'')+'" data-ref="'+esc(d.ato_ref)+'" title="selecionar pra Mesa de Pauta">★</button>'+
     '</div>'+
     '<details><summary>ver detalhes</summary><div class="det">'+
       (d.tipo_gancho?'<div class="tg">'+esc(d.tipo_gancho)+'</div>':'')+
@@ -332,6 +347,22 @@ document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click
   b.classList.add("on");tipoSel=b.dataset.tipo;render();}));
 document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
+// ★ selecionar pra Mesa de Pauta (delegação — os cards são re-renderizados)
+document.getElementById("lista").addEventListener("click",async e=>{
+  const b=e.target.closest(".star");if(!b)return;
+  const ref=b.dataset.ref;const d=DADOS.find(x=>x.ato_ref===ref);if(!d)return;
+  if(SEL.has(ref)){window.location.href="/mesa";return;}   // já na fila → abre a Mesa
+  b.classList.add("on");
+  try{
+    const r=await fetch("/mesa/selecionar",{method:"POST",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify({ato_ref:d.ato_ref,source:d.source,municipio:d.municipio,regiao:d.regiao,
+        objeto:d.objeto,gancho_curto:d.gancho_curto||d.gancho,score:d.score,url_fonte:d.url_fonte})});
+    if(!r.ok)throw new Error(r.status);
+    SEL.add(ref);
+  }catch(_){b.classList.remove("on");
+    alert("Não consegui salvar na Mesa. Arme o painel uma vez: abra /mesa?key=SUA_CHAVE e depois volte.");}
+});
 render();
 </script>
 </body></html>
