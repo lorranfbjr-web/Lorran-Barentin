@@ -31,6 +31,78 @@ class DomController extends Controller
         'todas'            => ['cat' => null, 'mod' => null],
     ];
 
+    // ───────────────────────── dedup + fornecedor (OBJ4/OBJ6) ─────────────────────────
+
+    /** Assinatura de conteúdo p/ colapsar republicações (mesma entidade+objeto+data). */
+    private function assinatura(?string $orgao, ?string $municipio, ?string $modalidade, ?string $objeto, ?string $data): string
+    {
+        $norm = fn (?string $s) => preg_replace('/\s+/u', ' ', mb_strtolower(trim((string) $s)));
+
+        return implode('|', [$norm($orgao ?: $municipio), $norm($modalidade), $norm($objeto), (string) $data]);
+    }
+
+    /**
+     * Colapsa itens repetidos (OBJ4). Mantém o 1º (mais recente, já ordenado) e
+     * conta as republicações em '_reps'. $sig devolve a assinatura de cada item.
+     *
+     * @param  array<int,array>  $itens
+     * @return array<int,array>  deduplicado, cada item com '_reps' (1 = único)
+     */
+    private function colapsar(array $itens, callable $sig): array
+    {
+        $vistos = [];   // assinatura => índice no $out
+        $out = [];
+        foreach ($itens as $it) {
+            $k = $sig($it);
+            if (isset($vistos[$k])) {
+                $out[$vistos[$k]]['_reps']++;
+
+                continue;
+            }
+            $it['_reps'] = 1;
+            $vistos[$k] = count($out);
+            $out[] = $it;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mapa fornecedor (normalizado) => nº de MUNICÍPIOS distintos em que aparece
+     * (OBJ6, best-effort). Só conta fornecedor extraído (heurístico — costuma vir
+     * nulo); serve pra sinalizar "fornecedor recorrente", nunca como prova.
+     *
+     * @return array<string,int>
+     */
+    private function fornecedorRecorrencia(): array
+    {
+        $linhas = DB::table('jr_dom_atos')
+            ->whereNotNull('fornecedor')->where('fornecedor', '!=', '')
+            ->whereNotNull('municipio')
+            ->get(['fornecedor', 'municipio']);
+
+        $mapa = []; // fornNorm => [municipios distintos]
+        foreach ($linhas as $r) {
+            $k = $this->normFornecedor($r->fornecedor);
+            if ($k === '') {
+                continue;
+            }
+            $mapa[$k][$r->municipio] = true;
+        }
+
+        return array_map('count', $mapa);
+    }
+
+    private function normFornecedor(string $s): string
+    {
+        $s = mb_strtoupper(trim($s));
+        $s = preg_replace('/\s+/u', ' ', $s);
+        // tira sufixos societários pra agrupar a mesma empresa escrita de formas diferentes
+        $s = preg_replace('/[\.,]/', '', $s);
+
+        return trim((string) $s);
+    }
+
     // ───────────────────────── PÁGINA 1 — Todos ─────────────────────────
 
     public function todos()
@@ -42,41 +114,52 @@ class DomController extends Controller
 
         $total = DB::table('jr_dom_atos')->count();
 
-        $linhas = $atos->map(function ($a) {
-            $val = $a->valor !== null ? 'R$ ' . number_format((float) $a->valor, 0, ',', '.') : '—';
-            $mod = $a->modalidade ?: ($a->categoria ?: '');
-            $reg = DomGeografia::regiao($a->municipio);
-            $muni = e($a->municipio ?: '—') . ($reg ? '<span class="reg">' . e($reg) . '</span>' : '');
-            // objeto_limpo (legível) substitui o objeto cru/boilerplate
-            $obj = e(mb_strimwidth((string) ($a->objeto_limpo ?: '—'), 0, 180, '…'));
+        // OBJ4 — colapsa republicações (mesma entidade+objeto+data) num só item.
+        $itens = $atos->map(fn ($a) => (array) $a)->all();
+        $itens = $this->colapsar($itens, fn ($a) => $this->assinatura(
+            $a['orgao'] ?? null, $a['municipio'] ?? null, $a['modalidade'] ?? null, $a['objeto_limpo'] ?? null, $a['data_pub'] ?? null));
+        $mostrados = count($itens);
+
+        $linhas = collect($itens)->map(function ($a) {
+            $val = $a['valor'] !== null ? 'R$ ' . number_format((float) $a['valor'], 0, ',', '.') : '—';
+            $mod = $a['modalidade'] ?: ($a['categoria'] ?: '—');
+            $reg = DomGeografia::regiao($a['municipio']);
+            $muni = '<span class="mn">' . e($a['municipio'] ?: '—') . '</span>'
+                . ($reg ? '<span class="reg">' . e($reg) . '</span>' : '');
+            $objFull = (string) ($a['objeto_limpo'] ?: '—');
+            $reps = ($a['_reps'] ?? 1) > 1
+                ? '<span class="reps" title="republicado ' . (int) $a['_reps'] . '×">×' . (int) $a['_reps'] . '</span>' : '';
+            // OBJ5 — objeto truncado por CSS (ellipsis); clique/hover revela o inteiro.
+            $obj = '<span class="objt" title="' . $this->attr($objFull) . '">' . e($objFull) . '</span>' . $reps;
 
             return '<tr>'
-                . '<td class="nw">' . $this->fmtData($a->data_pub) . '</td>'
+                . '<td class="nw dt">' . $this->fmtData($a['data_pub']) . '</td>'
                 . '<td class="muni">' . $muni . '</td>'
-                . '<td><span class="mod">' . e($mod) . '</span></td>'
+                . '<td class="modc"><span class="mod">' . e($mod) . '</span></td>'
                 . '<td class="obj">' . $obj . '</td>'
                 . '<td class="nw val">' . $val . '</td>'
-                . '<td class="nw"><a href="' . e($a->url_fonte) . '" target="_blank" rel="noopener">ato</a>'
-                . ($a->url_pdf ? ' · <a href="' . e($a->url_pdf) . '" target="_blank" rel="noopener">pdf</a>' : '') . '</td>'
+                . '<td class="nw src"><a href="' . e($a['url_fonte']) . '" target="_blank" rel="noopener">ato</a>'
+                . ($a['url_pdf'] ? '<a href="' . e($a['url_pdf']) . '" target="_blank" rel="noopener">pdf</a>' : '') . '</td>'
                 . '</tr>';
         })->implode('');
 
         $body = <<<HTML
 <div class="bar">
   <input type="search" id="f" placeholder="🔎 filtrar por município, objeto, modalidade…">
-  <span class="muted" id="cnt">{$atos->count()} de {$total} atos</span>
+  <span class="muted" id="cnt">{$mostrados} de {$total} atos</span>
 </div>
-<div class="tablewrap">
-<table id="t">
-  <thead><tr><th>Data</th><th>Município</th><th>Modalidade</th><th>Objeto</th><th>Valor</th><th>Fonte</th></tr></thead>
+<div class="muted small">Toque/clique num objeto pra ver o texto inteiro. Republicações idênticas vêm colapsadas (×N).</div>
+<table id="t" class="firehose">
+  <thead><tr><th class="dt">Data</th><th>Município · região</th><th>Modalidade</th><th>Objeto</th><th class="val">Valor</th><th class="src">Fonte</th></tr></thead>
   <tbody>{$linhas}</tbody>
 </table>
-</div>
 <script>
 const f=document.getElementById('f'),rows=[...document.querySelectorAll('#t tbody tr')],cnt=document.getElementById('cnt');
 f.addEventListener('input',()=>{const q=f.value.toLowerCase().trim();let n=0;
   rows.forEach(r=>{const v=!q||r.textContent.toLowerCase().includes(q);r.style.display=v?'':'none';if(v)n++});
   cnt.textContent=n+' atos';});
+// OBJ5 — tap/click no objeto alterna entre truncado e inteiro
+document.querySelectorAll('#t .obj .objt').forEach(el=>el.addEventListener('click',()=>el.classList.toggle('open')));
 </script>
 HTML;
 
@@ -93,31 +176,53 @@ HTML;
             ->limit(500)
             ->get();
 
-        $dados = $atos->map(fn ($a) => [
-            'municipio' => $a->municipio,
-            'regiao' => DomGeografia::regiao($a->municipio),
-            'orgao' => $a->orgao,
-            'categoria' => $a->categoria,
-            'modalidade' => $a->modalidade,
-            // objeto_limpo (Sonnet polido pros pontuados; heurístico de fallback)
-            'objeto' => $a->objeto_limpo ?: $a->objeto,
-            'valor' => $a->valor !== null ? (float) $a->valor : null,
-            'fornecedor' => $a->fornecedor,
-            'data_pub' => $a->data_pub,
-            'texto' => (string) ($a->texto_bruto ?: ''),
-            'url_fonte' => $a->url_fonte,
-            'url_pdf' => $a->url_pdf,
-            'score' => (int) $a->score_pauta,
-            'gancho_curto' => $a->gancho_curto,
-            'gancho' => $a->gancho,
-            'tipo_gancho' => $a->tipo_de_gancho,
-            'apurar' => json_decode($a->o_que_apurar ?: '[]', true),
-            'angulo' => $a->angulo_sugerido,
-            'flags' => json_decode($a->flags ?: '[]', true),
-        ])->values()->all();
+        // OBJ6 — recorrência de fornecedor (best-effort, heurístico): nº de
+        // municípios distintos em que o fornecedor aparece em TODA a base.
+        $recorrencia = $this->fornecedorRecorrencia();
+
+        $dados = $atos->map(function ($a) use ($recorrencia) {
+            $fornReps = null;
+            if ($a->fornecedor) {
+                $k = $this->normFornecedor($a->fornecedor);
+                if ($k !== '' && ($recorrencia[$k] ?? 0) >= 2) {
+                    $fornReps = $recorrencia[$k];
+                }
+            }
+
+            return [
+                'municipio' => $a->municipio,
+                'regiao' => DomGeografia::regiao($a->municipio),
+                'orgao' => $a->orgao,
+                'categoria' => $a->categoria,
+                'modalidade' => $a->modalidade,
+                // objeto_limpo (Sonnet polido pros pontuados; heurístico de fallback)
+                'objeto' => $a->objeto_limpo ?: $a->objeto,
+                'valor' => $a->valor !== null ? (float) $a->valor : null,
+                'fornecedor' => $a->fornecedor,
+                'forn_reps' => $fornReps, // nº municípios se recorrente (>=2), senão null
+                'data_pub' => $a->data_pub,
+                'texto' => (string) ($a->texto_bruto ?: ''),
+                'url_fonte' => $a->url_fonte,
+                'url_pdf' => $a->url_pdf,
+                'score' => (int) $a->score_pauta,
+                'tipo' => $a->tipo, // dual-lens: fiscalizacao | servico | neutro | null
+                'gancho_curto' => $a->gancho_curto,
+                'gancho' => $a->gancho,
+                'tipo_gancho' => $a->tipo_de_gancho,
+                'apurar' => json_decode($a->o_que_apurar ?: '[]', true),
+                'angulo' => $a->angulo_sugerido,
+                'flags' => json_decode($a->flags ?: '[]', true),
+            ];
+        })->values()->all();
+
+        // OBJ4 — colapsa republicações (mesma entidade+objeto+data)
+        $dados = $this->colapsar($dados, fn ($d) => $this->assinatura(
+            $d['orgao'] ?? null, $d['municipio'] ?? null, $d['modalidade'] ?? null, $d['objeto'] ?? null, $d['data_pub'] ?? null));
 
         $totalScored = DB::table('jr_dom_atos')->whereNotNull('score_pauta')->count();
         $total = DB::table('jr_dom_atos')->count();
+        $nFisc = count(array_filter($dados, fn ($d) => $d['tipo'] === 'fiscalizacao'));
+        $nServ = count(array_filter($dados, fn ($d) => $d['tipo'] === 'servico'));
         $json = json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $body = <<<HTML
@@ -135,6 +240,12 @@ HTML;
     <option value="50000">≥ R$ 50 mil</option><option value="100000">≥ R$ 100 mil</option><option value="500000">≥ R$ 500 mil</option>
   </select>
   <span class="muted" id="count"></span>
+</div>
+<div class="lens">
+  <button type="button" class="lb on" data-tipo="">Tudo</button>
+  <button type="button" class="lb" data-tipo="fiscalizacao">🔴 Fiscalização <b>{$nFisc}</b></button>
+  <button type="button" class="lb" data-tipo="servico">🟢 Serviço <b>{$nServ}</b></button>
+  <label class="fchk"><input type="checkbox" id="fornrec"> só fornecedor recorrente</label>
 </div>
 <div class="muted small">{$totalScored} atos analisados · {$total} ingeridos · a página enche sozinha conforme o scoring termina</div>
 <main id="lista"></main>
@@ -161,13 +272,18 @@ function card(d){
   const reg=d.regiao?'<span class="reg"> · '+esc(d.regiao)+'</span>':'';
   const modtag=d.modalidade?'<span class="modtag">'+esc(d.modalidade)+'</span> ':'';
   const hook=d.gancho_curto||d.gancho||"";
+  // OBJ6 — marcador de lente (🔴 fiscalização / 🟢 serviço) e badges
+  const lens=d.tipo==='fiscalizacao'?'<span class="lens-dot" title="fiscalização — red flag a apurar">🔴</span>':(d.tipo==='servico'?'<span class="lens-dot" title="serviço / 1ª-mão">🟢</span>':'');
+  const fr=d.forn_reps?'<span class="frec" title="'+esc(d.fornecedor||"")+'">👷 fornecedor recorrente · '+d.forn_reps+' municípios</span>':'';
+  const reps=(d._reps>1)?'<span class="frec rep">republicado ×'+d._reps+'</span>':'';
   return '<div class="card">'+
     '<div class="face">'+
       '<div class="score '+cls(d.score)+'">'+d.score+'</div>'+
       '<div class="hd">'+
-        '<div class="l1"><span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
+        '<div class="l1">'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
         '<div class="l2">'+modtag+esc(d.objeto||"")+'</div>'+
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
+        ((fr||reps)?'<div class="badges">'+fr+reps+'</div>':'')+
       '</div>'+
     '</div>'+
     '<details><summary>ver detalhes</summary><div class="det">'+
@@ -184,14 +300,18 @@ function card(d){
     '</div></details>'+
   '</div>';
 }
+let tipoSel="";
 function render(){
   const q=document.getElementById("q").value.toLowerCase().trim();
   const mod=document.getElementById("mod").value,ord=document.getElementById("ord").value;
   const vmin=parseFloat(document.getElementById("vmin").value)||0;
+  const soForn=document.getElementById("fornrec").checked;
   let arr=DADOS.filter(d=>{
+    if(tipoSel&&d.tipo!==tipoSel)return false;
+    if(soForn&&!d.forn_reps)return false;
     if(mod&&d.modalidade!==mod)return false;
     if(vmin&&!(d.valor>=vmin))return false;
-    if(q){const h=((d.municipio||"")+" "+(d.regiao||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.gancho_curto||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")).toLowerCase();if(!h.includes(q))return false;}
+    if(q){const h=((d.municipio||"")+" "+(d.regiao||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.gancho_curto||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")+" "+(d.fornecedor||"")).toLowerCase();if(!h.includes(q))return false;}
     return true;});
   arr.sort((a,b)=>{
     if(ord==="valor")return(b.valor||0)-(a.valor||0);
@@ -201,7 +321,10 @@ function render(){
   document.getElementById("count").textContent=arr.length+" itens";
   document.getElementById("lista").innerHTML=arr.length?arr.map(card).join(""):'<div class="empty">Nenhum ato bate os filtros.</div>';
 }
-["q","mod","ord","vmin"].forEach(id=>document.getElementById(id).addEventListener("input",render));
+document.querySelectorAll(".lb").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".lb").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");tipoSel=b.dataset.tipo;render();}));
+["q","mod","ord","vmin","fornrec"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 render();
 </script>
 HTML;
@@ -387,12 +510,26 @@ nav a.on{opacity:1;border-bottom-color:#fff;background:rgba(255,255,255,.08)}
 .bar input[type=search]{flex:1 1 150px;min-width:120px}
 .muted{color:var(--muted);font-size:12px}.small{font-size:11.5px;margin:4px 0 10px}
 .muted#cnt,.muted#count{margin-left:auto}
-.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:11px;background:#fff}
-table{border-collapse:collapse;width:100%;font-size:12.5px}
-th{background:#f0f2f8;color:var(--navy);text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0}
-td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
-td.nw{white-space:nowrap}td.muni{font-weight:700}td.obj{min-width:220px}td.val{font-weight:700;color:var(--green)}
-.mod{font-size:10.5px;padding:2px 7px;border-radius:999px;background:#fdecef;color:var(--red);white-space:nowrap}
+/* OBJ5 — firehose responsivo: table-layout fixo + larguras % => cabe SEM scroll
+   lateral em qualquer tela (a soma das colunas é 100% e cada célula é overflow
+   hidden). Objeto e município truncam com reticências; clique/hover abre. */
+table.firehose{border-collapse:collapse;width:100%;table-layout:fixed;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+table.firehose th{background:#f0f2f8;color:var(--navy);text-align:left;padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.2px}
+table.firehose td{padding:7px 8px;border-top:1px solid var(--line);vertical-align:top;overflow:hidden}
+table.firehose th.dt,table.firehose td.dt{width:8%}
+table.firehose th:nth-child(2),table.firehose td.muni{width:24%}
+table.firehose th:nth-child(3),table.firehose td.modc{width:16%}
+table.firehose th:nth-child(4),table.firehose td.obj{width:34%}
+table.firehose th.val,table.firehose td.val{width:10%;text-align:right;font-weight:700;color:var(--green)}
+table.firehose th.src,table.firehose td.src{width:8%}
+table.firehose td.nw{white-space:nowrap}
+table.firehose td.muni .mn{font-weight:700;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.firehose td.muni .reg{display:block;font-weight:500;color:var(--muted);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+table.firehose td.obj .objt{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+table.firehose td.obj .objt.open{white-space:normal;overflow:visible}
+table.firehose td.src a{display:inline-block;margin-right:7px}
+.reps{display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:var(--amber);background:#fdf6ec;border-radius:999px;padding:1px 6px}
+.mod{font-size:10.5px;padding:2px 7px;border-radius:999px;background:#fdecef;color:var(--red);display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 a{color:var(--navy)}
 main{display:flex;flex-direction:column;gap:9px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden}
@@ -407,6 +544,16 @@ td.muni .reg{display:block;margin-top:1px}
 .l2{font-size:13.5px;margin:3px 0 4px;color:#222}
 .l2 .modtag{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.2px;color:var(--red);background:#fdecef;padding:2px 7px;border-radius:999px;margin-right:5px;white-space:nowrap}
 .l3{font-size:13.5px;font-weight:700;color:var(--navy);font-style:italic}
+/* OBJ6 — barra de lentes (dual-lens) + badges */
+.lens{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+.lb{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
+.lb.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.lb b{font-weight:800;opacity:.85;margin-left:2px}
+.fchk{font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-left:auto;cursor:pointer}
+.lens-dot{margin-right:5px;font-size:13px;vertical-align:baseline}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.frec{font-size:11px;font-weight:700;color:#7a3f12;background:#fdf0e1;border:1px solid #f3d9bf;border-radius:999px;padding:2px 9px}
+.frec.rep{color:var(--muted);background:#eef1f8;border-color:var(--line)}
 .oque{font-size:13.5px;margin:2px 0 4px}
 .why{font-size:13px;color:#333;background:#f8f9fc;border-left:3px solid var(--navy);padding:7px 10px;border-radius:0 8px 8px 0;margin:2px 0 8px}
 .why .lab{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:2px}
