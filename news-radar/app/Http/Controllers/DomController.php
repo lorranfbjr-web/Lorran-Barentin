@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Jr\DomConector;
+use App\Services\Jr\DomEntidades;
 use App\Services\Jr\DomGeografia;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -213,36 +214,41 @@ HTML;
     public function busca(Request $request, DomConector $conector)
     {
         $municipio = trim((string) $request->query('municipio', ''));
+        $codigo = (int) $request->query('codigoEntidade', 0);
         $modKey = (string) $request->query('modalidade', 'todas');
         $dias = (int) $request->query('dias', 30);
         $dias = in_array($dias, [7, 15, 30, 60], true) ? $dias : 30;
         $modCfg = self::MODALIDADES[$modKey] ?? self::MODALIDADES['todas'];
 
+        $entidade = $codigo ? DomEntidades::find($codigo) : null;
+
         $resultadoHtml = '';
-        if ($municipio !== '') {
+        if ($entidade) {
+            // Filtro ESTRUTURADO por entidade (codigoEntidade) — feed RSS do DOM.
+            // Escopo EXATO da entidade; nada de texto livre (sem "Itajaí genérico").
             $fim = Carbon::now();
             $ini = $fim->copy()->subDays($dias);
-            $atos = $conector->buscar($municipio, $modCfg['cat'], $ini, $fim, 5);
-
-            // pós-filtro de precisão: município no órgão (termo livre casa demais).
-            $alvo = mb_strtolower($municipio);
-            $estritos = array_filter($atos, fn ($a) => $a['orgao'] && mb_stripos($a['orgao'], $alvo) !== false);
+            $atos = $conector->buscarEntidade($codigo, $modCfg['cat'], $ini, $fim, 20);
             if ($modCfg['mod']) {
-                $estritos = array_filter($estritos, fn ($a) => $a['modalidade'] === $modCfg['mod']);
+                $atos = array_filter($atos, fn ($a) => $a['modalidade'] === $modCfg['mod']);
             }
-            $lista = $estritos ?: $atos; // fallback: mostra os text-match se o estrito esvaziar
-            $nota = $estritos ? '' : '<div class="muted small">Sem correspondência estrita de órgão — mostrando todos os atos que citam o termo na janela.</div>';
+            usort($atos, fn ($a, $b) => strcmp((string) $b['data_pub'], (string) $a['data_pub']));
 
-            if (! $lista) {
-                $resultadoHtml = '<div class="empty">Nada encontrado pra "' . e($municipio) . '" nessa janela.</div>';
+            // RSS rende 10/pág e paramos em 20 págs: ~200 = provável corte (entidade
+            // muito ativa). Avisamos pra restringir por categoria/janela.
+            $truncado = count($atos) >= 190;
+
+            $reg = $entidade['regiao'] ? ' · ' . e($entidade['regiao']) : '';
+            $cab = '<div class="enthd"><div class="entnome">' . e($entidade['nome']) . '</div>'
+                . '<div class="entsub">' . e($entidade['tipo']) . ($entidade['municipio'] ? ' · ' . e($entidade['municipio']) : '') . $reg
+                . ' · cód. ' . $codigo . '</div></div>';
+
+            if (! $atos) {
+                $resultadoHtml = $cab . '<div class="empty">Nenhum ato dessa entidade nos últimos ' . $dias . ' dias' . ($modKey !== 'todas' ? ' (filtro: ' . e($modKey) . ')' : '') . '.</div>';
             } else {
-                // Lista de resultados em cards expansíveis: objeto LEGÍVEL na cara +
-                // "ler completo" que mostra o TEXTO INTEGRAL já vindo na consulta
-                // (custo ZERO — é leitura, não reprocessa) + link do PDF.
-                $linhas = collect($lista)->map(function ($a) {
+                $linhas = collect($atos)->map(function ($a) {
                     $val = $a['valor'] !== null ? '<span class="pill val">R$ ' . number_format((float) $a['valor'], 2, ',', '.') . '</span>' : '';
                     $mod = $a['modalidade'] ?: ($a['categoria'] ?: '');
-                    $reg = DomGeografia::regiao($a['municipio'] ?? null);
                     $obj = e(($a['objeto_limpo'] ?? null) ?: $a['objeto'] ?: '—');
                     $texto = trim((string) ($a['texto_bruto'] ?? ''));
                     $lerCompleto = $texto !== ''
@@ -253,28 +259,61 @@ HTML;
                         . '<div class="rmeta">'
                             . '<span class="nw">' . $this->fmtData($a['data_pub']) . '</span>'
                             . '<span class="mod">' . e($mod) . '</span>'
-                            . ($reg ? '<span class="pill">' . e($reg) . '</span>' : '')
                             . $val
                         . '</div>'
                         . '<div class="robj">' . $obj . '</div>'
-                        . '<div class="rorg">' . e($a['orgao'] ?: '') . '</div>'
+                        . ($a['orgao'] ? '<div class="rorg">' . e($a['orgao']) . '</div>' : '')
                         . $lerCompleto
                         . '<div class="links"><a class="src" href="' . e($a['url_fonte']) . '" target="_blank" rel="noopener">Ver ato no DOM</a>'
                         . ($a['url_pdf'] ? '<a class="src pdf" href="' . e($a['url_pdf']) . '" target="_blank" rel="noopener">PDF</a>' : '') . '</div>'
                         . '</div>';
                 })->implode('');
-                $resultadoHtml = $nota . '<div class="muted small">' . count($lista) . ' atos · ' . e($municipio) . ' · ' . e($modKey) . ' · últimos ' . $dias . ' dias · objeto legível + “ler completo” (texto integral, custo zero)</div>'
+                $aviso = $truncado
+                    ? '<div class="muted small">⚠️ Entidade muito ativa — mostrando os ~' . count($atos) . ' atos mais recentes (pode haver mais na janela). Restrinja por categoria ou janela menor.</div>'
+                    : '';
+                $resultadoHtml = $cab
+                    . '<div class="muted small">' . count($atos) . ' atos · últimos ' . $dias . ' dias'
+                    . ($modKey !== 'todas' ? ' · ' . e($modKey) : '') . ' · objeto legível + “ler completo” (texto integral, custo zero)</div>'
+                    . $aviso
                     . '<main class="rlist">' . $linhas . '</main>';
             }
+        } elseif ($municipio !== '') {
+            $resultadoHtml = '<div class="muted small">Escolha a <b>entidade</b> (Prefeitura, Câmara, Fundo…) e clique em Buscar.</div>';
         }
+
+        // ── selects: município → entidade (codigoEntidade) ──
+        $municipios = DomEntidades::municipios();
+        $munOpts = '<option value="">— escolha o município —</option>';
+        foreach ($municipios as $m) {
+            $munOpts .= '<option value="' . $this->attr($m) . '"' . ($m === $municipio ? ' selected' : '') . '>' . e($m) . '</option>';
+        }
+        $munOpts .= '<option value="__regionais__"' . ($municipio === '__regionais__' ? ' selected' : '') . '>▸ Consórcios / Regionais</option>';
+
+        // entidades do município selecionado (server-side, pra funcionar pós-submit)
+        $entLista = $municipio === '__regionais__' ? DomEntidades::regionais()
+            : ($municipio !== '' ? DomEntidades::porMunicipio($municipio) : []);
+        $entOpts = '<option value="">— escolha a entidade —</option>';
+        foreach ($entLista as $e) {
+            $rotulo = $municipio === '__regionais__' ? $e['nome'] : $e['tipo'] . ' — ' . $e['nome'];
+            $entOpts .= '<option value="' . (int) $e['codigo'] . '"' . ((int) $e['codigo'] === $codigo ? ' selected' : '') . '>' . e($rotulo) . '</option>';
+        }
+
+        // mapa compacto p/ o JS repopular a entidade ao trocar de município
+        $mapa = [];
+        foreach (DomEntidades::todas() as $e) {
+            $k = $e['municipio'] ?? '__regionais__';
+            $mapa[$k][] = ['c' => (int) $e['codigo'], 'n' => $e['nome'], 't' => $e['tipo']];
+        }
+        $mapaJson = json_encode($mapa, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $sel = fn ($k) => $modKey === $k ? ' selected' : '';
         $seld = fn ($d) => $dias === $d ? ' selected' : '';
         $body = <<<HTML
-<form class="form" method="get">
-  <input type="text" name="municipio" value="{$this->attr($municipio)}" placeholder="Município (ex.: Tijucas)" autofocus>
+<form class="form" method="get" id="bform">
+  <select name="municipio" id="fmun">{$munOpts}</select>
+  <select name="codigoEntidade" id="fent">{$entOpts}</select>
   <select name="modalidade">
-    <option value="todas"{$sel('todas')}>Todas</option>
+    <option value="todas"{$sel('todas')}>Todas as categorias</option>
     <option value="dispensa"{$sel('dispensa')}>Dispensa</option>
     <option value="inexigibilidade"{$sel('inexigibilidade')}>Inexigibilidade</option>
     <option value="pregao"{$sel('pregao')}>Pregão</option>
@@ -288,11 +327,20 @@ HTML;
   </select>
   <button type="submit">Buscar no DOM</button>
 </form>
-<div class="muted small">Consulta AO VIVO o Diário Oficial dos Municípios de SC. Busca por termo (município) + categoria + janela; resultado limitado a ~50 atos por consulta (educado com a fonte).</div>
+<div class="aviso">⚠️ Filtra pela <b>entidade exata</b> (codigoEntidade do DOM) — não por texto livre. Projetos de lei / proposições da <b>câmara</b> NÃO entram no DOM (só atos administrativos) — pro legislativo, veja o <b>Radar de Câmaras</b> (em construção).</div>
 {$resultadoHtml}
+<script>
+const MAPA={$mapaJson};
+const fmun=document.getElementById('fmun'),fent=document.getElementById('fent');
+fmun.addEventListener('change',()=>{
+  const lst=MAPA[fmun.value]||[];const reg=fmun.value==='__regionais__';
+  fent.innerHTML='<option value="">— escolha a entidade —</option>'+
+    lst.map(e=>'<option value="'+e.c+'">'+(reg?e.n:e.t+' — '+e.n).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))+'</option>').join('');
+});
+</script>
 HTML;
 
-        return $this->chrome('busca', 'Busca dirigida', 'Consulta ao vivo no DOM/SC por município · modalidade · período', $body);
+        return $this->chrome('busca', 'Busca por órgão', 'Consulta ao vivo no DOM/SC — escolha município → entidade (Prefeitura/Câmara/Fundo)', $body);
     }
 
     // ───────────────────────── chrome / helpers ─────────────────────────
@@ -369,6 +417,12 @@ td.muni .reg{display:block;margin-top:1px}
 .rmeta .nw{font-size:12px;color:var(--muted);font-weight:600}
 .robj{font-size:14.5px;font-weight:600;margin:2px 0 3px}
 .rorg{font-size:12px;color:var(--muted);margin-bottom:7px}
+/* busca por órgão: cabeçalho da entidade + aviso */
+.enthd{background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px;margin:4px 0 10px}
+.enthd .entnome{font-weight:800;font-size:15.5px}
+.enthd .entsub{font-size:12px;opacity:.85;margin-top:2px}
+.aviso{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:12px;padding:9px 12px;border-radius:10px;margin:2px 0 12px;line-height:1.45}
+.form select{flex:1 1 160px;min-width:140px}
 details summary{cursor:pointer;list-style:none;font-size:12.5px;font-weight:700;color:var(--navy);padding:9px 13px;border-top:1px solid var(--line);background:#f8f9fc}
 summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}details[open]>summary::before{content:"▾ "}
 .det{padding:12px 13px}.det .org{font-size:12px;color:var(--muted);margin:4px 0}

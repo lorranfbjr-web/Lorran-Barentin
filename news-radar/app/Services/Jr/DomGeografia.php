@@ -38,6 +38,42 @@ class DomGeografia
         return $idx[$chave] ?? null;
     }
 
+    /** Todos os municípios (grafia oficial), ordenados. */
+    public static function municipios(): array
+    {
+        $out = [];
+        foreach (self::MAPA as $municipios) {
+            foreach ($municipios as $m) {
+                $out[] = $m;
+            }
+        }
+        sort($out);
+
+        return $out;
+    }
+
+    /**
+     * Se $nome TERMINA com um município conhecido (precedido de espaço), devolve
+     * o município canônico (o mais longo que casar). Ex.: "Prefeitura Municipal
+     * de São José do Cedro" → "São José do Cedro". Usado pra mapear entidade do
+     * DOM → município. Devolve null se não casar (consórcio/associação regional).
+     */
+    public static function municipioNoFim(string $nome): ?string
+    {
+        $alvo = self::norm($nome);
+        $melhor = null;
+        $melhorLen = 0;
+        foreach (self::municipios() as $m) {
+            $nm = self::norm($m);
+            if (mb_strlen($nm) > $melhorLen && str_ends_with($alvo, ' ' . $nm)) {
+                $melhor = $m;
+                $melhorLen = mb_strlen($nm);
+            }
+        }
+
+        return $melhor;
+    }
+
     private static function indice(): array
     {
         if (self::$indice !== null) {

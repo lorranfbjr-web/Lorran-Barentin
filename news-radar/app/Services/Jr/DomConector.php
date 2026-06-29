@@ -105,6 +105,145 @@ class DomConector
         return $out;
     }
 
+    /**
+     * BUSCA POR ENTIDADE (estruturada): consulta o feed RSS por entidade do DOM
+     * — site/portal&codigoEntidade=N&view=rss — que é o ÚNICO filtro de entidade
+     * estável e stateless do portal (o listing HTML por entidade é sessão-dep.).
+     * Escopo EXATO pelo codigoEntidade (não texto livre): exclui consórcio cujo
+     * nome contém "Vale do Itajaí". RSS traz 10 itens/página com categoria, órgão
+     * (author), data, PDF (enclosure) e texto — paginamos até a janela esvaziar.
+     *
+     * @return array<int,array> atos parseados (mesma forma de parse())
+     */
+    public function buscarEntidade(int $codigoEntidade, ?string $categoria, Carbon $ini, Carbon $fim, int $maxPaginas = 20): array
+    {
+        // IMPORTANTE: o RSS IGNORA filtros de q (categoria/data) — com data:[…]
+        // ele até inverte a ordem (devolve 2020). Com q=*:* devolve do mais NOVO
+        // pro mais antigo. Então paginamos *:* e filtramos data+categoria em PHP,
+        // parando quando a página inteira já é anterior à janela.
+        $iniStr = $ini->toDateString();
+        $fimStr = $fim->toDateString();
+        $catAlvo = $categoria ? mb_strtolower($categoria) : null;
+
+        $out = [];
+        for ($pagina = 1; $pagina <= $maxPaginas; $pagina++) {
+            try {
+                $resp = Http::withHeaders(['User-Agent' => $this->ua])
+                    ->timeout(40)->retry(2, 1500, throw: false)
+                    ->get($this->base . '/', [
+                        'r' => 'site/portal',
+                        'codigoEntidade' => $codigoEntidade,
+                        'q' => '*:*',
+                        'view' => 'rss',
+                        'AtoASolrDocument_page' => $pagina,
+                    ]);
+                $xml = $resp->ok() ? $resp->body() : '';
+            } catch (\Throwable $e) {
+                break;
+            }
+            if ($xml === '') {
+                break;
+            }
+            $itens = $this->parseRss($xml);
+            if (! $itens) {
+                break;
+            }
+            $todosAntigos = true;
+            foreach ($itens as $it) {
+                $d = $it['data_pub'];
+                if ($d !== null && $d >= $iniStr) {
+                    $todosAntigos = false; // ainda dentro/à frente da janela
+                }
+                if ($d !== null && $d >= $iniStr && $d <= $fimStr) {
+                    if ($catAlvo === null || mb_strtolower((string) $it['categoria']) === $catAlvo) {
+                        $out[$it['ato_id']] = $it; // dedup por id (RSS repete o 1º item)
+                    }
+                }
+            }
+            // ordem é decrescente: se a página inteira já é anterior à janela, parou.
+            if ($todosAntigos) {
+                break;
+            }
+            if (count($itens) < 10) {
+                break; // última página do feed
+            }
+            if ($this->pausa > 0) {
+                usleep((int) ($this->pausa * 1_000_000));
+            }
+        }
+
+        return array_values($out);
+    }
+
+    /**
+     * Parseia os <item> do RSS por entidade. Cada item: title, link/guid (id:N),
+     * pubDate, category, author ("Município - Secretaria"), enclosure (PDF),
+     * description (texto). Reaproveita os parsers de campo do listing.
+     *
+     * @return array<int,array>
+     */
+    private function parseRss(string $xml): array
+    {
+        $out = [];
+        if (! preg_match_all('#<item>(.*?)</item>#is', $xml, $blocos)) {
+            return $out;
+        }
+        foreach ($blocos[1] as $b) {
+            $pegar = function (string $tag) use ($b): string {
+                if (preg_match("#<{$tag}[^>]*>(.*?)</{$tag}>#is", $b, $m)) {
+                    // desembrulha CDATA antes de limpar (senão o strip de tags come tudo)
+                    $raw = preg_replace('/<!\[CDATA\[(.*?)\]\]>/s', '$1', $m[1]);
+
+                    return $this->limpa($raw);
+                }
+
+                return '';
+            };
+            $link = $pegar('guid') ?: $pegar('link');
+            if (! preg_match('/id:(\d+)/', $link, $mid)) {
+                continue;
+            }
+            $atoId = (int) $mid[1];
+            $titulo = $pegar('title');
+            $texto = $pegar('description');
+            $categoria = $pegar('category');
+            $author = $pegar('author'); // "Município - Secretaria ..."
+            $orgao = trim(preg_replace('/\s*<@>\s*$/', '', str_replace(['"', '«', '»'], '', $author)));
+
+            $data = null;
+            if (($pd = $pegar('pubDate')) !== '') {
+                try {
+                    $data = Carbon::parse($pd)->toDateString();
+                } catch (\Throwable $e) {
+                    $data = null;
+                }
+            }
+            $pdf = '';
+            if (preg_match('#<enclosure[^>]*url="([^"]+)"#i', $b, $me)) {
+                $pdf = html_entity_decode($me[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            }
+
+            $out[] = [
+                'ato_id' => $atoId,
+                'titulo' => $titulo,
+                'orgao' => $orgao ?: null,
+                'municipio' => $this->municipioDe($orgao),
+                'categoria' => $categoria ?: null,
+                'modalidade' => $this->modalidadeDe($titulo . ' ' . $texto),
+                'objeto' => $this->objetoDe($texto, $titulo),
+                'objeto_limpo' => DomObjetoLimpo::limpar($texto, $titulo),
+                'valor' => $this->valorDe($texto),
+                'fornecedor' => $this->fornecedorDe($texto),
+                'data_pub' => $data,
+                'url_fonte' => $this->base . '/atos/' . $atoId,
+                'url_pdf' => $pdf ?: ($this->base . '/?r=site/autopublicacaoAssinado&id=' . $atoId),
+                'texto_bruto' => $texto,
+            ];
+        }
+
+        return $out;
+    }
+
     private function fetchPagina(?string $categoria, Carbon $ini, Carbon $fim, int $pagina, ?string $termo = null): string
     {
         // Termos SEPARADOS POR ESPAÇO (operador default do Solr). NÃO usar "+"
