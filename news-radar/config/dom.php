@@ -29,6 +29,17 @@ return [
     'dias' => (int) env('JRDOM_DIAS', 14),
     'max_paginas' => (int) env('JRDOM_MAX_PAGINAS', 40),
 
+    // ── Crawler RETROATIVO (OBJ1) — varre o histórico pra trás aos poucos, em
+    // background, sem competir com o forward. Cursor persistido em jr_dom_estado.
+    'retro' => [
+        // Profundidade-alvo: até quantos dias atrás encher (parar quando chega lá).
+        'alvo_dias' => (int) env('JRDOM_RETRO_ALVO', 60),
+        // Tamanho do passo: cada execução varre uma janela deste tamanho e recua.
+        'chunk_dias' => (int) env('JRDOM_RETRO_CHUNK', 3),
+        // Teto de páginas/categoria por chunk (a janela curta costuma drenar antes).
+        'max_paginas' => (int) env('JRDOM_RETRO_MAX_PAGINAS', 60),
+    ],
+
     // ── Radar de Oportunidades (scoring) ──
     'scoring' => [
         // SEPARADO do juiz (Opus). Sonnet por padrão; trocável por env.

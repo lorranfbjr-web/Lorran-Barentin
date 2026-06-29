@@ -54,17 +54,32 @@ Schedule::command('jrlink:assuntos')
     ->cron('10,40 * * * *')
     ->withoutOverlapping();
 
-// ── DOM/SC — Radar de Oportunidades (automação aprovada pelo Lorran) ──
-// Minera o Diário Oficial dos Municípios de SC (busca pública) atrás de pauta
-// de licitação/compras e pontua com Sonnet (editor, não auditor). ISOLADO do
-// juiz/radar. Diário e BOUNDED pra ser educado com o portal (que rate-limita
-// sob rajada): puxa a janela de 2 dias (idempotente, dedup por ato_id) de
-// madrugada e, 1h depois, pontua só os novos (whereNull score) + gera a página.
-// Minutos na grade /5 do timer systemd. withoutOverlapping evita pile-up.
-Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25')
-    ->dailyAt('04:10')
+// ── DOM/SC — Radar de Oportunidades (PRODUÇÃO 24/7, aprovada pelo Lorran) ──
+// Minera o Diário Oficial dos Municípios de SC (busca pública) atrás de pauta de
+// licitação/compras e pontua com Sonnet (editor, não auditor). ISOLADO do juiz/
+// radar. EDUCADO com o portal (pausa entre páginas; o portal rate-limita rajada).
+// Todos os minutos caem na grade /5 do timer systemd (senão schedule:run nunca
+// acha a tarefa "due"). withoutOverlapping (lock próprio por comando) evita
+// pile-up e mantém forward e retroativo sem se atropelarem.
+//
+// (1) FORWARD — prioridade: a cada 15min puxa a janela curta (2 dias) e PARA de
+//     paginar assim que bate no que já temos (--parar-vistos), então é barato e
+//     só captura o que é novo. É o que mantém a base "daqui pra frente".
+Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25 --parar-vistos=20')
+    ->everyFifteenMinutes()
     ->withoutOverlapping();
 
+// (2) SCORING — contínuo e incremental: pontua só os atos novos (whereNull score)
+//     com Sonnet (dual-lens 🔴/🟢) e regenera a página. Offset 5min pra rodar
+//     LOGO DEPOIS do forward, no mesmo ciclo. Lock de 600s (chamada LLM é lenta).
 Schedule::command('jr:dom-oportunidades --lote=8')
-    ->dailyAt('05:10')
-    ->withoutOverlapping(120);
+    ->cron('5,20,35,50 * * * *')
+    ->withoutOverlapping(600);
+
+// (3) RETROATIVO — background, baixa prioridade: a cada 30min baixa UM chunk do
+//     histórico pra trás (cursor persistido, resume) até a profundidade-alvo
+//     (60 dias). Offset 10/40 pra não coincidir com o forward (0/15/30/45). Não
+//     compete: lock próprio + pausa educada; quando alcança o alvo, vira no-op.
+Schedule::command('jr:dom-retroativo --chunks=1')
+    ->cron('10,40 * * * *')
+    ->withoutOverlapping(600);
