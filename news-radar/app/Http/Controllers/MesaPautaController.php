@@ -232,6 +232,7 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <script>
 let DADOS={$json};
 const STN={$statusJson};
+const SRCI={dom:"🧾",camara:"📜",mpsc:"⚖️",tce:"💰",tjsc:"👨‍⚖️"};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s==null?"na":s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
 let stSel="",srcSel="";
@@ -248,7 +249,7 @@ function card(d){
   return '<div class="card" data-id="'+d.id+'">'+
     '<div class="score '+cls(d.score)+'">'+sc+'</div>'+
     '<div class="bd">'+
-      '<div class="l1"><span class="src-badge src-'+d.source+'">'+esc(d.src_nome)+'</span>'+
+      '<div class="l1"><span class="src-badge src-'+d.source+'">'+(SRCI[d.source]||"")+' '+esc(d.src_nome)+'</span>'+
         '<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+
         '<span class="when">'+esc(d.data)+'</span></div>'+
       (d.objeto?'<div class="obj">'+esc(d.objeto)+'</div>':'')+

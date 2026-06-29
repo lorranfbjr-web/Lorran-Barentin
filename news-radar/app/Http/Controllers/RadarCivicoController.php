@@ -257,6 +257,11 @@ header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12p
 .lb{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
 .lb.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .lb.cinca.on{background:var(--amber);color:#1c1408;border-color:var(--amber)}
+.days{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
+.db{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
+.db.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.day-sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:10px 2px 0;padding-top:7px;border-top:1px dashed var(--line)}
+.day-sep:first-child{border-top:none;padding-top:0;margin-top:0}
 main{display:flex;flex-direction:column;gap:9px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden}
 .face{display:flex;gap:11px;padding:13px}
@@ -307,16 +312,22 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <div class="wrap">
 <div class="srcs">
   <button type="button" class="sb on" data-src="">Todas <b>{$s['total']}</b></button>
-  <button type="button" class="sb" data-src="dom">📋 DOM <b>{$p['dom']}</b></button>
-  <button type="button" class="sb" data-src="camara">🏛️ Câmaras <b>{$p['camara']}</b></button>
+  <button type="button" class="sb" data-src="dom">🧾 DOM <b>{$p['dom']}</b></button>
+  <button type="button" class="sb" data-src="camara">📜 Câmaras <b>{$p['camara']}</b></button>
   <button type="button" class="sb" data-src="mpsc">⚖️ MPSC <b>{$p['mpsc']}</b></button>
-  <button type="button" class="sb" data-src="tce">🧮 TCE <b>{$p['tce']}</b></button>
+  <button type="button" class="sb" data-src="tce">💰 TCE <b>{$p['tce']}</b></button>
 </div>
 <div class="lens">
   <button type="button" class="lb on" data-tipo="">Tudo</button>
   <button type="button" class="lb" data-tipo="fiscalizacao">🔴 Fiscalização <b>{$s['fisc']}</b></button>
   <button type="button" class="lb" data-tipo="servico">🟢 Serviço <b>{$s['serv']}</b></button>
-  <button type="button" class="lb cinca" id="bcinca">🏛️ CINCATARINA <b>{$s['cinca']}</b></button>
+  <button type="button" class="lb cinca" id="bcinca">🤝 CINCATARINA <b>{$s['cinca']}</b></button>
+</div>
+<div class="days">
+  <button type="button" class="db on" data-day="">Todo período</button>
+  <button type="button" class="db" data-day="hoje">Hoje</button>
+  <button type="button" class="db" data-day="ontem">Ontem</button>
+  <button type="button" class="db" data-day="7">Últimos 7 dias</button>
 </div>
 <div class="bar">
   <input type="search" id="q" placeholder="🔎 cidade, objeto, órgão, gancho…">
@@ -330,11 +341,18 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <script>
 const DADOS={$json};
 const SEL=new Set({$selJson});
-const SRCN={dom:"DOM",camara:"Câmara",mpsc:"MPSC",tce:"TCE"};
+const SRCN={dom:"DOM",camara:"Câmara",mpsc:"MPSC",tce:"TCE",tjsc:"TJSC"};
+const SRCI={dom:"🧾",camara:"📜",mpsc:"⚖️",tce:"💰",tjsc:"👨‍⚖️"};
+const z2=n=>String(n).padStart(2,"0");
+const ymd=d=>d.getFullYear()+"-"+z2(d.getMonth()+1)+"-"+z2(d.getDate());
+const _h=new Date();const Y_HOJE=ymd(_h);
+const _o=new Date(_h);_o.setDate(_o.getDate()-1);const Y_ONTEM=ymd(_o);
+const _7=new Date(_h);_7.setDate(_7.getDate()-6);const Y_7=ymd(_7);
+const dayLabel=dp=>{if(!dp)return"sem data";if(dp===Y_HOJE)return"Hoje";if(dp===Y_ONTEM)return"Ontem";const p=String(dp).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+p[0]:dp;};
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
-let srcSel="",tipoSel="",soCinca=false;
+let srcSel="",tipoSel="",soCinca=false,daySel="";
 function card(d){
   const apurar=(d.apurar||[]).map(b=>'<li>'+esc(b)+'</li>').join("");
   const meta=(d.meta||[]).map(m=>'<span class="pill">'+esc(m)+'</span>').join("");
@@ -346,7 +364,7 @@ function card(d){
     '<div class="face">'+
       '<div class="score '+cls(d.score)+'">'+d.score+'</div>'+
       '<div class="hd">'+
-        '<div class="l1"><span class="src-badge src-'+d.source+'">'+esc(SRCN[d.source]||d.source)+'</span>'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
+        '<div class="l1"><span class="src-badge src-'+d.source+'">'+(SRCI[d.source]||"")+' '+esc(SRCN[d.source]||d.source)+'</span>'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
         '<div class="l2">'+esc(d.objeto||"")+'</div>'+
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
         (cinca?'<div class="badges">'+cinca+'</div>':'')+
@@ -379,6 +397,10 @@ function render(){
     if(srcSel&&d.source!==srcSel)return false;
     if(tipoSel&&d.tipo!==tipoSel)return false;
     if(soCinca&&!d.cinca)return false;
+    if(daySel){const dp=String(d.data_pub||"");
+      if(daySel==="hoje"&&dp!==Y_HOJE)return false;
+      if(daySel==="ontem"&&dp!==Y_ONTEM)return false;
+      if(daySel==="7"&&(!dp||dp<Y_7))return false;}
     if(q){const h=((d.municipio||"")+" "+(d.regiao||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.gancho_curto||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")+" "+(d.extra||"")).toLowerCase();if(!h.includes(q))return false;}
     return true;});
   arr.sort((a,b)=>{
@@ -386,7 +408,11 @@ function render(){
     if(ord==="muni")return(a.municipio||"").localeCompare(b.municipio||"");
     return b.score-a.score;});
   document.getElementById("count").textContent=arr.length+" itens";
-  document.getElementById("lista").innerHTML=arr.length?arr.map(card).join(""):'<div class="empty">Nenhum item bate os filtros.</div>';
+  let html="";
+  if(ord==="data"){let lastDay=null;arr.forEach(d=>{const dp=String(d.data_pub||"");
+    if(dp!==lastDay){lastDay=dp;html+='<div class="day-sep">'+esc(dayLabel(dp))+'</div>';}html+=card(d);});}
+  else{html=arr.map(card).join("");}
+  document.getElementById("lista").innerHTML=arr.length?html:'<div class="empty">Nenhum item bate os filtros.</div>';
 }
 document.querySelectorAll(".sb").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".sb").forEach(x=>x.classList.remove("on"));
@@ -395,6 +421,8 @@ document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click
   document.querySelectorAll(".lb[data-tipo]").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");tipoSel=b.dataset.tipo;render();}));
 document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
+document.querySelectorAll(".db").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".db").forEach(x=>x.classList.remove("on"));b.classList.add("on");daySel=b.dataset.day;render();}));
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 // ★ selecionar pra Mesa de Pauta (delegação — os cards são re-renderizados)
 document.getElementById("lista").addEventListener("click",async e=>{
