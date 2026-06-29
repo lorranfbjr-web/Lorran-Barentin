@@ -14,6 +14,13 @@
  *
  *   REST: busca.tjsc.jus.br/dje-consulta/rest/diario/caderno?edicao=N&cdCaderno=N
  *   Cadernos vistos: 4 = Matérias Administrativas; 6 = Matérias Jurídicas (PDF).
+ *
+ * 2ª SONDA (2026-06-29, aprofundamento): sweep cdCaderno 1→9 confirma que SÓ
+ * existem 4 e 6 (resto = 404) — config exaustiva, sem caderno escondido com
+ * decisão. A busca de jurisprudência (acórdãos, a substância real) está atrás de
+ * shield anti-bot TSPD/F5 (cookies TSda… rotativos, desafio JS) — inacessível por
+ * HTTP educado. Re-medição (ed. 4756, n=2): 0 blocos. PARQUEADO de propósito;
+ * caminho futuro = API oficial / Datajud-CNJ. Ver goals/SCOPING-fase6-tjsc.md §2ª SONDA.
  */
 return [
     'url_base' => env('JRTJSC_URL', 'https://busca.tjsc.jus.br/dje-consulta/rest/diario/caderno'),
