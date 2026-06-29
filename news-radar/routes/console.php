@@ -100,3 +100,17 @@ Schedule::command('jr:camara-ingest --parar-vistos=20')
 Schedule::command('jr:camara-score')
     ->cron('35 * * * *')
     ->withoutOverlapping(600);
+
+// ── RADAR CÍVICO Fase 4 — MPSC (DOE PDF diário) — instaurações de procedimentos ──
+// ADITIVO/ISOLADO. O DOE-MPSC sai Seg-Sex; o forward varre os últimos dias úteis
+// (fim de semana = 404, pula). Parsing via PyMuPDF (venv dedicado). Grade /5.
+//
+// (1) FORWARD — 1×/dia de manhã puxa a janela curta de dias úteis e dedup.
+Schedule::command('jr:mpsc-ingest --dias=3')
+    ->cron('45 8 * * 1-6')
+    ->withoutOverlapping(600);
+
+// (2) FARO — pontua os extratos novos (Sonnet, dual-lens, lente MPSC).
+Schedule::command('jr:mpsc-score')
+    ->cron('55 8 * * 1-6')
+    ->withoutOverlapping(600);
