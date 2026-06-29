@@ -571,6 +571,15 @@ return [
             'Serviços Executados',
             'Lesadas pela JANNA/ VIRTUOSA oficial',
             'Ideias Mkt Alex',
+            // pessoais (revisão da ponte WhatsApp 2026-06-29):
+            'Aniversário do DOM.',
+            'Fernando de Noronha - 24/04',
+            'Holly shit brow',
+            // internos do JR / anti-loop (não são imprensa externa):
+            'Disparador JR',
+            'JURÍDICO - JORNAL RAZÃO',
+            'As Tif | Jornal Razão',
+            'REDES SOCIAIS POSTAGENS',
         ],
         // só mensagem de grupo entra (Parte A — opção B).
         'somente_grupo' => true,

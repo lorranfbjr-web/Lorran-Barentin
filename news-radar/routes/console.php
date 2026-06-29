@@ -21,15 +21,17 @@ Schedule::command('jrlink:bridge-news')
 
 // CANAL WHATSAPP — ingest cru (idempotente, incremental por cursor: só lê os
 // arquivos novos do webhook, não os ~56k do backlog) + ponte captura→Radar
-// (release de grupo -> jr_link_extracao origem=whatsapp). A ponte roda :02/:32,
+// (release de grupo -> jr_link_extracao origem=whatsapp). A ponte roda :00/:30,
 // LOGO ANTES do juiz (:05/:35), pra release novo já entrar no ciclo. O filtro
 // de privacidade (só grupo permitido) vive no ingest e na rota de captura.
+// NB: cron tem de cair na grade /5 do timer (OnCalendar *:00/5:10), senão o
+// schedule:run nunca acha a tarefa "due" — foi o que travou a ponte ('2,32').
 Schedule::command('jrpauta:ingest --incremental')
     ->everyFiveMinutes()
     ->withoutOverlapping();
 
 Schedule::command('jrpauta:bridge-radar')
-    ->cron('2,32 * * * *')
+    ->cron('0,30 * * * *')
     ->withoutOverlapping();
 
 Schedule::command('jrlink:juiz --hours=48')
