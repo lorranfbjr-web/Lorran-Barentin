@@ -72,18 +72,54 @@ class DomConector
         }
     }
 
-    private function fetchPagina(string $categoria, Carbon $ini, Carbon $fim, int $pagina): string
+    /**
+     * BUSCA DIRIGIDA (on-demand): query AO VIVO no Solr por município (termo
+     * livre, pós-filtrado por precisão no controller), categoria opcional e
+     * janela. Mesma listagem parseável do site/index. Devolve atos parseados.
+     *
+     * Nota: o filtro estrito por entidade (entidade:"X"+codigoEntidade na rota
+     * site/portal) é frágil/sessão-dependente — por isso usamos termo livre.
+     *
+     * @return array<int,array>
+     */
+    public function buscar(string $municipio, ?string $categoria, Carbon $ini, Carbon $fim, int $maxPaginas = 5): array
+    {
+        $out = [];
+        for ($pagina = 1; $pagina <= $maxPaginas; $pagina++) {
+            $html = $this->fetchPagina($categoria, $ini, $fim, $pagina, $municipio);
+            if ($html === '') {
+                break;
+            }
+            $itens = $this->parse($html, $categoria ?: '');
+            if (! $itens) {
+                break;
+            }
+            foreach ($itens as $it) {
+                $out[] = $it;
+            }
+            if ($this->pausa > 0) {
+                usleep((int) ($this->pausa * 1_000_000));
+            }
+        }
+
+        return $out;
+    }
+
+    private function fetchPagina(?string $categoria, Carbon $ini, Carbon $fim, int $pagina, ?string $termo = null): string
     {
         // Termos SEPARADOS POR ESPAÇO (operador default do Solr). NÃO usar "+"
         // literal entre termos: o http_build_query o codifica como %2B (operador
         // MUST do Lucene) e muda a semântica — derruba o total. data:[…] usa o
         // dia seguinte ao fim como teto exclusivo (offset SC ~UTC-3).
-        $q = sprintf(
-            'categoria:"%s" data:[%sT03:00:00Z TO %sT02:59:59Z]',
-            $categoria,
-            $ini->toDateString(),
-            $fim->copy()->addDay()->toDateString()
-        );
+        $partes = [];
+        if ($categoria) {
+            $partes[] = sprintf('categoria:"%s"', $categoria);
+        }
+        if ($termo) {
+            $partes[] = sprintf('"%s"', str_replace('"', '', $termo));
+        }
+        $partes[] = sprintf('data:[%sT03:00:00Z TO %sT02:59:59Z]', $ini->toDateString(), $fim->copy()->addDay()->toDateString());
+        $q = implode(' ', $partes);
 
         // Resiliente: hiccup de rede não derruba a ingestão inteira (pula a página).
         try {

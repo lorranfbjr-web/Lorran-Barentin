@@ -53,3 +53,18 @@ Schedule::command('jrlink:publicados-sync')
 Schedule::command('jrlink:assuntos')
     ->cron('10,40 * * * *')
     ->withoutOverlapping();
+
+// ── DOM/SC — Radar de Oportunidades (automação aprovada pelo Lorran) ──
+// Minera o Diário Oficial dos Municípios de SC (busca pública) atrás de pauta
+// de licitação/compras e pontua com Sonnet (editor, não auditor). ISOLADO do
+// juiz/radar. Diário e BOUNDED pra ser educado com o portal (que rate-limita
+// sob rajada): puxa a janela de 2 dias (idempotente, dedup por ato_id) de
+// madrugada e, 1h depois, pontua só os novos (whereNull score) + gera a página.
+// Minutos na grade /5 do timer systemd. withoutOverlapping evita pile-up.
+Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25')
+    ->dailyAt('04:10')
+    ->withoutOverlapping();
+
+Schedule::command('jr:dom-oportunidades --lote=8')
+    ->dailyAt('05:10')
+    ->withoutOverlapping(120);

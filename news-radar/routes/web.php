@@ -24,6 +24,13 @@ Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
     Route::post('/radar/verificar', [\App\Http\Controllers\JrVerificadorController::class, 'verificar']);
 });
 
+// Radar de Oportunidades DOM/SC — 3 páginas públicas server-rendered (leem
+// jr_dom_atos ao vivo; /dom-busca consulta o Solr do DOM ao vivo). Subsistema
+// ISOLADO (não toca juiz/radar editorial). Antes do catch-all do SPA.
+Route::get('/dom-todos', [\App\Http\Controllers\DomController::class, 'todos']);
+Route::get('/dom-radar', [\App\Http\Controllers\DomController::class, 'radar']);
+Route::get('/dom-busca', [\App\Http\Controllers\DomController::class, 'busca']);
+
 Route::get('/{any?}', function () {
     return view('app');
 })->where('any', '.*');
