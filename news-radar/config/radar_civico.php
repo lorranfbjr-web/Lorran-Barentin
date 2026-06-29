@@ -39,4 +39,21 @@ return [
 
     // base pública pro "link pro card" (#ato-<source>-<id> no Radar Cívico)
     'base_url' => env('RADAR_CIVICO_BASE_URL', env('APP_URL', '')),
+
+    /*
+     * RASCUNHO (Fase 5) — botão "✍️ criar rascunho" na Mesa. Gera um draft JR do
+     * ato (LLM, Opus) e ENTREGA SÓ no WhatsApp do Lorran (DM). NÃO publica.
+     *
+     * ALVO FAIL-CLOSED: sem `phone` (número pessoal do Lorran) o draft é gerado e
+     * mostrado na própria Mesa, mas NÃO é enviado a ninguém — nunca cai em grupo,
+     * nunca toca o disparador 884. Reusa a instância Z-API própria do Radar (a
+     * mesma do alerta/notificação), NÃO o n8n. Modelo = mesmo do pipeline (Opus).
+     */
+    'rascunho' => [
+        'phone' => env('RADAR_CIVICO_RASCUNHO_PHONE', ''),   // SÓ o número do Lorran (DM)
+        'instance' => env('JRLINK_ALERT_ZAPI_INSTANCE', ''),
+        'token' => env('JRLINK_ALERT_ZAPI_TOKEN', ''),
+        'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
+        'modelo' => env('RADAR_CIVICO_RASCUNHO_MODELO', 'claude-opus-4-8'),
+    ],
 ];

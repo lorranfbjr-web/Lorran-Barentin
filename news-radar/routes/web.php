@@ -49,6 +49,7 @@ Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
     Route::post('/mesa/selecionar', [\App\Http\Controllers\MesaPautaController::class, 'selecionar']);
     Route::post('/mesa/{id}', [\App\Http\Controllers\MesaPautaController::class, 'atualizar'])->where('id', '\d+');
     Route::post('/mesa/{id}/remover', [\App\Http\Controllers\MesaPautaController::class, 'remover'])->where('id', '\d+');
+    Route::post('/mesa/{id}/rascunho', [\App\Http\Controllers\MesaPautaController::class, 'rascunho'])->where('id', '\d+');
 });
 
 Route::get('/{any?}', function () {

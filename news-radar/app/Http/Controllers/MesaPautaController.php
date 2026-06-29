@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Jr\RascunhoCivico;
+use App\Services\Jr\ZapLorran;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -104,6 +106,50 @@ class MesaPautaController extends Controller
         return response()->json(['ok' => (bool) $n]);
     }
 
+    /**
+     * Fase 5 — gera um rascunho JR do ato (LLM) e ENTREGA SÓ no WhatsApp do
+     * Lorran (fail-closed: sem número configurado, só gera e mostra na Mesa, não
+     * envia). Marca a pauta como rascunho-gerado. NÃO publica nada. Manual.
+     */
+    public function rascunho(int $id, RascunhoCivico $gerador, ZapLorran $zap)
+    {
+        $p = DB::table('jr_pauta_fila')->where('id', $id)->first();
+        if (! $p) {
+            return response()->json(['ok' => false, 'erro' => 'pauta não encontrada'], 404);
+        }
+
+        $ato = $gerador->carregar($p->ato_ref);
+        if (! $ato) {
+            return response()->json(['ok' => false, 'erro' => 'ato de origem não encontrado (pode ter saído da base)'], 422);
+        }
+
+        $r = $gerador->gerar($p->ato_ref);
+        if (empty($r)) {
+            return response()->json(['ok' => false, 'erro' => 'o gerador não retornou rascunho — tente de novo'], 502);
+        }
+
+        $texto = $gerador->formatar($r, $ato);
+        $now = Carbon::now();
+
+        DB::table('jr_pauta_fila')->where('id', $id)->update([
+            'rascunho' => $texto,
+            'rascunho_at' => $now,
+            'status' => 'rascunho-gerado',
+            'updated_at' => $now,
+        ]);
+
+        // entrega SÓ pro Lorran (fail-closed se não configurado)
+        $messageId = $zap->texto($texto);
+
+        return response()->json([
+            'ok' => true,
+            'rascunho' => $texto,
+            'enviado' => $messageId !== null,
+            'destino_configurado' => $zap->configurado(),
+            'status' => 'rascunho-gerado',
+        ]);
+    }
+
     /** Remove uma pauta da fila. */
     public function remover(int $id)
     {
@@ -137,6 +183,7 @@ class MesaPautaController extends Controller
             'url_fonte' => $p->url_fonte,
             'status' => $p->status,
             'nota' => $p->nota,
+            'rascunho' => $p->rascunho,
             'data' => $p->created_at ? Carbon::parse($p->created_at)->format('d/m H:i') : '',
         ])->all();
 
@@ -203,6 +250,11 @@ main{display:flex;flex-direction:column;gap:9px}
 .acts button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .acts .del{color:var(--red);border-color:#f3c6ca;margin-left:auto}
 .acts .src{color:#fff;background:var(--navy);border-color:var(--navy)}
+.acts .rasc{color:#6b21a8;border-color:#e3d2f5;background:#faf5ff}
+.acts .rasc:disabled{opacity:.6;cursor:wait}
+.rascunho-box{margin-top:8px}
+.rasc-txt{white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12.5px;line-height:1.5;background:#faf5ff;border:1px solid #e9d5ff;border-left:3px solid #7c3aed;border-radius:0 8px 8px 0;padding:10px 12px;margin:0;max-height:360px;overflow:auto}
+.rasc-feed{font-size:11.5px;color:var(--muted);margin-top:4px;font-weight:700}
 .nota{margin-top:8px}
 .nota textarea{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;resize:vertical;min-height:38px;background:#fcfcfe;color:var(--ink)}
 .nota .save{font-size:11px;color:var(--muted);margin-top:3px;height:14px}
@@ -255,8 +307,9 @@ function card(d){
       (d.objeto?'<div class="obj">'+esc(d.objeto)+'</div>':'')+
       (d.gancho_curto?'<div class="hook">'+esc(d.gancho_curto)+'</div>':'')+
       '<div><span class="st st-'+d.status+'">'+esc(STN[d.status]||d.status)+'</span></div>'+
-      '<div class="acts">'+btns+srcl+'<button class="del">remover</button></div>'+
+      '<div class="acts">'+btns+'<button class="rasc">'+(d.rascunho?'↻ refazer rascunho':'✍️ criar rascunho')+'</button>'+srcl+'<button class="del">remover</button></div>'+
       '<div class="nota"><textarea placeholder="anotação livre…">'+esc(d.nota||"")+'</textarea><div class="save"></div></div>'+
+      '<div class="rascunho-box">'+(d.rascunho?('<pre class="rasc-txt">'+esc(d.rascunho)+'</pre>'):'')+'</div>'+
     '</div>'+
   '</div>';
 }
@@ -274,6 +327,20 @@ function render(){
 function obj(id){return DADOS.find(d=>d.id==id);}
 document.getElementById("lista").addEventListener("click",async e=>{
   const cardEl=e.target.closest(".card");if(!cardEl)return;const id=+cardEl.dataset.id;const d=obj(id);
+  if(e.target.classList.contains("rasc")){
+    const btn=e.target;const old=btn.textContent;btn.disabled=true;btn.textContent="gerando… (uns 20s)";
+    try{
+      const j=await post("/mesa/"+id+"/rascunho",{});
+      if(!j.ok){alert(j.erro||"falhou");btn.disabled=false;btn.textContent=old;return;}
+      d.rascunho=j.rascunho;d.status=j.status;
+      const st=cardEl.querySelector(".st");if(st){st.className="st st-"+d.status;st.textContent=STN[d.status]||d.status;}
+      cardEl.querySelectorAll(".setst").forEach(x=>x.classList.toggle("on",x.dataset.k===d.status));
+      const feed=j.enviado?"📲 enviado no seu WhatsApp ✓":(j.destino_configurado?"gerado — envio ao WhatsApp falhou (veja o log)":"gerado — configure RADAR_CIVICO_RASCUNHO_PHONE pra receber no WhatsApp");
+      cardEl.querySelector(".rascunho-box").innerHTML='<pre class="rasc-txt">'+esc(j.rascunho)+'</pre><div class="rasc-feed">'+esc(feed)+'</div>';
+      btn.disabled=false;btn.textContent="↻ refazer rascunho";
+    }catch(_){alert("falhou ao gerar");btn.disabled=false;btn.textContent=old;}
+    return;
+  }
   if(e.target.classList.contains("setst")){
     const k=e.target.dataset.k;try{await post("/mesa/"+id,{status:k});d.status=k;render();}catch(_){alert("falhou");}
   }else if(e.target.classList.contains("del")){
