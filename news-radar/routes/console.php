@@ -125,3 +125,12 @@ Schedule::command('jr:tce-ingest --dias=3')
 Schedule::command('jr:tce-score')
     ->cron('0 10 * * 1-6')
     ->withoutOverlapping(600);
+
+// ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no Telegram ──
+// ADITIVO/ISOLADO. Digest por ciclo (anti-flood) das pautas quentes E novas;
+// dedup em jr_civico_alertas. FAIL-CLOSED: sem TELEGRAM_BOT_TOKEN +
+// RADAR_CIVICO_ALERT_CHAT_ID no .env, NÃO envia (só loga) — então deixar
+// agendado é inócuo até o Lorran configurar o alvo. Grade /5 do timer.
+Schedule::command('jrcivico:alertar')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(600);

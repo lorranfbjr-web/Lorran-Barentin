@@ -360,7 +360,7 @@ function card(d){
   const hook=d.gancho_curto||d.gancho||"";
   const lens=d.tipo==='fiscalizacao'?'<span class="lens-dot" title="fiscalização">🔴</span>':(d.tipo==='servico'?'<span class="lens-dot" title="serviço/1ª-mão">🟢</span>':'');
   const cinca=d.cinca?'<span class="frec cinca">🏛️ CINCATARINA</span>':'';
-  return '<div class="card">'+
+  return '<div class="card" id="ato-'+d.ato_ref.replace(":","-")+'">'+
     '<div class="face">'+
       '<div class="score '+cls(d.score)+'">'+d.score+'</div>'+
       '<div class="hd">'+
@@ -424,6 +424,15 @@ document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;
 document.querySelectorAll(".db").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".db").forEach(x=>x.classList.remove("on"));b.classList.add("on");daySel=b.dataset.day;render();}));
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
+// link pro card vindo do alerta do Telegram (#ato-<source>-<id>): rola, abre e pisca
+function jumpHash(){
+  if(!location.hash.startsWith("#ato-"))return;
+  const el=document.getElementById(location.hash.slice(1));if(!el)return;
+  el.scrollIntoView({block:"center"});
+  const det=el.querySelector("details");if(det)det.open=true;
+  el.style.outline="3px solid #f4b400";el.style.outlineOffset="2px";
+  setTimeout(()=>{el.style.outline="";el.style.outlineOffset="";},2600);
+}
 // ★ selecionar pra Mesa de Pauta (delegação — os cards são re-renderizados)
 document.getElementById("lista").addEventListener("click",async e=>{
   // Fase 2 — abrir/fechar a íntegra do ato (lazy)
@@ -459,6 +468,8 @@ document.getElementById("lista").addEventListener("click",async e=>{
     alert("Não consegui salvar na Mesa. Arme o painel uma vez: abra /mesa?key=SUA_CHAVE e depois volte.");}
 });
 render();
+jumpHash();
+window.addEventListener("hashchange",jumpHash);
 </script>
 </body></html>
 HTML;
