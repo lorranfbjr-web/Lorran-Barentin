@@ -114,3 +114,14 @@ Schedule::command('jr:mpsc-ingest --dias=3')
 Schedule::command('jr:mpsc-score')
     ->cron('55 8 * * 1-6')
     ->withoutOverlapping(600);
+
+// ── RADAR CÍVICO Fase 5 — TCE-SC (DOTC-e PDF diário) — decisões/julgamentos ──
+// ADITIVO/ISOLADO. DOTC-e sai Seg-Sex; forward varre dias úteis (404 no fds).
+// PDF datado direto (o índice tem shield anti-bot). Parsing PyMuPDF. Grade /5.
+Schedule::command('jr:tce-ingest --dias=3')
+    ->cron('50 9 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:tce-score')
+    ->cron('0 10 * * 1-6')
+    ->withoutOverlapping(600);
