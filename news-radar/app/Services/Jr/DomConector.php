@@ -192,6 +192,7 @@ class DomConector
                 'categoria' => $categoria,
                 'modalidade' => $this->modalidadeDe($titulo . ' ' . $texto),
                 'objeto' => $this->objetoDe($texto, $titulo),
+                'objeto_limpo' => DomObjetoLimpo::limpar($texto, $titulo),
                 'valor' => $this->valorDe($texto),
                 'fornecedor' => $this->fornecedorDe($texto),
                 'data_pub' => $data,

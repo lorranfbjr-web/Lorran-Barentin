@@ -63,7 +63,7 @@ class DomScorer
             $texto = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($it['texto'] ?? ''))), 0, 900);
             $valor = $it['valor'] ? ('R$ ' . number_format((float) $it['valor'], 2, ',', '.')) : '(não detectado)';
             $lista .= sprintf(
-                "ID %d\nMUNICÍPIO/ÓRGÃO: %s — %s\nCATEGORIA: %s | MODALIDADE: %s | VALOR DETECTADO: %s\nTÍTULO: %s\nTEXTO: %s\n\n",
+                "ID %d\nMUNICÍPIO/ÓRGÃO: %s — %s\nCATEGORIA: %s | MODALIDADE: %s | VALOR DETECTADO: %s\nTÍTULO: %s\nOBJETO (extração heurística, pode estar tosca): %s\nTEXTO: %s\n\n",
                 $it['ato_id'],
                 $it['municipio'] ?: '(?)',
                 $it['orgao'] ?: '(?)',
@@ -71,6 +71,7 @@ class DomScorer
                 $it['modalidade'] ?: '(?)',
                 $valor,
                 trim((string) ($it['titulo'] ?? '')),
+                trim((string) ($it['objeto_limpo'] ?? '')) ?: '(?)',
                 $texto ?: '(sem texto)'
             );
         }
@@ -101,6 +102,8 @@ INSTRUÇÃO-CHAVE: NÃO filtre pelo óbvio nem exija valor alto. Pense "o que re
 
 Para CADA ato responda:
 - score_pauta: 0-100 = NOTICIABILIDADE (não valor). 80-100 = chamaria a capa, apuraria HOJE; 60-79 = boa pauta; 40-59 = talvez, fraco; <40 = rotina burocrática.
+- objeto_limpo: UMA linha curta e ESPECÍFICA dizendo O QUE está sendo comprado/contratado/feito (ex.: "Show da banda X na festa do município", "Aquisição de 2 caminhões basculantes", "Reforma da praça central"). LIMPE o boilerplate institucional (CNPJ, "torna público", endereço, nº de processo). Concreto, sem juridiquês. NÃO é acusação.
+- gancho_curto: hook de NO MÁXIMO 8 palavras — UMA frase/expressão provocativa que faria alguém parar pra ler (ex.: "Por que comprar isso?", "Show por dispensa de novo", "Caro demais pra cidade pequena?"). Provocativo mas é LEAD/pergunta, NUNCA afirma irregularidade.
 - gancho: 1 frase curta — por que isto vira pauta (em tom de LEAD, não acusação).
 - tipo_de_gancho: TEXTO LIVRE e curto (ex.: "show por dispensa", "luxo em órgão pequeno", "publicidade pré-eleição", "fornecedor recorrente", "gasto desproporcional"). Não se prenda a categorias fixas.
 - o_que_apurar: array de 2-4 bullets curtos — o que checar, que pergunta fazer, quem ouvir.
@@ -108,7 +111,7 @@ Para CADA ato responda:
 - flags: array com os números dos EIXOS acima que bateram (ex.: [1,2]).
 
 RESPONDA APENAS com um array JSON válido, um objeto por ato, sem markdown e sem texto fora do JSON:
-[{"id": <id>, "score_pauta": <0-100>, "gancho": "...", "tipo_de_gancho": "...", "o_que_apurar": ["...","..."], "angulo_sugerido": "...", "flags": [1,2]}]
+[{"id": <id>, "score_pauta": <0-100>, "objeto_limpo": "...", "gancho_curto": "...", "gancho": "...", "tipo_de_gancho": "...", "o_que_apurar": ["...","..."], "angulo_sugerido": "...", "flags": [1,2]}]
 
 ATOS:
 
@@ -161,8 +164,11 @@ PROMPT;
             }
             $apurar = $v['o_que_apurar'] ?? [];
             $flags = $v['flags'] ?? [];
+            $objLimpo = trim((string) ($v['objeto_limpo'] ?? ''));
             $out[$id] = [
                 'score_pauta' => max(0, min(100, (int) ($v['score_pauta'] ?? 0))),
+                'objeto_limpo' => $objLimpo !== '' ? mb_substr($objLimpo, 0, 240) : null,
+                'gancho_curto' => mb_substr(trim((string) ($v['gancho_curto'] ?? '')), 0, 120),
                 'gancho' => mb_substr(trim((string) ($v['gancho'] ?? '')), 0, 400),
                 'tipo_de_gancho' => mb_substr(trim((string) ($v['tipo_de_gancho'] ?? '')), 0, 80),
                 'o_que_apurar' => is_array($apurar) ? array_values(array_filter(array_map(fn ($b) => mb_substr(trim((string) $b), 0, 300), $apurar))) : [],

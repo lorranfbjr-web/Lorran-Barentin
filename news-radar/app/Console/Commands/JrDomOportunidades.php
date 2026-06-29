@@ -22,6 +22,7 @@ class JrDomOportunidades extends Command
         . '{--lote= : Atos por chamada LLM (default config dom.scoring.lote)} '
         . '{--model= : Modelo do scoring (default config dom.scoring.modelo — trocável)} '
         . '{--force : Re-pontua mesmo quem já tem score} '
+        . '{--min-score= : Com --force, re-pontua só atos com score_pauta >= N (ex.: re-scorar o radar)} '
         . '{--render-only : Só regenera a página, sem pontuar}';
 
     protected $description = 'Radar de Oportunidades: pontua atos do DOM/SC com Sonnet (noticiabilidade) e gera /oportunidades.';
@@ -44,13 +45,17 @@ class JrDomOportunidades extends Command
         if (! $this->option('force')) {
             $q->whereNull('score_pauta');
         }
+        if ($this->option('min-score') !== null && $this->option('min-score') !== '') {
+            // re-scoring dirigido (ex.: só o radar ≥40) — exige --force pra fazer sentido
+            $q->where('score_pauta', '>=', (int) $this->option('min-score'));
+        }
         $limit = (int) $this->option('limit');
         // mais recentes primeiro (sem viés de noticiabilidade na seleção)
         $q->orderByDesc('data_pub')->orderByDesc('ato_id');
         if ($limit > 0) {
             $q->limit($limit);
         }
-        $pendentes = $q->get(['ato_id', 'municipio', 'orgao', 'categoria', 'modalidade', 'valor', 'titulo', 'texto_bruto']);
+        $pendentes = $q->get(['ato_id', 'municipio', 'orgao', 'categoria', 'modalidade', 'valor', 'titulo', 'objeto_limpo', 'texto_bruto']);
 
         if ($pendentes->isEmpty()) {
             $this->info('Nada pra pontuar. Gerando página…');
@@ -87,14 +92,16 @@ class JrDomOportunidades extends Command
                 'modalidade' => $r->modalidade,
                 'valor' => $r->valor,
                 'titulo' => $r->titulo,
+                'objeto_limpo' => $r->objeto_limpo,
                 'texto' => $r->texto_bruto,
             ])->all();
 
             try {
                 $vereditos = $scorer->pontuarLote($itens);
                 foreach ($vereditos as $atoId => $v) {
-                    DB::table('jr_dom_atos')->where('ato_id', $atoId)->update([
+                    $upd = [
                         'score_pauta' => $v['score_pauta'],
+                        'gancho_curto' => $v['gancho_curto'],
                         'gancho' => $v['gancho'],
                         'tipo_de_gancho' => $v['tipo_de_gancho'],
                         'o_que_apurar' => json_encode($v['o_que_apurar'], JSON_UNESCAPED_UNICODE),
@@ -103,7 +110,12 @@ class JrDomOportunidades extends Command
                         'scored_model' => $scorer->modelo(),
                         'scored_at' => now(),
                         'updated_at' => now(),
-                    ]);
+                    ];
+                    // só sobrescreve o objeto_limpo (heurístico) se o Sonnet poliu de fato
+                    if (! empty($v['objeto_limpo'])) {
+                        $upd['objeto_limpo'] = $v['objeto_limpo'];
+                    }
+                    DB::table('jr_dom_atos')->where('ato_id', $atoId)->update($upd);
                     $ok++;
                 }
             } catch (\Throwable $e) {
@@ -142,7 +154,7 @@ class JrDomOportunidades extends Command
             'orgao' => $a->orgao,
             'categoria' => $a->categoria,
             'modalidade' => $a->modalidade,
-            'objeto' => $a->objeto,
+            'objeto' => $a->objeto_limpo ?: $a->objeto,
             'valor' => $a->valor !== null ? (float) $a->valor : null,
             'fornecedor' => $a->fornecedor,
             'data_pub' => $a->data_pub,

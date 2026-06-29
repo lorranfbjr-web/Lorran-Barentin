@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Jr\DomConector;
+use App\Services\Jr\DomGeografia;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -36,19 +37,23 @@ class DomController extends Controller
         $atos = DB::table('jr_dom_atos')
             ->orderByDesc('data_pub')->orderByDesc('ato_id')
             ->limit(2000)
-            ->get(['municipio', 'orgao', 'categoria', 'modalidade', 'objeto', 'valor', 'data_pub', 'url_fonte', 'url_pdf']);
+            ->get(['municipio', 'orgao', 'categoria', 'modalidade', 'objeto_limpo', 'valor', 'data_pub', 'url_fonte', 'url_pdf']);
 
         $total = DB::table('jr_dom_atos')->count();
 
         $linhas = $atos->map(function ($a) {
             $val = $a->valor !== null ? 'R$ ' . number_format((float) $a->valor, 0, ',', '.') : '—';
             $mod = $a->modalidade ?: ($a->categoria ?: '');
+            $reg = DomGeografia::regiao($a->municipio);
+            $muni = e($a->municipio ?: '—') . ($reg ? '<span class="reg">' . e($reg) . '</span>' : '');
+            // objeto_limpo (legível) substitui o objeto cru/boilerplate
+            $obj = e(mb_strimwidth((string) ($a->objeto_limpo ?: '—'), 0, 180, '…'));
 
             return '<tr>'
                 . '<td class="nw">' . $this->fmtData($a->data_pub) . '</td>'
-                . '<td class="muni">' . e($a->municipio ?: '—') . '</td>'
+                . '<td class="muni">' . $muni . '</td>'
                 . '<td><span class="mod">' . e($mod) . '</span></td>'
-                . '<td class="obj">' . e(mb_strimwidth((string) ($a->objeto ?: ''), 0, 160, '…')) . '</td>'
+                . '<td class="obj">' . $obj . '</td>'
                 . '<td class="nw val">' . $val . '</td>'
                 . '<td class="nw"><a href="' . e($a->url_fonte) . '" target="_blank" rel="noopener">ato</a>'
                 . ($a->url_pdf ? ' · <a href="' . e($a->url_pdf) . '" target="_blank" rel="noopener">pdf</a>' : '') . '</td>'
@@ -74,7 +79,7 @@ f.addEventListener('input',()=>{const q=f.value.toLowerCase().trim();let n=0;
 </script>
 HTML;
 
-        return $this->chrome('todos', 'Todos os atos', 'Firehose cronológico do DOM/SC — cru, sem nota, mais recente primeiro', $body);
+        return $this->chrome('todos', 'Todos os atos', 'Firehose cronológico do DOM/SC — objeto legível, sem nota, mais recente primeiro', $body);
     }
 
     // ───────────────────────── PÁGINA 2 — Radar enxuto ─────────────────────────
@@ -89,18 +94,20 @@ HTML;
 
         $dados = $atos->map(fn ($a) => [
             'municipio' => $a->municipio,
+            'regiao' => DomGeografia::regiao($a->municipio),
             'orgao' => $a->orgao,
             'categoria' => $a->categoria,
             'modalidade' => $a->modalidade,
-            'objeto' => $a->objeto,
-            'oque' => trim(($a->modalidade ? ucfirst($a->modalidade) . ': ' : '') . mb_strimwidth((string) ($a->objeto ?: ''), 0, 120, '…')),
+            // objeto_limpo (Sonnet polido pros pontuados; heurístico de fallback)
+            'objeto' => $a->objeto_limpo ?: $a->objeto,
             'valor' => $a->valor !== null ? (float) $a->valor : null,
             'fornecedor' => $a->fornecedor,
             'data_pub' => $a->data_pub,
-            'texto' => mb_strimwidth((string) ($a->texto_bruto ?: ''), 0, 1200, '…'),
+            'texto' => (string) ($a->texto_bruto ?: ''),
             'url_fonte' => $a->url_fonte,
             'url_pdf' => $a->url_pdf,
             'score' => (int) $a->score_pauta,
+            'gancho_curto' => $a->gancho_curto,
             'gancho' => $a->gancho,
             'tipo_gancho' => $a->tipo_de_gancho,
             'apurar' => json_decode($a->o_que_apurar ?: '[]', true),
@@ -146,18 +153,25 @@ function card(d){
   const apurar=(d.apurar||[]).map(b=>'<li>'+esc(b)+'</li>').join("");
   const val=d.valor!=null?'<span class="pill val">'+fmtV(d.valor)+'</span>':'';
   const mod=d.modalidade?'<span class="pill mod">'+esc(d.modalidade)+'</span>':'';
-  // CARA: 3 coisas — cidade · o que é · por que vira pauta. Resto no spoiler.
+  // CARA (passar-o-olho): 3 linhas exatas.
+  //  L1: NOTA · MUNICÍPIO · REGIÃO
+  //  L2: MODALIDADE + OBJETO (objeto_limpo, o mais específico possível)
+  //  L3: gancho_curto (hook provocativo de ≤8 palavras; é LEAD, não acusação)
+  const reg=d.regiao?'<span class="reg"> · '+esc(d.regiao)+'</span>':'';
+  const modtag=d.modalidade?'<span class="modtag">'+esc(d.modalidade)+'</span> ':'';
+  const hook=d.gancho_curto||d.gancho||"";
   return '<div class="card">'+
     '<div class="face">'+
       '<div class="score '+cls(d.score)+'">'+d.score+'</div>'+
       '<div class="hd">'+
-        '<div class="muni">'+esc(d.municipio||"—")+'</div>'+
-        '<div class="oque">'+esc(d.oque||d.objeto||"")+'</div>'+
-        '<div class="why"><span class="lab">vira pauta:</span> '+esc(d.gancho||"")+'</div>'+
+        '<div class="l1"><span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
+        '<div class="l2">'+modtag+esc(d.objeto||"")+'</div>'+
+        (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
       '</div>'+
     '</div>'+
     '<details><summary>ver detalhes</summary><div class="det">'+
       (d.tipo_gancho?'<div class="tg">'+esc(d.tipo_gancho)+'</div>':'')+
+      (d.gancho?'<div class="why"><span class="lab">por que vira pauta</span>'+esc(d.gancho)+'</div>':'')+
       '<div class="meta">'+val+mod+'<span class="pill">'+esc(d.categoria||"")+'</span><span class="pill">'+fmtD(d.data_pub)+'</span></div>'+
       '<div class="org">'+esc(d.orgao||"")+'</div>'+
       (apurar?'<div class="lab">o que apurar</div><ul class="apurar">'+apurar+'</ul>':'')+
@@ -176,7 +190,7 @@ function render(){
   let arr=DADOS.filter(d=>{
     if(mod&&d.modalidade!==mod)return false;
     if(vmin&&!(d.valor>=vmin))return false;
-    if(q){const h=((d.municipio||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")).toLowerCase();if(!h.includes(q))return false;}
+    if(q){const h=((d.municipio||"")+" "+(d.regiao||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.gancho_curto||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")).toLowerCase();if(!h.includes(q))return false;}
     return true;});
   arr.sort((a,b)=>{
     if(ord==="valor")return(b.valor||0)-(a.valor||0);
@@ -191,7 +205,7 @@ render();
 </script>
 HTML;
 
-        return $this->chrome('radar', 'Radar', 'Possíveis pautas (noticiabilidade ≥ 40) — cidade · o que é · por que vira pauta', $body);
+        return $this->chrome('radar', 'Radar', 'Possíveis pautas (noticiabilidade ≥ 40) — nota · cidade · região · o que é · gancho', $body);
     }
 
     // ───────────────────────── PÁGINA 3 — Busca dirigida ─────────────────────────
@@ -222,21 +236,35 @@ HTML;
             if (! $lista) {
                 $resultadoHtml = '<div class="empty">Nada encontrado pra "' . e($municipio) . '" nessa janela.</div>';
             } else {
+                // Lista de resultados em cards expansíveis: objeto LEGÍVEL na cara +
+                // "ler completo" que mostra o TEXTO INTEGRAL já vindo na consulta
+                // (custo ZERO — é leitura, não reprocessa) + link do PDF.
                 $linhas = collect($lista)->map(function ($a) {
-                    $val = $a['valor'] !== null ? 'R$ ' . number_format((float) $a['valor'], 0, ',', '.') : '—';
+                    $val = $a['valor'] !== null ? '<span class="pill val">R$ ' . number_format((float) $a['valor'], 2, ',', '.') . '</span>' : '';
+                    $mod = $a['modalidade'] ?: ($a['categoria'] ?: '');
+                    $reg = DomGeografia::regiao($a['municipio'] ?? null);
+                    $obj = e(($a['objeto_limpo'] ?? null) ?: $a['objeto'] ?: '—');
+                    $texto = trim((string) ($a['texto_bruto'] ?? ''));
+                    $lerCompleto = $texto !== ''
+                        ? '<details class="inner"><summary>ler completo</summary><div class="txt">' . e($texto) . '</div></details>'
+                        : '<div class="muted small">Texto integral não disponível nesta listagem.</div>';
 
-                    return '<tr>'
-                        . '<td class="nw">' . $this->fmtData($a['data_pub']) . '</td>'
-                        . '<td>' . e($a['orgao'] ?: '—') . '</td>'
-                        . '<td><span class="mod">' . e($a['modalidade'] ?: $a['categoria'] ?: '') . '</span></td>'
-                        . '<td class="obj">' . e(mb_strimwidth((string) ($a['objeto'] ?: ''), 0, 180, '…')) . '</td>'
-                        . '<td class="nw val">' . $val . '</td>'
-                        . '<td class="nw"><a href="' . e($a['url_fonte']) . '" target="_blank" rel="noopener">ato</a>'
-                        . ($a['url_pdf'] ? ' · <a href="' . e($a['url_pdf']) . '" target="_blank" rel="noopener">pdf</a>' : '') . '</td>'
-                        . '</tr>';
+                    return '<div class="rcard">'
+                        . '<div class="rmeta">'
+                            . '<span class="nw">' . $this->fmtData($a['data_pub']) . '</span>'
+                            . '<span class="mod">' . e($mod) . '</span>'
+                            . ($reg ? '<span class="pill">' . e($reg) . '</span>' : '')
+                            . $val
+                        . '</div>'
+                        . '<div class="robj">' . $obj . '</div>'
+                        . '<div class="rorg">' . e($a['orgao'] ?: '') . '</div>'
+                        . $lerCompleto
+                        . '<div class="links"><a class="src" href="' . e($a['url_fonte']) . '" target="_blank" rel="noopener">Ver ato no DOM</a>'
+                        . ($a['url_pdf'] ? '<a class="src pdf" href="' . e($a['url_pdf']) . '" target="_blank" rel="noopener">PDF</a>' : '') . '</div>'
+                        . '</div>';
                 })->implode('');
-                $resultadoHtml = $nota . '<div class="muted small">' . count($lista) . ' atos · ' . e($municipio) . ' · ' . e($modKey) . ' · últimos ' . $dias . ' dias</div>'
-                    . '<div class="tablewrap"><table><thead><tr><th>Data</th><th>Órgão</th><th>Modalidade</th><th>Objeto</th><th>Valor</th><th>Fonte</th></tr></thead><tbody>' . $linhas . '</tbody></table></div>';
+                $resultadoHtml = $nota . '<div class="muted small">' . count($lista) . ' atos · ' . e($municipio) . ' · ' . e($modKey) . ' · últimos ' . $dias . ' dias · objeto legível + “ler completo” (texto integral, custo zero)</div>'
+                    . '<main class="rlist">' . $linhas . '</main>';
             }
         }
 
@@ -324,8 +352,23 @@ main{display:flex;flex-direction:column;gap:9px}
 .score{flex:0 0 auto;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#fff;background:var(--green)}
 .score.hi{background:var(--red)}.score.mid{background:var(--navy)}.score.lo{background:var(--amber)}
 .hd{flex:1;min-width:0}.muni{font-weight:800;font-size:15px}
+td.muni .reg,.l1 .reg{font-weight:600;color:var(--muted);font-size:12px}
+td.muni .reg{display:block;margin-top:1px}
+/* card enxuto do radar: 3 linhas (nota·cidade·região / modalidade+objeto / gancho) */
+.l1{line-height:1.2}
+.l2{font-size:13.5px;margin:3px 0 4px;color:#222}
+.l2 .modtag{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.2px;color:var(--red);background:#fdecef;padding:2px 7px;border-radius:999px;margin-right:5px;white-space:nowrap}
+.l3{font-size:13.5px;font-weight:700;color:var(--navy);font-style:italic}
 .oque{font-size:13.5px;margin:2px 0 4px}
-.why{font-size:13px;color:#333}.why .lab{color:var(--navy);font-weight:700}
+.why{font-size:13px;color:#333;background:#f8f9fc;border-left:3px solid var(--navy);padding:7px 10px;border-radius:0 8px 8px 0;margin:2px 0 8px}
+.why .lab{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:2px}
+/* busca: cards expansíveis com "ler completo" */
+.rlist{gap:10px}
+.rcard{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px}
+.rmeta{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:5px}
+.rmeta .nw{font-size:12px;color:var(--muted);font-weight:600}
+.robj{font-size:14.5px;font-weight:600;margin:2px 0 3px}
+.rorg{font-size:12px;color:var(--muted);margin-bottom:7px}
 details summary{cursor:pointer;list-style:none;font-size:12.5px;font-weight:700;color:var(--navy);padding:9px 13px;border-top:1px solid var(--line);background:#f8f9fc}
 summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}details[open]>summary::before{content:"▾ "}
 .det{padding:12px 13px}.det .org{font-size:12px;color:var(--muted);margin:4px 0}

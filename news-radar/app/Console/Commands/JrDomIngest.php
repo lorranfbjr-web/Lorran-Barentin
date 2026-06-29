@@ -71,6 +71,7 @@ class JrDomIngest extends Command
                     'categoria' => $ato['categoria'],
                     'modalidade' => $ato['modalidade'],
                     'objeto' => $ato['objeto'],
+                    'objeto_limpo' => $ato['objeto_limpo'],
                     'valor' => $ato['valor'],
                     'fornecedor' => $ato['fornecedor'],
                     'data_pub' => $ato['data_pub'],
