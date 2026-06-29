@@ -95,6 +95,12 @@ EIXOS de noticiabilidade (são SINAIS, não filtros — QUALQUER UM basta; pode 
 
 INSTRUÇÃO-CHAVE: NÃO filtre pelo óbvio nem exija valor alto. Pense "o que renderia TÍTULO" / "o que o cidadão comentaria no grupo de WhatsApp da cidade". Se um jornalista local levantaria a sobrancelha, FLAGGA. Rotina pura (folha de pagamento, IPTU, nomeação corriqueira, aditivo de prazo sem valor) = score baixo.
 
+🔭 DUAS LENTES (classifique cada ato no campo "tipo") — a noticiabilidade NÃO é só polêmica; serviço de 1ª-mão também é pauta:
+- "fiscalizacao" 🔴 = RED FLAG a apurar: dispensa/inexigibilidade pra coisa que dava pra licitar, auto-benefício (câmara/gestor gastando consigo), contrato zumbi/aditivo que incha, conflito de interesse, fornecedor recorrente suspeito, valor desproporcional ao porte. (É LEAD pra investigar, NUNCA acusação.)
+- "servico" 🟢 = NOVIDADE positiva ou neutra de interesse do cidadão: lançamento de edital de obra (pavimentação, ponte, escola), concurso/processo seletivo público, investimento/compra que melhora um serviço (nova UBS, ambulância, ônibus, creche), evento cultural legítimo. Serve de informação útil, não de denúncia.
+- "neutro" = rotina burocrática/descartável (prazo, republicação técnica, sem ângulo).
+AMBOS 🔴 e 🟢 recebem score_pauta de NOTICIABILIDADE (um bom 🟢 pode valer 70). Só "neutro" fica baixo.
+
 ÂNCORAS (mostram a AMPLITUDE — o fio comum é "dinheiro público + algo que chama atenção", NÃO valor):
 (a) Câmara de Porto Belo compra iPhones por R$124k — luxo + alto valor + órgão pequeno.
 (b) Prefeitura contrata SHOW MUSICAL por DISPENSA de licitação — entretenimento + sem concorrência, MESMO barato.
@@ -105,13 +111,14 @@ Para CADA ato responda:
 - objeto_limpo: UMA linha curta e ESPECÍFICA dizendo O QUE está sendo comprado/contratado/feito (ex.: "Show da banda X na festa do município", "Aquisição de 2 caminhões basculantes", "Reforma da praça central"). LIMPE o boilerplate institucional (CNPJ, "torna público", endereço, nº de processo). Concreto, sem juridiquês. NÃO é acusação.
 - gancho_curto: hook de NO MÁXIMO 8 palavras — UMA frase/expressão provocativa que faria alguém parar pra ler (ex.: "Por que comprar isso?", "Show por dispensa de novo", "Caro demais pra cidade pequena?"). Provocativo mas é LEAD/pergunta, NUNCA afirma irregularidade.
 - gancho: 1 frase curta — por que isto vira pauta (em tom de LEAD, não acusação).
-- tipo_de_gancho: TEXTO LIVRE e curto (ex.: "show por dispensa", "luxo em órgão pequeno", "publicidade pré-eleição", "fornecedor recorrente", "gasto desproporcional"). Não se prenda a categorias fixas.
+- tipo: UMA de "fiscalizacao" | "servico" | "neutro" (ver DUAS LENTES acima).
+- tipo_de_gancho: TEXTO LIVRE e curto (ex.: "show por dispensa", "luxo em órgão pequeno", "publicidade pré-eleição", "fornecedor recorrente", "edital de obra", "concurso público", "gasto desproporcional"). Não se prenda a categorias fixas.
 - o_que_apurar: array de 2-4 bullets curtos — o que checar, que pergunta fazer, quem ouvir.
 - angulo_sugerido: 1 frase — o ângulo/título que o jornal poderia perseguir.
 - flags: array com os números dos EIXOS acima que bateram (ex.: [1,2]).
 
 RESPONDA APENAS com um array JSON válido, um objeto por ato, sem markdown e sem texto fora do JSON:
-[{"id": <id>, "score_pauta": <0-100>, "objeto_limpo": "...", "gancho_curto": "...", "gancho": "...", "tipo_de_gancho": "...", "o_que_apurar": ["...","..."], "angulo_sugerido": "...", "flags": [1,2]}]
+[{"id": <id>, "score_pauta": <0-100>, "tipo": "fiscalizacao|servico|neutro", "objeto_limpo": "...", "gancho_curto": "...", "gancho": "...", "tipo_de_gancho": "...", "o_que_apurar": ["...","..."], "angulo_sugerido": "...", "flags": [1,2]}]
 
 ATOS:
 
@@ -165,8 +172,12 @@ PROMPT;
             $apurar = $v['o_que_apurar'] ?? [];
             $flags = $v['flags'] ?? [];
             $objLimpo = trim((string) ($v['objeto_limpo'] ?? ''));
+            // dual-lens: normaliza pra um dos três rótulos (default neutro)
+            $tipo = mb_strtolower(trim((string) ($v['tipo'] ?? '')));
+            $tipo = in_array($tipo, ['fiscalizacao', 'servico', 'neutro'], true) ? $tipo : 'neutro';
             $out[$id] = [
                 'score_pauta' => max(0, min(100, (int) ($v['score_pauta'] ?? 0))),
+                'tipo' => $tipo,
                 'objeto_limpo' => $objLimpo !== '' ? mb_substr($objLimpo, 0, 240) : null,
                 'gancho_curto' => mb_substr(trim((string) ($v['gancho_curto'] ?? '')), 0, 120),
                 'gancho' => mb_substr(trim((string) ($v['gancho'] ?? '')), 0, 400),

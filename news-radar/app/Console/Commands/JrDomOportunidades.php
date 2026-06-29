@@ -101,6 +101,7 @@ class JrDomOportunidades extends Command
                 foreach ($vereditos as $atoId => $v) {
                     $upd = [
                         'score_pauta' => $v['score_pauta'],
+                        'tipo' => $v['tipo'],
                         'gancho_curto' => $v['gancho_curto'],
                         'gancho' => $v['gancho'],
                         'tipo_de_gancho' => $v['tipo_de_gancho'],
