@@ -38,9 +38,14 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
+            // WAL: leitor não bloqueia escritor — essencial porque produção (juiz,
+            // dispatch, site) e os faros cívicos (DOM/câmara/MPSC/TCE) compartilham
+            // ESTE arquivo sqlite. Sem WAL (modo delete) o backfill cívico gerou
+            // "database is locked" em cascata e travou a produção (30/06/2026).
+            // busy_timeout 60s dá margem pra escrita longa antes de desistir.
+            'busy_timeout' => (int) env('DB_BUSY_TIMEOUT', 60000),
+            'journal_mode' => env('DB_JOURNAL_MODE', 'WAL'),
+            'synchronous' => env('DB_SYNCHRONOUS', 'NORMAL'),
             'transaction_mode' => 'DEFERRED',
         ],
 

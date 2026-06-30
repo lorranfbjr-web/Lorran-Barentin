@@ -72,8 +72,12 @@ Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25 --parar-vistos=20')
 // (2) SCORING — contínuo e incremental: pontua só os atos novos (whereNull score)
 //     com Sonnet (dual-lens 🔴/🟢) e regenera a página. Offset 5min pra rodar
 //     LOGO DEPOIS do forward, no mesmo ciclo. Lock de 600s (chamada LLM é lenta).
-Schedule::command('jr:dom-oportunidades --lote=8')
-    ->cron('5,20,35,50 * * * *')
+// --limit=24: execução CURTA (3 chamadas/ciclo) — mantém o FORWARD em dia sem o
+// backlog histórico (30k+ atos do retroativo) sufocar o claude-cli. Horário 20,50
+// NÃO coincide com o juiz (5,35), que tem prioridade na assinatura Max. (Backlog
+// histórico se scora em janelas manuais controladas, não no horário de produção.)
+Schedule::command('jr:dom-oportunidades --lote=8 --limit=24')
+    ->cron('20,50 * * * *')
     ->withoutOverlapping(600);
 
 // (3) RETROATIVO — background, baixa prioridade: a cada 30min baixa UM chunk do
