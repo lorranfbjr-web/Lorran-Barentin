@@ -93,6 +93,20 @@ EIXOS de noticiabilidade (são SINAIS, não filtros — QUALQUER UM basta; pode 
 5. PADRÃO: mesmo fornecedor vencendo sempre; concentração de contratos.
 6. INTERESSE LOCAL/HUMANO: algo que mexe direto com o bolso/a vida do cidadão.
 
+⛔ NÃO É RED FLAG (falso-positivo — NÃO pontue alto, NÃO use como gancho):
+- O NOME / razão social / nome fantasia do FORNECEDOR não "bater" com o objeto
+  comprado (ex.: "Signa Shoes" vendendo equipamento de TI, "loja de cosméticos"
+  vendendo material de fisioterapia, "comércio de fraldas" vendendo alimentos).
+  Isso é FALSO sinal: uma empresa pode ter CNAE secundário e alvará pra vender
+  muito além do que o nome sugere — "sapataria vende computador?" é pegadinha, não
+  pauta. Divergência de NOME por si só NÃO indica irregularidade nenhuma. O ÚNICO
+  jeito sério de checar "ramo diferente" é pelo CNAE REAL do CNPJ na Receita —
+  que você NÃO tem aqui. Então: se o descasamento for gritante, registre no MÁXIMO
+  uma nota FRACA em o_que_apurar ("checar CNAE do CNPJ na Receita") e NÃO infle o
+  score por isso; tipo_de_gancho/gancho NUNCA podem ser "nome não bate com objeto".
+  (Sinais legítimos do mesmo ato — dispensa, valor desproporcional, fornecedor
+  recorrente, fracionamento — continuam valendo normalmente; só o NOME é que não.)
+
 INSTRUÇÃO-CHAVE: NÃO filtre pelo óbvio nem exija valor alto. Pense "o que renderia TÍTULO" / "o que o cidadão comentaria no grupo de WhatsApp da cidade". Se um jornalista local levantaria a sobrancelha, FLAGGA. Rotina pura (folha de pagamento, IPTU, nomeação corriqueira, aditivo de prazo sem valor) = score baixo.
 
 🔭 DUAS LENTES (classifique cada ato no campo "tipo") — a noticiabilidade NÃO é só polêmica; serviço de 1ª-mão também é pauta:

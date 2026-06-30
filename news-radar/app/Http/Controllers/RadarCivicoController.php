@@ -115,8 +115,14 @@ class RadarCivicoController extends Controller
 
     private function camara(): array
     {
+        // Piso de recência: feeds mortos (SAPL parado — Canoinhas 2024, Tijucas
+        // 2022, São José 2020) não são pauta atual; só proposição dos últimos N
+        // meses entra no radar. (A ingestão já só puxa as VIVAS; isto protege o
+        // que já está na base do backfill histórico.)
+        $piso = now()->subMonths((int) config('camara.radar_meses', 18))->toDateString();
         $rows = DB::table('jr_camara_proposicoes')
             ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
+            ->whereNotNull('data_pub')->where('data_pub', '>=', $piso)
             ->orderByDesc('score_pauta')->limit(self::LIMITE)->get();
 
         return $rows->map(fn ($a) => $this->base('camara', $a) + [

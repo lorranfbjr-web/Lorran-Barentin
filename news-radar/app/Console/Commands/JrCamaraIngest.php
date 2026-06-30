@@ -23,6 +23,7 @@ class JrCamaraIngest extends Command
         . '{--backfill : Varre TODO o histórico (sem early-stop), não só o ano corrente} '
         . '{--ano= : Restringe a um ano específico} '
         . '{--cidade= : Só esta câmara (casa pelo nome, ex.: "Rio do Sul")} '
+        . '{--incluir-mortas : Inclui câmaras vivo=false (SAPL parado) — default só as VIVAS} '
         . '{--max-paginas= : Teto de páginas por câmara (default config)} '
         . '{--parar-vistos=20 : FORWARD: para após N vistos consecutivos (0 = não para)}';
 
@@ -38,13 +39,27 @@ class JrCamaraIngest extends Command
         $anoOpt = $this->option('ano');
         $cidadeFiltro = trim((string) $this->option('cidade'));
 
-        // FORWARD: ano corrente; BACKFILL: todos. --ano sobrepõe.
-        $ano = $anoOpt !== null && $anoOpt !== '' ? (int) $anoOpt : ($backfill ? null : (int) now()->year);
-        if ($backfill) {
+        // Janela de anos a varrer (recente-primeiro). --ano fixa um; BACKFILL varre
+        // tudo (null); FORWARD pega o ano corrente + os anteriores da janela
+        // (janela_anos), pra capturar proposição do fim do ano passado ainda viva.
+        if ($anoOpt !== null && $anoOpt !== '') {
+            $anos = [(int) $anoOpt];
+        } elseif ($backfill) {
+            $anos = [null]; // varre todo o histórico
             $pararVistos = 0; // backfill não faz early-stop
+        } else {
+            $janela = max(1, (int) ($cfg['janela_anos'] ?? 2));
+            $anoBase = (int) now()->year;
+            $anos = range($anoBase, $anoBase - $janela + 1); // ex.: [2026, 2025]
         }
 
         $camaras = collect($cfg['camaras']);
+        // Por padrão só as VIVAS (SAPL ainda alimentado). As mortas (vivo=false)
+        // entram só com --incluir-mortas (backfill histórico manual). --cidade
+        // sobrepõe (permite mirar uma morta específica de propósito).
+        if (! $this->option('incluir-mortas') && $cidadeFiltro === '') {
+            $camaras = $camaras->filter(fn ($c) => (bool) ($c['vivo'] ?? false));
+        }
         if ($cidadeFiltro !== '') {
             $camaras = $camaras->filter(fn ($c) => mb_stripos($c['cidade'], $cidadeFiltro) !== false);
         }
@@ -54,8 +69,9 @@ class JrCamaraIngest extends Command
             return self::FAILURE;
         }
 
-        $this->info(sprintf('%s · %d câmara(s) · ano=%s · max_pag=%d',
-            $backfill ? 'BACKFILL' : 'FORWARD', $camaras->count(), $ano ?? 'todos', $maxPaginas));
+        $this->info(sprintf('%s · %d câmara(s) · anos=%s · max_pag=%d',
+            $backfill ? 'BACKFILL' : 'FORWARD', $camaras->count(),
+            $anos === [null] ? 'todos' : implode(',', $anos), $maxPaginas));
 
         $totNovos = 0;
         $totVistos = 0;
@@ -75,6 +91,7 @@ class JrCamaraIngest extends Command
                 return $existe;
             };
             try {
+                foreach ($anos as $ano) {
                 foreach ($conector->materias($host, $municipio, $ano, $maxPaginas, $tiposAlvo, $jaVisto, $pararVistos) as $p) {
                     $hash = sha1($host . ':' . $p['materia_id']);
                     DB::table('jr_camara_proposicoes')->insert([
@@ -101,6 +118,7 @@ class JrCamaraIngest extends Command
                         'updated_at' => now(),
                     ]);
                     $novos++;
+                }
                 }
             } catch (\Throwable $e) {
                 $this->warn("  {$municipio}: erro — " . mb_substr($e->getMessage(), 0, 140));

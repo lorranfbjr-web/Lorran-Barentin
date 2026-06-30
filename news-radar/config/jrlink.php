@@ -580,6 +580,10 @@ return [
             'JURÍDICO - JORNAL RAZÃO',
             'As Tif | Jornal Razão',
             'REDES SOCIAIS POSTAGENS',
+            // ANTI-LOOP: grupo de ENTREGA dos rascunhos do /radar. A instância de
+            // captura (276) é membro dele; sem este corte, todo rascunho enviado
+            // ali seria recapturado e realimentaria o juiz.
+            'Rascunhos',
         ],
         // só mensagem de grupo entra (Parte A — opção B).
         'somente_grupo' => true,

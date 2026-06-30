@@ -23,6 +23,7 @@ class JrDomOportunidades extends Command
         . '{--model= : Modelo do scoring (default config dom.scoring.modelo — trocável)} '
         . '{--force : Re-pontua mesmo quem já tem score} '
         . '{--min-score= : Com --force, re-pontua só atos com score_pauta >= N (ex.: re-scorar o radar)} '
+        . '{--ids= : Re-pontua só estes ato_id (lista separada por vírgula) — re-score cirúrgico} '
         . '{--render-only : Só regenera a página, sem pontuar}';
 
     protected $description = 'Radar de Oportunidades: pontua atos do DOM/SC com Sonnet (noticiabilidade) e gera /oportunidades.';
@@ -41,8 +42,14 @@ class JrDomOportunidades extends Command
         $cap = (int) $cfg['cap_chamadas'];
         $scorer = new DomScorer($this->option('model') ?: null);
 
+        $idsAlvo = array_values(array_filter(array_map('intval',
+            preg_split('/\s*,\s*/', (string) $this->option('ids'), -1, PREG_SPLIT_NO_EMPTY))));
+
         $q = DB::table('jr_dom_atos');
-        if (! $this->option('force')) {
+        if ($idsAlvo) {
+            // re-score cirúrgico: só estes atos, com ou sem score (ignora --force/whereNull)
+            $q->whereIn('ato_id', $idsAlvo);
+        } elseif (! $this->option('force')) {
             $q->whereNull('score_pauta');
         }
         if ($this->option('min-score') !== null && $this->option('min-score') !== '') {

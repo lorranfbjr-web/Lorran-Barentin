@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoping — Cobertura SAPL das Câmaras (SC)</title>
+<style>
+ :root{--viva:#0f766e;--morta:#b45309;--ausente:#6b7280;--bg:#0f1117;--card:#171a22;--tx:#e5e7eb;--mut:#9aa3b2}
+ *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;padding:24px}
+ h1{font-size:21px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px;font-size:13px}
+ .legend{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 16px;font-size:13px}
+ .tag{padding:2px 9px;border-radius:999px;font-weight:600;font-size:12px;color:#fff}
+ .viva{background:var(--viva)}.morta{background:var(--morta)}.ausente{background:var(--ausente)}
+ table{border-collapse:collapse;width:100%;background:var(--card);border-radius:10px;overflow:hidden}
+ th,td{text-align:left;padding:8px 11px;border-bottom:1px solid #232735;font-size:13px;vertical-align:top}
+ th{background:#1d212c;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.03em;font-size:11px}
+ tr:last-child td{border-bottom:0}.muni{font-weight:600}.host{color:var(--mut);font-family:ui-monospace,monospace;font-size:11px}
+ .note{color:var(--mut)}.sec{margin:26px 0 8px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+ .box{background:var(--card);border-radius:10px;padding:14px 16px;margin:8px 0;font-size:13px}
+ code{background:#0b0d12;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Cobertura SAPL das câmaras · Radar Cívico</h1>
+<p class="sub">Recon probe-based (VPS, sem web search) · 29/06/2026 · <code>GET /api/materia/materialegislativa/?ano=2026|2025</code> + última matéria via <code>o=-data_apresentacao</code></p>
+
+<div class="legend">
+ <span><span class="tag viva">VIVA</span> alimenta o radar (proposição 2025/2026)</span>
+ <span><span class="tag morta">MORTA</span> SAPL existe mas parou — fora do radar</span>
+ <span><span class="tag ausente">AUSENTE</span> sem SAPL no host padrão</span>
+</div>
+
+<div class="sec">SAPL respondendo (6 câmaras) — classe por última proposição real</div>
+<table>
+ <tr><th>Cidade</th><th>Host SAPL</th><th>Classe</th><th>Última proposição</th><th>Onde publica hoje (se morta)</th></tr>
+ <tr><td class="muni">Rio do Sul</td><td class="host">sapl.camarariodosul.sc.gov.br</td><td><span class="tag viva">VIVA</span></td><td>2026-06-26</td><td class="note">— (no radar)</td></tr>
+ <tr><td class="muni">São Bento do Sul</td><td class="host">sapl.saobentodosul.sc.leg.br</td><td><span class="tag viva">VIVA</span></td><td>2026-06-29</td><td class="note">— (no radar)</td></tr>
+ <tr><td class="muni">Canoinhas</td><td class="host">sapl.canoinhas.sc.leg.br</td><td><span class="tag morta">MORTA</span></td><td>2024-07-31</td><td class="note">site da câmara bloqueia probe (503 LiteSpeed) — recon manual pendente</td></tr>
+ <tr><td class="muni">Imbuia</td><td class="host">sapl.imbuia.sc.leg.br</td><td><span class="tag morta">MORTA</span></td><td>2023-06-29</td><td class="note">AINDA roda SAPL/Interlegis (+ Betha/transparência) — só não alimenta desde jun/2023</td></tr>
+ <tr><td class="muni">Tijucas</td><td class="host">sapl.tijucas.sc.leg.br</td><td><span class="tag morta">MORTA</span></td><td>2022-11-22</td><td class="note">portal próprio em <code>camaratijucas.sc.gov.br</code> (openresty, sem Interlegis) — conector dedicado</td></tr>
+ <tr><td class="muni">São José</td><td class="host">sapl.saojose.sc.leg.br</td><td><span class="tag morta">MORTA</span></td><td>2020-09-16</td><td class="note">site bloqueia probe (503 LiteSpeed) — recon manual pendente</td></tr>
+</table>
+
+<div class="sec">AUSENTE — sem SAPL no host padrão <code>sapl.&lt;cidade&gt;.sc.leg.br</code> (31 câmaras probadas)</div>
+<div class="box">
+ <b>Alto Vale do Itajaí:</b> Ituporanga, Taió, Pouso Redondo, Trombudo Central, Agrolândia, Laurentino, Rio do Oeste, Aurora, Lontras, Presidente Getúlio, Ibirama, Petrolândia, Vidal Ramos, Agronômica, Salete.<br>
+ <b>Planalto Norte:</b> Mafra, Rio Negrinho, Campo Alegre, Papanduva, Três Barras, Itaiópolis, Porto União, Irineópolis.<br>
+ <b>Maiores de SC:</b> Florianópolis, Joinville, Blumenau, Itajaí, Chapecó, Lages, Jaraguá do Sul, Brusque.
+ <p class="note" style="margin:10px 0 0">Pistas conhecidas (recon anterior): <b>Florianópolis</b> = CMF custom; <b>Joinville</b> = LEGISOFT. As demais exigem recon manual (navegação/busca) p/ achar a plataforma — fora do escopo VPS-probe. Construir conector dedicado é trabalho futuro; NÃO feito agora.</p>
+</div>
+
+<div class="sec">Decisão aplicada</div>
+<div class="box">
+ • Ingestão (<code>jr:camara-ingest</code>) puxa <b>só as VIVAS</b> por padrão (<code>--incluir-mortas</code> força backfill histórico).<br>
+ • Forward-first real: <code>o=-data_apresentacao,-numero</code> (o <code>?o=</code> é o filtro DRF que funciona; <code>?ordering=</code> é ignorado pelo SAPL), janela <b>ano corrente + anterior</b> (<code>janela_anos=2</code>).<br>
+ • Radar filtra proposição por recência (<code>radar_meses=18</code>): feeds mortos (Canoinhas/Tijucas/São José/Imbuia) saem da pauta atual sem apagar o histórico da base.
+</div>
+</body>
+</html>

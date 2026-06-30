@@ -26,6 +26,21 @@ TIPOS = [
     (r"NOT[ÍI]CIA DE FATO", "noticia_de_fato"),
 ]
 
+# Todo ato no DOE-MP começa com um cabeçalho em CAIXA ALTA do tipo
+# "(EXTRATO|EDITAL|AVISO|PROMOÇÃO|PORTARIA) DE <ALGO>". SÓ "EXTRATO DE INSTAURAÇÃO"
+# é PAUTA ("MP abre investigação"). Todos os outros — CONCLUSÃO, ARQUIVAMENTO,
+# CIENTIFICAÇÃO, COMUNICAÇÃO, INTIMAÇÃO, PRORROGAÇÃO… — são o OPOSTO de pauta (o MP
+# encerrando/avisando) e entram aqui SÓ como FRONTEIRA de bloco. Quebrar em TODO
+# cabeçalho (não só instauração) impede que um ato vaze pro objeto/texto da
+# instauração anterior (ex.: notícia de fato de Barra Velha colada num edital de
+# arquivamento de IP; conclusão de Maravilha colada na instauração de Mafra).
+INSTAURACAO = r"EXTRATO DE INSTAURA[ÇC][ÃA]O"
+# CAIXA ALTA obrigatória (1ª letra após "DE " maiúscula) pra casar só cabeçalho de
+# verdade, nunca "edital de…" em minúsculas no meio de um objeto/prosa.
+CABECALHO = r"(?:EXTRATO|EDITAL|AVISO|PROMO[ÇC][ÃA]O|PORTARIA) DE [A-ZÇÃÁÉÍÓÚÂÊÔ]"
+MARCADOR = re.compile(rf"(?={CABECALHO})")
+RE_INSTAURACAO = re.compile(INSTAURACAO, re.I)
+
 # linhas de rodapé/cabeçalho da página que se intrometem no meio do bloco
 FOOTER = re.compile(
     r"(Divulga[çc][ãa]o:|Publica[çc][ãa]o:|Ano \d+\s*\|?\s*n\.|Di[áa]rio Oficial Eletr[ôo]nico|"
@@ -63,9 +78,12 @@ def parse(pdf_path: str, url_fonte: str, edicao: str):
     txt = re.sub(r"[ \t]+", " ", txt)
 
     out = []
-    blocos = re.split(r"(?=EXTRATO DE INSTAURA[ÇC][ÃA]O)", txt)
+    blocos = MARCADOR.split(txt)
     for b in blocos:
-        if not re.match(r"EXTRATO DE INSTAURA[ÇC][ÃA]O", b):
+        # SÓ instauração vira extrato (pauta). Arquivamento/cientificação/etc. são
+        # apenas fronteira: o split já impede que o texto deles vaze pra instauração
+        # anterior; aqui eles são descartados (NÃO são pauta).
+        if not RE_INSTAURACAO.match(b):
             continue
         header = b.split("\n", 1)[0]
         tipo = tipo_de(header)

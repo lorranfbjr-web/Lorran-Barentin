@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Jr\RascunhoCivico;
-use App\Services\Jr\ZapLorran;
+use App\Services\Jr\ZapRascunhos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -107,11 +107,12 @@ class MesaPautaController extends Controller
     }
 
     /**
-     * Fase 5 — gera um rascunho JR do ato (LLM) e ENTREGA SÓ no WhatsApp do
-     * Lorran (fail-closed: sem número configurado, só gera e mostra na Mesa, não
-     * envia). Marca a pauta como rascunho-gerado. NÃO publica nada. Manual.
+     * Fase 5 — gera um rascunho JR do ato (LLM) e ENTREGA no grupo próprio "JR
+     * Rascunhos" via Z-API (ZapRascunhos, instância do Radar/884). NÃO usa DM pro
+     * número de captura (276) — evita o anti-loop; o grupo está no denylist da
+     * captura. Fail-closed: sem creds/grupo, só gera e mostra na Mesa. Manual.
      */
-    public function rascunho(int $id, RascunhoCivico $gerador, ZapLorran $zap)
+    public function rascunho(int $id, RascunhoCivico $gerador, ZapRascunhos $zap)
     {
         $p = DB::table('jr_pauta_fila')->where('id', $id)->first();
         if (! $p) {

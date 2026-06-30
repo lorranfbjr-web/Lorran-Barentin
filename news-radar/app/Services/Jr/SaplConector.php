@@ -153,7 +153,12 @@ class SaplConector
         foreach (array_keys($rel) as $tid) {
             $seguidos = 0;
             for ($page = 1; $page <= $maxPaginas; $page++) {
-                $q = ['limit' => 10, 'page' => $page, 'o' => '-ano,-numero', 'tipo' => $tid];
+                // o=-data_apresentacao,-numero: RECÊNCIA VERDADEIRA primeiro
+                // (o campo de data, não o número — que pode ser não-monotônico com
+                // a data). O -numero é só desempate ESTÁVEL p/ a paginação DRF não
+                // embaralhar itens da mesma data entre páginas. (?ordering= é
+                // IGNORADO pelo SAPL — o filtro DRF é ?o=.) Probe 29/06/2026.
+                $q = ['limit' => 10, 'page' => $page, 'o' => '-data_apresentacao,-numero', 'tipo' => $tid];
                 if ($ano !== null) {
                     $q['ano'] = $ano;
                 }
