@@ -48,11 +48,33 @@ Schedule::command('jrlink:publicados-sync')
     ->everyThirtyMinutes()
     ->withoutOverlapping();
 
-// v5 — agrupamento por assunto (Opus) pra vitrine Radar; roda DEPOIS do juiz,
-// no ciclo (nunca no request da página). Custo/latência do Opus vivem aqui.
+// v5 — agrupamento por assunto (gpt-4o-mini desde 30/06 — operação mecânica, zero
+// Max) pra vitrine Radar; roda DEPOIS do juiz, no ciclo (nunca no request).
 Schedule::command('jrlink:assuntos')
     ->cron('10,40 * * * *')
     ->withoutOverlapping();
+
+// SEGUNDO OLHAR — 2ª opinião do gpt-4o-mini (CEGO, zero Max) que marca DIVERGÊNCIA
+// pra revisão humana na Mesa. Não toca o veredito primário. Roda no ciclo.
+// (a) JUIZ de notícias: nos quentes recentes, com o mesmo prompt do juiz.
+Schedule::command('jr:segundo-olhar-juiz --dias=3 --lote=8')
+    ->cron('15,45 * * * *')
+    ->withoutOverlapping(600);
+
+// (b) RADAR CÍVICO: nos candidatos a pauta (score>=min) de cada fonte. --limit
+//     mantém a execução curta; roda logo após cada faro.
+Schedule::command('jr:segundo-olhar dom --limit=60')
+    ->cron('55 * * * *')
+    ->withoutOverlapping(600);
+Schedule::command('jr:segundo-olhar camara --limit=60')
+    ->cron('40 * * * *')
+    ->withoutOverlapping(600);
+Schedule::command('jr:segundo-olhar mpsc --limit=60')
+    ->cron('5 9 * * 1-6')
+    ->withoutOverlapping(600);
+Schedule::command('jr:segundo-olhar tce --limit=60')
+    ->cron('10 10 * * 1-6')
+    ->withoutOverlapping(600);
 
 // ── DOM/SC — Radar de Oportunidades (PRODUÇÃO 24/7, aprovada pelo Lorran) ──
 // Minera o Diário Oficial dos Municípios de SC (busca pública) atrás de pauta de
@@ -69,24 +91,17 @@ Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25 --parar-vistos=20')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
-// (2) SCORING — contínuo e incremental: pontua só os atos novos (whereNull score)
-//     com Sonnet (dual-lens 🔴/🟢) e regenera a página. Offset 5min pra rodar
-//     LOGO DEPOIS do forward, no mesmo ciclo. Lock de 600s (chamada LLM é lenta).
-// --limit=24: execução CURTA (3 chamadas/ciclo) — mantém o FORWARD em dia sem o
-// backlog histórico (30k+ atos do retroativo) sufocar o claude-cli. Horário 20,50
-// NÃO coincide com o juiz (5,35), que tem prioridade na assinatura Max. (Backlog
-// histórico se scora em janelas manuais controladas, não no horário de produção.)
+// (2) SCORING — SÓ PRA FRENTE: pontua os atos novos (whereNull) dos últimos
+//     dom.scoring.forward_dias com Sonnet (dual-lens 🔴/🟢) e regenera a página.
+//     --limit=24 = execução curta (3 chamadas/ciclo); horário 20,50 NÃO coincide
+//     com o juiz (5,35). O backlog histórico é ABANDONADO (piso de recência no
+//     comando) — o radar é daqui pra frente, sem gastar LLM com ato velho.
 Schedule::command('jr:dom-oportunidades --lote=8 --limit=24')
     ->cron('20,50 * * * *')
     ->withoutOverlapping(600);
 
-// (3) RETROATIVO — background, baixa prioridade: a cada 30min baixa UM chunk do
-//     histórico pra trás (cursor persistido, resume) até a profundidade-alvo
-//     (60 dias). Offset 10/40 pra não coincidir com o forward (0/15/30/45). Não
-//     compete: lock próprio + pausa educada; quando alcança o alvo, vira no-op.
-Schedule::command('jr:dom-retroativo --chunks=1')
-    ->cron('10,40 * * * *')
-    ->withoutOverlapping(600);
+// RETROATIVO: REMOVIDO (30/06/2026). Decisão do Lorran: só pra frente, sem
+// histórico. O crawler jr:dom-retroativo existe mas não é mais agendado.
 
 // ── RADAR CÍVICO Fase 2 — CÂMARAS (SAPL) — proposições legislativas ──
 // ADITIVO/ISOLADO (não toca DOM/juiz/captura). Só 2 das 5 câmaras com SAPL são

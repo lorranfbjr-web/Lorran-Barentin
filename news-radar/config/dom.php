@@ -48,5 +48,9 @@ return [
         'lote' => (int) env('JRDOM_LOTE', 6),
         // Hard cap de chamadas por execução (backstop).
         'cap_chamadas' => (int) env('JRDOM_CAP', 500),
+        // SÓ PRA FRENTE: o faro scora apenas atos dos últimos N dias — abandona o
+        // backlog histórico (não gasta LLM com ato velho). Cobre o forward ingest
+        // (--dias=2) com margem. 0 = sem piso (scora tudo).
+        'forward_dias' => (int) env('JRDOM_FORWARD_DIAS', 7),
     ],
 ];

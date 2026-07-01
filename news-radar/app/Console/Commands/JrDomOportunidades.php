@@ -51,6 +51,13 @@ class JrDomOportunidades extends Command
             $q->whereIn('ato_id', $idsAlvo);
         } elseif (! $this->option('force')) {
             $q->whereNull('score_pauta');
+            // SÓ PRA FRENTE: abandona o backlog histórico — não gasta LLM scorando
+            // ato velho. O radar é "daqui pra frente"; histórico ingerido fica sem
+            // score e fora do radar. forward_dias=0 desliga o piso (scora tudo).
+            $fwd = (int) config('dom.scoring.forward_dias', 45);
+            if ($fwd > 0) {
+                $q->where('data_pub', '>=', now()->subDays($fwd)->toDateString());
+            }
         }
         if ($this->option('min-score') !== null && $this->option('min-score') !== '') {
             // re-scoring dirigido (ex.: só o radar ≥40) — exige --force pra fazer sentido
