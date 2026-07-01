@@ -402,10 +402,28 @@ return [
     | driver (JuizLlm) ainda escolhe openai vs claude-cli; isto é só o --model
     | do claude-cli por função.
     */
+    // Política de custo (30/06/2026): Sonnet no lugar de Opus — qualidade editorial
+    // mantida a ~1/5 do consumo. Opus queimava a cota Max (US$ ~79/3d). Reversível
+    // por env se algum dia quiser Opus de volta numa função específica.
     'modelos' => [
-        'juiz' => env('JRLINK_MODELO_JUIZ', 'claude-opus-4-8'),
-        'dedup' => env('JRLINK_MODELO_DEDUP', 'claude-opus-4-8'),
-        'match_publicado' => env('JRLINK_MODELO_MATCH', 'claude-opus-4-8'),
+        'juiz' => env('JRLINK_MODELO_JUIZ', 'claude-sonnet-4-6'),
+        'dedup' => env('JRLINK_MODELO_DEDUP', 'claude-sonnet-4-6'),
+        'match_publicado' => env('JRLINK_MODELO_MATCH', 'claude-sonnet-4-6'),
+    ],
+
+    /*
+    | DRIVER POR OPERAÇÃO — economia sem abrir mão da qualidade. As operações
+    | MECÂNICAS (dedup de cluster, match com publicados, agrupamento por assunto)
+    | não precisam de Claude: vão pro OpenAI (gpt-4o-mini via openai.api_key), que
+    | ZERA o consumo da assinatura Max e custa centavos. O JUIZ (mérito editorial)
+    | e as REESCRITAS (geração de texto) NÃO estão aqui — seguem o driver global
+    | (claude-cli/Sonnet) pela qualidade. Fail-closed: sem chave OpenAI real, o
+    | JuizLlm cai pro claude-cli. A chave é o nome da OPERATION logada em jr_juiz_log.
+    */
+    'drivers' => [
+        'cluster_merge' => env('JRLINK_DRIVER_DEDUP', 'openai'),
+        'publicado_match' => env('JRLINK_DRIVER_MATCH', 'openai'),
+        'assunto_group' => env('JRLINK_DRIVER_ASSUNTO', 'openai'),
     ],
 
     'juiz' => [

@@ -59,6 +59,76 @@ class JuizLlm
             ?? 'claude-opus-4-8');
     }
 
+    /** Chave OpenAI real configurada? (mesma regra anti-placeholder do resolveDriver). */
+    private function chaveOpenaiReal(): bool
+    {
+        $key = (string) config('openai.api_key', '');
+
+        return $key !== '' && ! preg_match('/noop|smoke|test|placeholder|xxx/i', $key);
+    }
+
+    /**
+     * Driver a usar para uma OPERAÇÃO. jrlink.drivers.{operacao} pode forçar
+     * 'openai' (mecânicas baratas — zero Max) ou 'claude-cli'; sem override, segue
+     * o driver global da instância. Fail-closed: 'openai' só vale com chave real.
+     */
+    private function usarOpenaiPara(string $operacao): bool
+    {
+        $d = (string) config('jrlink.drivers.' . $operacao, '');
+        if ($d === 'openai') {
+            return $this->chaveOpenaiReal();
+        }
+        if ($d === 'claude-cli') {
+            return false;
+        }
+
+        return $this->driver === 'openai';
+    }
+
+    /**
+     * Executa um prompt no driver certo pra operação (híbrido por função).
+     * Retorna [texto, in_tokens, out_tokens, custo_usd].
+     */
+    private function chamar(string $prompt, string $operacao, ?string $modeloClaude = null): array
+    {
+        return $this->usarOpenaiPara($operacao)
+            ? $this->chamarOpenai($prompt)
+            : $this->chamarClaudeCli($prompt, $modeloClaude);
+    }
+
+    /**
+     * Extrai a LISTA de registros da resposta LLM, tolerante ao formato. claude-cli
+     * devolve um array nu `[{...}]`; o OpenAI em json_object mode NUNCA devolve array
+     * nu — embrulha em `{"itens":[...]}` ou, com 1 item, num objeto único `{...}`.
+     * Normaliza os três casos pra `[{...}, ...]`.
+     *
+     * @return array<int,array>
+     */
+    private function extrairLista(string $texto): array
+    {
+        $texto = trim($texto);
+        // 1) array nu no texto (claude-cli / gpt que embrulhou mas manteve o [...])
+        if (preg_match('/\[.*\]/s', $texto, $m)) {
+            $arr = json_decode($m[0], true);
+            if (is_array($arr)) {
+                return $arr;
+            }
+        }
+        // 2) objeto: {"chave":[...]} (pega a 1ª propriedade que é lista) ou registro único
+        $obj = json_decode($texto, true);
+        if (is_array($obj)) {
+            foreach ($obj as $v) {
+                if (is_array($v) && array_is_list($v)) {
+                    return $v;
+                }
+            }
+
+            return $obj === [] ? [] : [$obj]; // objeto único -> envolve
+        }
+
+        return [];
+    }
+
     /**
      * Diagnóstico do few-shot (calibração do editor): se está ligado e quantos
      * exemplos REAIS entram no input do juiz. O bloco é injetado por
@@ -102,9 +172,7 @@ class JuizLlm
         for ($attempt = 1; $attempt <= 2; $attempt++) {
             $t0 = microtime(true);
             try {
-                [$texto, $inTok, $outTok, $custo] = $this->driver === 'openai'
-                    ? $this->chamarOpenai($prompt)
-                    : $this->chamarClaudeCli($prompt, $this->modeloFuncao('juiz'));
+                [$texto, $inTok, $outTok, $custo] = $this->chamar($prompt, 'juiz', $this->modeloFuncao('juiz'));
 
                 $vereditos = $this->parse($texto, $itens);
 
@@ -194,16 +262,10 @@ PROMPT;
     {
         $t0 = microtime(true);
         try {
-            [$texto, $in, $out, $custo] = $this->driver === 'openai'
-                ? $this->chamarOpenai($prompt)
-                : $this->chamarClaudeCli($prompt, $modelo);
+            [$texto, $in, $out, $custo] = $this->chamar($prompt, $operation, $modelo);
             $this->log('success', 1, $itens, $in, $out, $custo, null, $t0, $operation);
-            if (preg_match('/\[.*\]/s', $texto, $m)) {
-                $texto = $m[0];
-            }
-            $arr = json_decode($texto, true);
 
-            return is_array($arr) ? $arr : [];
+            return $this->extrairLista($texto);
         } catch (\Throwable $e) {
             $this->log('error', 1, $itens, null, null, null, $e->getMessage(), $t0, $operation);
 
@@ -240,17 +302,11 @@ PROMPT;
 
         $t0 = microtime(true);
         try {
-            [$texto, $in, $out, $custo] = $this->driver === 'openai'
-                ? $this->chamarOpenai($prompt)
-                : $this->chamarClaudeCli($prompt, $this->modeloFuncao('dedup'));
+            [$texto, $in, $out, $custo] = $this->chamar($prompt, 'cluster_merge', $this->modeloFuncao('dedup'));
             $this->log('success', 1, count($pares), $in, $out, $custo, null, $t0, 'cluster_merge');
 
-            if (preg_match('/\[.*\]/s', $texto, $m)) {
-                $texto = $m[0];
-            }
-            $arr = json_decode($texto, true);
             $res = [];
-            foreach (is_array($arr) ? $arr : [] as $v) {
+            foreach ($this->extrairLista($texto) as $v) {
                 if (isset($v['par'])) {
                     $res[(int) $v['par']] = (bool) ($v['mesmo'] ?? false);
                 }
