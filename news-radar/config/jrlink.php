@@ -428,11 +428,18 @@ return [
 
     'juiz' => [
         // Versão do prompt — item julgado com a MESMA versão não re-julga (idempotência).
+        // v5: efeméride ≠ viral (data comemorativa COM ação concreta de escala/insólita
+        // = viral_curiosidade do DNA, ex. 11 mil fatias grátis; só efeméride PURA é
+        // eh_pauta=false). Juiz openai sobe pra gpt-5.4-mini (reasoning low).
+        // v4: input estruturado por item (FONTE/PUBLICADO/COBERTURA/CONTEXTO/ALERTA
+        // fora do truncamento do lead — antes o corte de 280 chars engolia o aviso
+        // de IG e o alerta de fato-velho), lead 450 chars, cobertura de portais
+        // mensurável, contrato JSON endurecido (todos os ids, na ordem).
         // v3: seção de score ancorada no DNA real do Instagram (jr-ig-dna).
         // v2: regra SEO-washing explícita ("Como foi…", "Tudo o que se sabe…" =
         // eh_pauta false mesmo com fato real). Itens v1 re-julgam aos poucos nos
         // próximos runs.
-        'prompt_versao' => 'v3',
+        'prompt_versao' => 'v5',
 
         // Driver: auto = openai se OPENAI_API_KEY for real; senão claude-cli
         // (claude -p headless, assinatura local). openai reusa o MESMO cliente

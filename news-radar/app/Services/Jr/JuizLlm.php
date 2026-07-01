@@ -201,9 +201,46 @@ class JuizLlm
     {
         $lista = '';
         foreach ($itens as $it) {
-            $lead = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $it['lead'])), 0, 280);
-            $lista .= sprintf("ID %d\nTÍTULO: %s\nLEAD: %s\n\n", $it['id'], trim((string) $it['titulo']), $lead ?: '(sem lead)');
+            // Truncamento SÓ do corpo do lead (450 chars, sem cortar palavra no
+            // meio). CONTEXTO e ALERTA entram como campos próprios FORA do corte —
+            // antes eram concatenados no lead e o mb_substr os engolia exatamente
+            // quando importavam (aviso de IG comia o lead; fato-velho sumia).
+            $lead = trim(preg_replace('/\s+/u', ' ', (string) ($it['lead'] ?? '')));
+            if (mb_strlen($lead) > 450) {
+                $corte = mb_substr($lead, 0, 450);
+                $esp = mb_strrpos($corte, ' ');
+                $lead = ($esp !== false && $esp > 300 ? mb_substr($corte, 0, $esp) : $corte) . '…';
+            }
+
+            // Metadados opcionais — chamadores legados (verificador, reescritor,
+            // segundo olhar) passam só id/titulo/lead e o item sai igual ao formato antigo.
+            $meta = [];
+            if (! empty($it['fonte'])) {
+                $origem = ! empty($it['origem']) && $it['origem'] !== 'feed' ? ' (' . $it['origem'] . ')' : '';
+                $meta[] = 'FONTE: ' . $it['fonte'] . $origem;
+            }
+            if (! empty($it['publicado'])) {
+                $meta[] = 'PUBLICADO: ' . $it['publicado'];
+            }
+            if ((int) ($it['portais'] ?? 0) > 1) {
+                $meta[] = 'COBERTURA: ' . (int) $it['portais'] . ' portais independentes';
+            }
+
+            $lista .= 'ID ' . (int) $it['id'] . "\n";
+            if ($meta) {
+                $lista .= implode(' · ', $meta) . "\n";
+            }
+            $lista .= 'TÍTULO: ' . trim((string) $it['titulo']) . "\n";
+            $lista .= 'LEAD: ' . ($lead !== '' ? $lead : '(sem lead)') . "\n";
+            if (! empty($it['contexto'])) {
+                $lista .= 'CONTEXTO: ' . trim((string) $it['contexto']) . "\n";
+            }
+            if (! empty($it['alerta'])) {
+                $lista .= 'ALERTA EDITORIAL: ' . trim((string) $it['alerta']) . "\n";
+            }
+            $lista .= "\n";
         }
+        $n = count($itens);
 
         // Few-shot do feedback humano: '' quando desligado/sem votos — e aí o
         // prompt fica byte a byte idêntico ao atual (interpolação vazia).
@@ -215,13 +252,20 @@ Você é o editor-chefe do Jornal Razão, jornal regional de Tijucas/SC que cobr
 REGRAS DO VEREDITO:
 - escopo: "local" (uma cidade da região), "regional" (SC/região), "nacional_localizado" (assunto nacional COM ângulo local real no título), "nacional" (sem ângulo local).
 - Notícia nacional sem ângulo local real NO TÍTULO (Enem, Lula, ONU, decisões da UE, futebol nacional, loteria) = escopo "nacional" e score baixo.
-- eh_pauta=false para: SEO/listicle, coluna/opinião, horóscopo, home institucional, aniversariantes do dia, datas comemorativas, conteúdo requentado sem fato novo.
+- eh_pauta=false para: SEO/listicle, coluna/opinião, horóscopo, home institucional, aniversariantes do dia, efeméride PURA (data comemorativa sem fato concreto além da data), conteúdo requentado sem fato novo.
+- CUIDADO — data comemorativa NÃO mata a pauta quando há AÇÃO CONCRETA local de escala ou insólita atrelada (distribuição gratuita em massa, recorde, mutirão, feito inusitado): isso é viral_curiosidade do DNA do perfil (mediana 757 comentários/272 mil views), não efeméride. Ex.: "Dia da Pizza: 11 mil fatias grátis em X" = possível pauta viral (gancho curiosidade/escala); "Hoje é o Dia da Pizza" = efeméride, false.
 - SEO-washing é SEMPRE eh_pauta=false, mesmo que o fato por trás seja real: título que reconta cobertura alheia em formato de busca — "Como foi…", "O que aconteceu com…", "Tudo o que se sabe sobre…", "O que se sabe…", "Entenda…", "Veja como…", receitas, listas.
 - TEMPERATURA/SCORE — a régua é UMA pergunta: "isto seria um post do @jornalrazao?" (DNA real do perfil, engajamento medido em COMENTÁRIOS):
   · O que MAIS engaja (mediana real): política local com emoção/indignação (1648) > flagrante policial COM NARRATIVA (798) > viral/insólito (757) > luto/comoção (686) > superação com nome e história (583) > acidente/resgate com drama (527).
   · O que MENOS engaja e o perfil quase não posta: evento/agenda cultural (150), economia/negócios institucional (141), clima rotineiro (211), serviço/utilidade (265), institucional de prefeitura (313).
   · Flagrante/ocorrência SÓ esquenta com narrativa ou insólito — boletim burocrático (corte de cabos, apreensão sem história) é frio mesmo sendo crime.
   · Evento institucional fofo de prefeitura/órgão (casamento coletivo, inauguração protocolar, campanha oficial) NÃO é quente (score < 60), salvo cobertura múltipla independente de portais.
+- METADADOS DO ITEM (quando presentes, use-os — não os ignore):
+  · COBERTURA: nº de portais independentes cobrindo o MESMO evento. 2+ portais = o fato tem tração real na região — é este campo que valida a exceção de "cobertura múltipla" acima. Sem o campo, assuma cobertura única.
+  · PUBLICADO: data/hora da publicação. Notícia com dias de idade sem fato novo perde temperatura; não trate como quente só porque o assunto é forte.
+  · FONTE: portal de origem e canal (feed/instagram/whatsapp).
+  · CONTEXTO: explica o formato da fonte (legenda de IG, mensagem de grupo) — avalie o ASSUNTO, não o formato.
+  · ALERTA EDITORIAL: guarda automática (ex.: fato antigo re-noticiado) — obedeça à instrução do alerta.
 - EXEMPLOS REAIS do perfil com ALTO engajamento (a cara do quente 80-100):
   · "Casal de pastores de Joinville manteve mulher em cárcere por mais de um ano" (11,4 mil comentários)
   · "Ladrão invadiu casa em Chapecó e teve uma surpresa nada agradável" (10,9 mil)
@@ -243,8 +287,8 @@ REGRAS DO VEREDITO:
 - score_editorial: 0-100 calibrado pelo DNA acima — 80-100 = postaria HOJE com cara de capa (história forte, nome, drama, indignação ou insólito); 60-79 = postável; 40-59 = fraco/talvez; <40 = não parece post do perfil. USE A ESCALA TODA, não sature.
 - motivo: 1 frase curta justificando.
 
-{$calibracao}RESPONDA APENAS com um array JSON válido, um objeto por pauta, sem markdown e sem texto fora do JSON:
-[{"id": <id>, "escopo": "...", "eh_pauta": true|false, "tipo_gancho": "...", "cidade": "..."|null, "score_editorial": <0-100>, "motivo": "..."}]
+{$calibracao}RESPONDA APENAS com JSON válido neste formato, sem markdown e sem texto fora do JSON. "pautas" deve ter EXATAMENTE {$n} objeto(s) — um por pauta, TODOS os IDs listados, na mesma ordem, sem pular nenhum. Copie cada "id" EXATAMENTE como aparece na pauta:
+{"pautas": [{"id": <id>, "escopo": "...", "eh_pauta": true|false, "tipo_gancho": "...", "cidade": "..."|null, "score_editorial": <0-100>, "motivo": "..."}]}
 
 PAUTAS:
 
@@ -374,24 +418,49 @@ PROMPT;
 
     // ───────────────────────── drivers ─────────────────────────
 
+    /** Preço US$/M tokens [input, output] por prefixo de modelo — pro custo_usd do log. */
+    private const PRECO_OPENAI = [
+        'gpt-5.4-mini' => [0.25, 2.00],   // estimado = gpt-5-mini; confira na fatura
+        'gpt-5-mini' => [0.25, 2.00],
+        'gpt-5' => [1.25, 10.00],
+        'gpt-4o-mini' => [0.15, 0.60],
+        'gpt-4.1-mini' => [0.40, 1.60],
+    ];
+
     /** @return array{0:string,1:?int,2:?int,3:?float} [texto, in_tokens, out_tokens, custo_usd] */
     private function chamarOpenai(string $prompt): array
     {
-        $this->ultimoModelo = (string) $this->cfg['modelo_openai'];
-        $response = OpenAI::chat()->create([
-            'model' => $this->cfg['modelo_openai'],
+        $modelo = (string) $this->cfg['modelo_openai'];
+        $this->ultimoModelo = $modelo;
+        $params = [
+            'model' => $modelo,
             'messages' => [
                 ['role' => 'user', 'content' => $prompt],
             ],
-            'temperature' => 0,
             'response_format' => ['type' => 'json_object'],
-        ]);
+        ];
+        // Família gpt-5/o* (reasoning): só aceita temperature default (1) e o
+        // esforço de raciocínio é controlável — 'low' basta pra classificação
+        // e segura o custo de output. gpt-4* segue determinístico com temp 0.
+        if (str_starts_with($modelo, 'gpt-4')) {
+            $params['temperature'] = 0;
+        } else {
+            $params['reasoning_effort'] = 'low';
+        }
+        $response = OpenAI::chat()->create($params);
 
         $texto = (string) ($response->choices[0]->message->content ?? '');
         $in = $response->usage->promptTokens ?? null;
         $out = $response->usage->completionTokens ?? null;
-        // gpt-4o-mini: $0.15/M in, $0.60/M out (referência; ajustar se trocar o modelo).
-        $custo = ($in !== null && $out !== null) ? ($in * 0.15 + $out * 0.60) / 1_000_000 : null;
+        $custo = null;
+        if ($in !== null && $out !== null) {
+            foreach (self::PRECO_OPENAI as $prefixo => [$pIn, $pOut]) {
+                if (str_starts_with($modelo, $prefixo)) {
+                    $custo = ($in * $pIn + $out * $pOut) / 1_000_000;
+                    break;
+                }
+            }
+        }
 
         return [$texto, $in, $out, $custo];
     }
@@ -440,17 +509,26 @@ PROMPT;
     private function parse(string $texto, array $itens): array
     {
         $texto = trim($texto);
-        // tolera cerca de markdown e texto em volta — pega o primeiro array JSON.
-        if (preg_match('/\[.*\]/s', $texto, $m)) {
+        // Formato pedido: {"pautas":[...]}. Tolera variações: array puro (claude-cli
+        // costuma devolver), cerca de markdown/texto em volta, e — caso do
+        // json_object mode do openai com lote de 1 — o VEREDITO SOLTO sem array.
+        if (! str_starts_with($texto, '{') && preg_match('/\[.*\]/s', $texto, $m)) {
             $texto = $m[0];
         }
         $arr = json_decode($texto, true);
         if (! is_array($arr)) {
-            throw new \RuntimeException('JSON inválido do juiz: ' . mb_substr($texto, 0, 200));
+            // texto em volta do objeto — recorta do primeiro { ao último }
+            if (preg_match('/\{.*\}/s', $texto, $m)) {
+                $arr = json_decode($m[0], true);
+            }
+            if (! is_array($arr)) {
+                throw new \RuntimeException('JSON inválido do juiz: ' . mb_substr($texto, 0, 200));
+            }
         }
-        // openai json_object mode pode embrulhar em {"pautas": [...]}.
         if (array_keys($arr) !== range(0, count($arr) - 1)) {
-            $arr = collect($arr)->first(fn ($v) => is_array($v)) ?? [];
+            // objeto: veredito único solto ({"id":..., ...}) vira lote de 1;
+            // senão é o envelope {"pautas":[...]} — pega o primeiro valor-array.
+            $arr = isset($arr['id']) ? [$arr] : (collect($arr)->first(fn ($v) => is_array($v)) ?? []);
         }
 
         $idsEsperados = array_map(fn ($i) => (int) $i['id'], $itens);

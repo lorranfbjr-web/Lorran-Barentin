@@ -369,35 +369,66 @@ class JrLinkJuiz extends Command
         $falhas = 0;
         $velhoPorId = [];
         foreach (array_chunk($pendentes, $lote) as $chunk) {
-            $itens = array_map(function ($r) use ($clf, $fatoVelho, &$velhoPorId) {
-                $lead = $clf->corpoFromMarkdown($r->markdown);
-                // CANAL INSTAGRAM: o "título" é a LEGENDA do post (pode começar
-                // com emoji/horário/frase solta, sem formato de manchete). Aviso
-                // entra pelo INPUT do item — o prompt BASE do juiz não muda.
-                if (($r->origem ?? null) === 'instagram') {
-                    $lead = "[Este texto é a LEGENDA de um post de INSTAGRAM de um perfil regional — pode começar com emoji, horário ou frase solta, sem formato de manchete de jornal. Avalie o ASSUNTO da legenda como possível pauta, não o formato.]\n\n" . $lead;
-                }
-                // CANAL WHATSAPP: o texto é uma MENSAGEM de grupo de imprensa/
-                // release (prefeitura, polícia, assessoria) — sem formato de
-                // manchete. Aviso pelo INPUT do item; o prompt BASE não muda.
-                if (($r->origem ?? null) === 'whatsapp') {
-                    $lead = "[Este texto é uma MENSAGEM de um grupo de WhatsApp de imprensa/release (assessoria de prefeitura, polícia, órgão público ou veículo) — pode ser informal, sem formato de manchete de jornal. Avalie o ASSUNTO da mensagem como possível pauta, não o formato.]\n\n" . $lead;
-                }
-                // GUARDA DE FATO-VELHO: a instrução entra pelo INPUT do item (o
-                // prompt BASE do juiz não muda). Heurística barata sinaliza no
-                // input pro Opus raciocinar E rebaixa de forma determinística no
-                // aplicarVeredito (o corpo às vezes afirma "lei nova" e o LLM não
-                // tem como datar a sanção — a heurística é a autoridade aqui).
+            // COBERTURA por item: nº de hosts distintos no cluster (a régua do
+            // prompt cita "cobertura múltipla independente de portais" — este é
+            // o campo que a torna verificável em vez de adivinhada).
+            $clusterIds = array_values(array_filter(array_unique(array_map(fn ($r) => $r->cluster_id ?? null, $chunk))));
+            $cobertura = $clusterIds === [] ? collect() : DB::table('jr_link_extracao')
+                ->whereIn('cluster_id', $clusterIds)
+                ->selectRaw('cluster_id, count(distinct host) n')
+                ->groupBy('cluster_id')->pluck('n', 'cluster_id');
+
+            $itens = array_map(function ($r) use ($clf, $fatoVelho, $cobertura, &$velhoPorId) {
+                // CANAL INSTAGRAM/WHATSAPP: o "título" é legenda/mensagem sem cara
+                // de manchete. O aviso vai no campo CONTEXTO do item (fora do
+                // truncamento do lead) — o prompt BASE do juiz não muda.
+                $contexto = match ($r->origem ?? null) {
+                    'instagram' => 'Este texto é a LEGENDA de um post de INSTAGRAM de um perfil regional — pode começar com emoji, horário ou frase solta, sem formato de manchete de jornal. Avalie o ASSUNTO da legenda como possível pauta, não o formato.',
+                    'whatsapp' => 'Este texto é uma MENSAGEM de um grupo de WhatsApp de imprensa/release (assessoria de prefeitura, polícia, órgão público ou veículo) — pode ser informal, sem formato de manchete de jornal. Avalie o ASSUNTO da mensagem como possível pauta, não o formato.',
+                    default => null,
+                };
+
+                // GUARDA DE FATO-VELHO: a instrução vai no campo ALERTA (fora do
+                // truncamento — antes era anexada ao fim do lead e o corte de
+                // 280 chars a engolia). Heurística sinaliza pro LLM raciocinar E
+                // rebaixa de forma determinística no aplicarVeredito (o corpo às
+                // vezes afirma "lei nova" e o LLM não tem como datar a sanção —
+                // a heurística é a autoridade aqui).
+                $alerta = null;
                 $sinal = $fatoVelho->analisar((string) $r->titulo, (string) $r->markdown, $r->data_pub ?: $r->created_at);
                 if ($sinal !== null) {
                     $velhoPorId[(int) $r->id] = $sinal;
-                    $lead .= "\n\n[ALERTA EDITORIAL — possível FATO ANTIGO apenas re-noticiado: {$sinal}. "
+                    $alerta = "possível FATO ANTIGO apenas re-noticiado: {$sinal}. "
                         . 'Se o acontecimento central NÃO for recente (lei já em vigor há tempo, efeméride, '
                         . 'retrospectiva, recapitulação de fato anterior), marque eh_pauta=false mesmo que a '
-                        . 'data de publicação seja recente.]';
+                        . 'data de publicação seja recente.';
                 }
 
-                return ['id' => (int) $r->id, 'titulo' => (string) $r->titulo, 'lead' => $lead];
+                // PUBLICADO: data confiável + idade (guard contra data_pub futura,
+                // mesma lógica do candidatos()).
+                $publicado = null;
+                try {
+                    $dt = Carbon::parse($r->data_pub ?: $r->created_at);
+                    if ($dt->isFuture()) {
+                        $dt = Carbon::parse($r->created_at);
+                    }
+                    $horas = (int) $dt->diffInHours(Carbon::now());
+                    $publicado = $dt->format('d/m/Y H:i') . ' (há ' . ($horas < 48 ? $horas . 'h' : intdiv($horas, 24) . ' dias') . ')';
+                } catch (\Throwable) {
+                    // data ilegível — item segue sem o metadado
+                }
+
+                return [
+                    'id' => (int) $r->id,
+                    'titulo' => (string) $r->titulo,
+                    'lead' => $clf->corpoFromMarkdown($r->markdown),
+                    'fonte' => (string) ($r->host ?? ''),
+                    'origem' => (string) ($r->origem ?? 'feed'),
+                    'publicado' => $publicado,
+                    'portais' => ($r->cluster_id ?? null) ? (int) ($cobertura[$r->cluster_id] ?? 1) : 1,
+                    'contexto' => $contexto,
+                    'alerta' => $alerta,
+                ];
             }, $chunk);
 
             try {

@@ -56,9 +56,19 @@ class FatoVelho
             return 'marco legislativo (lei sancionada/em vigor — pode não ser acontecimento dos últimos dias)';
         }
 
-        // (3) EFEMÉRIDE / RETROSPECTIVA / BALANÇO.
+        // (3) EFEMÉRIDE / RETROSPECTIVA / BALANÇO — mas AÇÃO CONCRETA futura/em
+        // curso atrelada à data suprime o sinal: "Dia da Pizza: 11 mil fatias
+        // serão distribuídas" é evento novo (viral_curiosidade do DNA), não
+        // recapitulação. O texto menciona "aniversário"/"há X anos" como pano
+        // de fundo e a regex sozinha não distingue.
         if (preg_match('/\bh[áa]\s+\d+\s+anos\b|\b\d+\s+anos\s+atr[áa]s\b|\bcomplet\w+\s+\d+\s+anos\b|\banivers[áa]rio\s+de\b|\brelembr\w+\b|\bretrospectiva\b|\bbalan[çc]o\s+de\s+\d{4}\b|\brevej\w+\b|\bh[áa]\s+\d+\s+(meses|m[êe]s)\b/u', $texto)) {
-            return 'efeméride/retrospectiva (recapitulação de fato anterior)';
+            $acaoConcreta = preg_match(
+                '/\bser[áã]o?\b|\bacontecer?[áã]?\b|\bocorrer[áã]\b|\bcome[çc]a(m|r[áã])?\b|\ba\s+partir\s+de\b|\bneste\s+(s[áa]bado|domingo|feriado|fim\s+de\s+semana)\b|\bnesta\s+(segunda|ter[çc]a|quarta|quinta|sexta)\b|\binscri[çc][õo]es\b|\bmutir[ãa]o\b|\bdistribui[çc][ãa]o\b|\bgratuit\w+\b|\bprograma[çc][ãa]o\b/u',
+                $texto
+            );
+            if (! $acaoConcreta) {
+                return 'efeméride/retrospectiva (recapitulação de fato anterior)';
+            }
         }
 
         return null;
