@@ -42,6 +42,16 @@ class EventClusterer
     /** Pares limítrofes do último cluster(): candidatos pro merge LLM. */
     private array $limitrofes = [];
 
+    /** "128M"/"1G"/"512K" → bytes (formato do memory_limit do PHP). */
+    private function paraBytes(string $v): int
+    {
+        $v = trim($v);
+        $mult = ['k' => 1024, 'm' => 1024 ** 2, 'g' => 1024 ** 3];
+        $sufixo = strtolower(substr($v, -1));
+
+        return isset($mult[$sufixo]) ? (int) $v * $mult[$sufixo] : (int) $v;
+    }
+
     public function __construct(?array $cfg = null)
     {
         $cfg = $cfg ?? config('jrlink.cluster', []);
@@ -59,6 +69,14 @@ class EventClusterer
         $n = count($rows);
         if ($n === 0) {
             return [];
+        }
+
+        // O mapa de pares candidatos cresce quase quadrático com a janela —
+        // 4.900 itens estouraram os 128M default do CLI (01/07/2026). Sobe o
+        // teto só se o atual for menor; -1 (ilimitado) fica como está.
+        $limite = ini_get('memory_limit');
+        if ($limite !== '-1' && $this->paraBytes($limite) < 512 * 1024 * 1024) {
+            ini_set('memory_limit', '512M');
         }
 
         // Tokens + document frequency + sinais de veto (localidade/idade).
@@ -109,7 +127,10 @@ class EventClusterer
                 for ($b = $a + 1; $b < $m; $b++) {
                     $i = $docs[$a];
                     $j = $docs[$b];
-                    $key = $i . ':' . $j;
+                    // chave INTEIRA ($i sempre < $j pelo índice ordenado): array
+                    // int-keyed do PHP gasta ~4x menos que string "i:j" — este
+                    // mapa chega aos milhões de entradas em janelas grandes.
+                    $key = $i * $n + $j;
                     if (isset($vistos[$key])) {
                         continue;
                     }
