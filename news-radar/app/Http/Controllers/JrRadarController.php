@@ -119,10 +119,15 @@ class JrRadarController extends Controller
 
     // ───────────────────── decaimento temporal (v4.1) ─────────────────────
 
-    /** Idade em horas da publicação original (data_pub; fallback created_at), em SQL (sqlite). */
+    /**
+     * Idade em horas da publicação original (data_pub; fallback created_at), em SQL.
+     * Guard: data_pub FUTURA (feed com data errada) cai pro created_at — senão a
+     * idade fica negativa e o decaimento daria nota cheia eterna no topo.
+     */
     private static function idadeHorasSql(): string
     {
-        return "((julianday('now') - coalesce(julianday(data_pub), julianday(created_at))) * 24.0)";
+        return "((julianday('now') - (case when data_pub is not null and julianday(data_pub) <= julianday('now')
+            then julianday(data_pub) else julianday(created_at) end)) * 24.0)";
     }
 
     /** data_pub/created_at do LÍDER do evento (mesma escolha do montarEventos), em SQL. */

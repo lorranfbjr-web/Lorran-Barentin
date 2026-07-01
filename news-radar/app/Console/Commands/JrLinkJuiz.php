@@ -200,7 +200,12 @@ class JrLinkJuiz extends Command
                     })
                     ->orWhere('created_at', '>=', $cutoff);
             })
-            ->orderBy('id')
+            // RECENTES PRIMEIRO: notícia fresca é julgada antes do backlog velho,
+            // então aparece no radar sem esperar a fila. Guard contra data_pub
+            // FUTURA (feed com data errada): se data_pub > agora, usa created_at —
+            // senão uma data bugada ficaria eternamente no topo.
+            ->orderByRaw("(case when data_pub is not null and julianday(data_pub) <= julianday('now')
+                then julianday(data_pub) else julianday(created_at) end) desc")
             ->get()
             ->all();
     }
