@@ -135,15 +135,36 @@ Schedule::command('jr:mpsc-score')
     ->cron('55 8 * * 1-6')
     ->withoutOverlapping(600);
 
+// (3) SEGUNDA PASSADA vespertina — o DOE do DIA costuma sair depois das 08:45
+// (mesmo padrão do TCE em 01/07); a repetição é barata (dedup por hash).
+Schedule::command('jr:mpsc-ingest --dias=3')
+    ->cron('45 16 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:mpsc-score')
+    ->cron('55 16 * * 1-6')
+    ->withoutOverlapping(600);
+
 // ── RADAR CÍVICO Fase 5 — TCE-SC (DOTC-e PDF diário) — decisões/julgamentos ──
 // ADITIVO/ISOLADO. DOTC-e sai Seg-Sex; forward varre dias úteis (404 no fds).
 // PDF datado direto (o índice tem shield anti-bot). Parsing PyMuPDF. Grade /5.
+// Duas passadas: a edição do DIA costuma sair DEPOIS das 09:50 (01/07 ela só
+// existia à noite — a manhã pegava sempre a de ontem). A vespertina cobre a
+// edição do próprio dia; --dias=3 + dedup por hash fazem a repetição ser barata.
 Schedule::command('jr:tce-ingest --dias=3')
     ->cron('50 9 * * 1-6')
     ->withoutOverlapping(600);
 
 Schedule::command('jr:tce-score')
     ->cron('0 10 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:tce-ingest --dias=3')
+    ->cron('50 16 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:tce-score')
+    ->cron('0 17 * * 1-6')
     ->withoutOverlapping(600);
 
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no Telegram ──
