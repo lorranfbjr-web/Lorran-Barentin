@@ -38,9 +38,10 @@ Schedule::command('jrlink:juiz --hours=48')
     ->cron('5,35 * * * *')
     ->withoutOverlapping();
 
-Schedule::command('jrlink:instagram-poll')
-    ->cron('*/15 * * * *')
-    ->withoutOverlapping();
+// INSTAGRAM: ABANDONADO (01/07/2026, decisão do Lorran). O Apify retorna HTTP 403
+// (corpus IG @jornalrazao quebrado) e o poll falhava a cada 15min poluindo o log.
+// Desagendado — reabilitar só se trocar a fonte de coleta do IG.
+// Schedule::command('jrlink:instagram-poll')->cron('*/15 * * * *')->withoutOverlapping();
 
 // v4.1 — espelho dos posts publicados (WPGraphQL, só leitura) + marcação
 // "já publicado" nos eventos quentes do Radar (some do painel, nunca notifica).
