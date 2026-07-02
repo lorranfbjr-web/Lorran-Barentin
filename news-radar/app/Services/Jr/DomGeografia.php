@@ -89,6 +89,16 @@ class DomGeografia
         return self::$indice = $idx;
     }
 
+    /**
+     * Normalização canônica de nome de município (minúsculo, sem acento, espaços
+     * colapsados). Público pra CidadesInteresse/RankingExibicao usarem a MESMA
+     * régua nas 4 tabelas do Radar Cívico.
+     */
+    public static function normalizar(string $s): string
+    {
+        return self::norm($s);
+    }
+
     private static function norm(string $s): string
     {
         $s = mb_strtolower(trim($s), 'UTF-8');
