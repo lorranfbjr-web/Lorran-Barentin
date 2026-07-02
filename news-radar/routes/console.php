@@ -94,11 +94,13 @@ Schedule::command('jr:dom-ingest --dias=2 --max-paginas=25 --parar-vistos=20')
 
 // (2) SCORING — SÓ PRA FRENTE: pontua os atos novos (whereNull) dos últimos
 //     dom.scoring.forward_dias com Sonnet (dual-lens 🔴/🟢) e regenera a página.
-//     --limit=24 = execução curta (3 chamadas/ciclo); horário 20,50 NÃO coincide
-//     com o juiz (5,35). O backlog histórico é ABANDONADO (piso de recência no
-//     comando) — o radar é daqui pra frente, sem gastar LLM com ato velho.
-Schedule::command('jr:dom-oportunidades --lote=8 --limit=24')
-    ->cron('20,50 * * * *')
+//     CAPACIDADE (fix A5, 02/07): 48 ciclos × 24 = 1.152/dia < inflow 2.000–2.600
+//     ⇒ excedente morria sem score em 7 dias. Agora */10 × --limit=32 =
+//     4.608/dia nominal (≥3.000 com folga p/ tick pulado). O lote FICA em 8:
+//     chamada curta nunca estoura o Process::timeout(600) do scorer (o exit 143
+//     visto era lote grande numa chamada só). */10 não coincide com o juiz (5,35).
+Schedule::command('jr:dom-oportunidades --lote=8 --limit=32')
+    ->cron('*/10 * * * *')
     ->withoutOverlapping(600);
 
 // RETROATIVO: REMOVIDO (30/06/2026). Decisão do Lorran: só pra frente, sem
