@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Jr\DomGeografia;
+use App\Services\Jr\RankingExibicao;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -39,11 +40,15 @@ class RadarCivicoController extends Controller
         // colapsa repetição óbvia por assinatura município+objeto curto.
         $itens = $this->dedup($itens);
 
-        // ordena por noticiabilidade (já vem ≥40 de cada fonte)
-        usort($itens, fn ($a, $b) => $b['score'] <=> $a['score']);
+        // ordena por score de EXIBIÇÃO (tier + decay + cap de vago); o score
+        // cru continua no card e nos consumidores (Mesa/alertas).
+        usort($itens, fn ($a, $b) => $b['score_x'] <=> $a['score_x']);
 
         $stats = $this->stats($itens);
         $json = json_encode($itens, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        // pré-seleção via URL: /radar-civico?cidades=interesse (favoritável)
+        $intIni = request()->query('cidades') === 'interesse' ? '1' : '';
 
         // já-na-fila: marca as estrelas que já estão na Mesa de Pauta (se a tabela
         // existir — a Mesa é aditiva e pode ainda não ter sido migrada).
@@ -53,7 +58,7 @@ class RadarCivicoController extends Controller
         }
         $selJson = json_encode($selecionados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return response($this->html($json, $stats, $selJson))
+        return response($this->html($json, $stats, $selJson, $intIni))
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -96,9 +101,11 @@ class RadarCivicoController extends Controller
 
     private function dom(): array
     {
-        $rows = DB::table('jr_dom_atos')
-            ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
-            ->orderByDesc('score_pauta')->limit(self::LIMITE)->get();
+        // união 3-pernas (frescos ∪ interesse ∪ top) — item de ontem/hoje e de
+        // cidade de interesse SEMPRE chega ao JSON (fix do bug "Ontem = 0").
+        $rows = RankingExibicao::coletar('jr_dom_atos',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            self::LIMITE);
 
         return $rows->map(fn ($a) => $this->base('dom', $a) + [
             'orgao' => $a->orgao,
@@ -120,10 +127,10 @@ class RadarCivicoController extends Controller
         // meses entra no radar. (A ingestão já só puxa as VIVAS; isto protege o
         // que já está na base do backfill histórico.)
         $piso = now()->subMonths((int) config('camara.radar_meses', 18))->toDateString();
-        $rows = DB::table('jr_camara_proposicoes')
-            ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
-            ->whereNotNull('data_pub')->where('data_pub', '>=', $piso)
-            ->orderByDesc('score_pauta')->limit(self::LIMITE)->get();
+        $rows = RankingExibicao::coletar('jr_camara_proposicoes',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
+                ->whereNotNull('data_pub')->where('data_pub', '>=', $piso),
+            self::LIMITE);
 
         return $rows->map(fn ($a) => $this->base('camara', $a) + [
             'orgao' => $a->orgao,
@@ -143,9 +150,9 @@ class RadarCivicoController extends Controller
             'procedimento_preparatorio' => 'Proc. Preparatório', 'procedimento_administrativo' => 'Proc. Administrativo',
             'pa_acompanhamento' => 'PA Acompanhamento',
         ];
-        $rows = DB::table('jr_mpsc_extratos')
-            ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
-            ->orderByDesc('score_pauta')->limit(self::LIMITE)->get();
+        $rows = RankingExibicao::coletar('jr_mpsc_extratos',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            self::LIMITE);
 
         return $rows->map(fn ($a) => $this->base('mpsc', $a) + [
             'orgao' => $a->orgao,
@@ -160,9 +167,9 @@ class RadarCivicoController extends Controller
 
     private function tce(): array
     {
-        $rows = DB::table('jr_tce_decisoes')
-            ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
-            ->orderByDesc('score_pauta')->limit(self::LIMITE)->get();
+        $rows = RankingExibicao::coletar('jr_tce_decisoes',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            self::LIMITE);
 
         return $rows->map(fn ($a) => $this->base('tce', $a) + [
             'orgao' => $a->unidade_gestora,
@@ -178,6 +185,12 @@ class RadarCivicoController extends Controller
     /** Campos comuns a todas as fontes. */
     private function base(string $source, $a): array
     {
+        // exibição: tier de interesse + vago + fresco + score_x (score_pauta cru
+        // permanece em 'score' — Mesa/alertas seguem nele). Merge EXPLÍCITO das
+        // chaves (o operador + de array mantém a chave da ESQUERDA — mesma
+        // pegadinha do 'cinca' documentada abaixo).
+        $rx = RankingExibicao::avaliar((int) $a->score_pauta, $a->municipio, $a->data_pub, $a->objeto_limpo);
+
         return [
             'source' => $source,
             'ato_ref' => $source . ':' . $a->id,   // chave estável p/ a Mesa de Pauta (★)
@@ -187,6 +200,10 @@ class RadarCivicoController extends Controller
             'data_pub' => $a->data_pub,
             'url_fonte' => $a->url_fonte,
             'score' => (int) $a->score_pauta,
+            'tier' => $rx['tier'],
+            'vago' => $rx['vago'],
+            'fresco' => $rx['fresco'],
+            'score_x' => $rx['score_x'],
             'tipo' => $a->tipo,
             'gancho_curto' => $a->gancho_curto,
             'gancho' => $a->gancho,
@@ -222,17 +239,19 @@ class RadarCivicoController extends Controller
         $fisc = 0;
         $serv = 0;
         $cinca = 0;
+        $interesse = 0;
         foreach ($itens as $it) {
             $por[$it['source']] = ($por[$it['source']] ?? 0) + 1;
             $fisc += $it['tipo'] === 'fiscalizacao' ? 1 : 0;
             $serv += $it['tipo'] === 'servico' ? 1 : 0;
             $cinca += ! empty($it['cinca'] ?? null) ? 1 : 0;
+            $interesse += ($it['tier'] ?? 0) > 0 ? 1 : 0;
         }
 
-        return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca];
+        return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca, 'interesse' => $interesse];
     }
 
-    private function html(string $json, array $s, string $selJson): string
+    private function html(string $json, array $s, string $selJson, string $intIni = ''): string
     {
         $gerado = Carbon::now()->format('d/m/Y H:i');
         $p = $s['por'];
@@ -266,6 +285,9 @@ header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12p
 .days{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
 .db{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
 .db.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.ib{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
+.ib.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.frec.vago{color:#7a5b12;background:#fdf6e1;border:1px solid #f0e0b0}
 .day-sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:10px 2px 0;padding-top:7px;border-top:1px dashed var(--line)}
 .day-sep:first-child{border-top:none;padding-top:0;margin-top:0}
 main{display:flex;flex-direction:column;gap:9px}
@@ -335,6 +357,10 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
   <button type="button" class="db" data-day="ontem">Ontem</button>
   <button type="button" class="db" data-day="7">Últimos 7 dias</button>
 </div>
+<div class="days" id="ints">
+  <button type="button" class="ib" data-int="">Todas as cidades</button>
+  <button type="button" class="ib" data-int="1">⭐ Cidades de interesse <b>{$s['interesse']}</b></button>
+</div>
 <div class="bar">
   <input type="search" id="q" placeholder="🔎 cidade, objeto, órgão, gancho…">
   <select id="ord"><option value="score">Noticiabilidade</option><option value="data">Data</option><option value="muni">Município</option></select>
@@ -358,7 +384,7 @@ const dayLabel=dp=>{if(!dp)return"sem data";if(dp===Y_HOJE)return"Hoje";if(dp===
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
-let srcSel="",tipoSel="",soCinca=false,daySel="";
+let srcSel="",tipoSel="",soCinca=false,daySel="",intSel="{$intIni}";
 function card(d){
   const apurar=(d.apurar||[]).map(b=>'<li>'+esc(b)+'</li>').join("");
   const meta=(d.meta||[]).map(m=>'<span class="pill">'+esc(m)+'</span>').join("");
@@ -366,14 +392,15 @@ function card(d){
   const hook=d.gancho_curto||d.gancho||"";
   const lens=d.tipo==='fiscalizacao'?'<span class="lens-dot" title="fiscalização">🔴</span>':(d.tipo==='servico'?'<span class="lens-dot" title="serviço/1ª-mão">🟢</span>':'');
   const cinca=d.cinca?'<span class="frec cinca">🏛️ CINCATARINA</span>':'';
+  const vago=d.vago?'<span class="frec vago" title="objeto não identificado — lead incompleto">⚠️ objeto vago</span>':'';
   return '<div class="card" id="ato-'+d.ato_ref.replace(":","-")+'">'+
     '<div class="face">'+
-      '<div class="score '+cls(d.score)+'">'+d.score+'</div>'+
+      '<div class="score '+cls(d.score)+'" title="exibição: '+d.score_x+'">'+d.score+'</div>'+
       '<div class="hd">'+
         '<div class="l1"><span class="src-badge src-'+d.source+'">'+(SRCI[d.source]||"")+' '+esc(SRCN[d.source]||d.source)+'</span>'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
         '<div class="l2">'+esc(d.objeto||"")+'</div>'+
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
-        (cinca?'<div class="badges">'+cinca+'</div>':'')+
+        ((cinca||vago)?'<div class="badges">'+cinca+vago+'</div>':'')+
       '</div>'+
       '<button type="button" class="star'+(SEL.has(d.ato_ref)?' on':'')+'" data-ref="'+esc(d.ato_ref)+'" title="selecionar pra Mesa de Pauta">★</button>'+
     '</div>'+
@@ -403,6 +430,7 @@ function render(){
     if(srcSel&&d.source!==srcSel)return false;
     if(tipoSel&&d.tipo!==tipoSel)return false;
     if(soCinca&&!d.cinca)return false;
+    if(intSel&&!d.tier)return false;
     if(daySel){const dp=String(d.data_pub||"");
       if(daySel==="hoje"&&dp!==Y_HOJE)return false;
       if(daySel==="ontem"&&dp!==Y_ONTEM)return false;
@@ -412,12 +440,15 @@ function render(){
   arr.sort((a,b)=>{
     if(ord==="data")return(String(b.data_pub||"")).localeCompare(String(a.data_pub||""));
     if(ord==="muni")return(a.municipio||"").localeCompare(b.municipio||"");
-    return b.score-a.score;});
+    return b.score_x-a.score_x;});
   document.getElementById("count").textContent=arr.length+" itens";
   let html="";
   if(ord==="data"){let lastDay=null;arr.forEach(d=>{const dp=String(d.data_pub||"");
     if(dp!==lastDay){lastDay=dp;html+='<div class="day-sep">'+esc(dayLabel(dp))+'</div>';}html+=card(d);});}
-  else{html=arr.map(card).join("");}
+  else{// cara do gol: frescos (48h) primeiro, resto vira Arquivo
+    const fresco=arr.filter(d=>d.fresco), velho=arr.filter(d=>!d.fresco);
+    html=(fresco.length?'<div class="day-sep">🔥 Últimas 48h</div>'+fresco.map(card).join(""):"")
+        +(velho.length?'<div class="day-sep">📁 Arquivo (mais antigos)</div>'+velho.map(card).join(""):"");}
   document.getElementById("lista").innerHTML=arr.length?html:'<div class="empty">Nenhum item bate os filtros.</div>';
 }
 document.querySelectorAll(".sb").forEach(b=>b.addEventListener("click",()=>{
@@ -429,6 +460,9 @@ document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click
 document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
 document.querySelectorAll(".db").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".db").forEach(x=>x.classList.remove("on"));b.classList.add("on");daySel=b.dataset.day;render();}));
+document.querySelectorAll("#ints .ib").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("#ints .ib").forEach(x=>x.classList.remove("on"));b.classList.add("on");intSel=b.dataset.int;render();}));
+document.querySelector('#ints .ib[data-int="'+intSel+'"]').classList.add("on");
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 // link pro card vindo do alerta do Telegram (#ato-<source>-<id>): rola, abre e pisca
 function jumpHash(){
