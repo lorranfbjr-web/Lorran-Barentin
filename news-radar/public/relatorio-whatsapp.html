@@ -1,0 +1,149 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>WhatsApp religado — NewsRadar</title><style>
+:root{--bg:#0f1115;--card:#171a21;--ink:#e8eaed;--mut:#9aa3af;--line:#262b34;--acc:#25d366;--blu:#4da3ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:32px 20px 80px}
+h1{font-size:29px;line-height:1.22;margin:.2em 0 .4em;letter-spacing:-.02em}
+h2{font-size:22px;margin:1.7em 0 .5em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:18px;margin:1.3em 0 .4em;color:#cdd3db}
+p{margin:.55em 0}a{color:var(--blu)}
+code{background:#0b0d11;border:1px solid var(--line);border-radius:5px;padding:.05em .4em;font-size:.86em;font-family:ui-monospace,Menlo,monospace}
+pre{background:#0b0d11;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{border:0;background:0;padding:0}
+ul{margin:.4em 0;padding-left:1.3em}li{margin:.2em 0}
+hr{border:0;border-top:1px solid var(--line);margin:1.6em 0}
+table{border-collapse:collapse;width:100%;margin:.8em 0;font-size:14.5px;background:var(--card);border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#1e222b;font-weight:600;color:#cdd3db}tr:last-child td{border-bottom:0}
+strong{color:#fff}h2:first-of-type{border-top:0}.wrap>p:first-of-type{color:var(--mut)}
+</style></head><body><div class="wrap"><h1>RELATÓRIO — CANAL WHATSAPP RELIGADO (captura + privacidade + ponte pro Radar)</h1>
+
+<p><strong>Data:</strong> 2026-06-23 · <strong>Branch:</strong> <code>claude/sc-news-aggregator-2M470</code> · <strong>Commit local:</strong> <code>6a66e47</code> (NÃO pushado)</p>
+
+<p><strong>Resumo de uma linha:</strong> o webhook do raspador <strong>nunca tinha parado</strong> — o que faltava era ingerir e fazer a ponte pro Radar. Religuei a ingestão, botei um filtro de privacidade que só deixa entrar <strong>grupo permitido</strong>, e construí a ponte que leva release de grupo até o juiz e a aba WhatsApp do <code>/radar</code>. Contraprova passou nos três casos. Nada do disparador/produção foi tocado.</p>
+
+<hr>
+
+<h2>PASSO 0 — o que o diagnóstico achou (e corrigiu o diagnóstico anterior)</h2>
+
+<table><thead><tr><th>Pergunta</th><th>Resposta</th></tr></thead><tbody>
+<tr><td><strong>Instância do raspador (276)</strong></td><td><code>instanceId = 3F43****************************</code> (mascarado), <code>connectedPhone = 5548****0276</code> (mascarado). Lido da VERDADE-TERRENO (o próprio payload cru que o Z-API grava). <strong>NÃO é o 884</strong> (disparador).</td></tr>
+<tr><td><strong>Instância está conectada?</strong></td><td><strong>SIM, conectada e recebendo agora.</strong> A pasta <code>storage/app/jr-pauta-capture</code> tem <strong>56.217 arquivos</strong>, o mais novo de <strong>hoje</strong> (minutos antes do diagnóstico). Você <strong>não precisa reler QR</strong>.</td></tr>
+<tr><td><strong>Então por que parou em ~10/06?</strong></td><td>Não foi o webhook. Foi a <strong>ingestão</strong>: <code>jrpauta:ingest</code> rodou manualmente de 05–10/jun e nunca mais — os arquivos crus empilharam (56k) mas pararam de virar linha em <code>jr_pauta_capturas</code>. Correção do diagnóstico anterior, que disse "pasta vazia" (o `*.json</td><td>wc -l<code> estourou o glob; com </code>find` aparecem todos).</td></tr>
+<tr><td><strong>Rota <code>/api/jr-pauta-capture</code></strong></td><td>Existe e responde <strong>200</strong> (recebendo agora).</td></tr>
+<tr><td><strong><code>jrpauta:ingest</code> agendado?</strong></td><td><strong>Não estava.</strong> Agora está (Parte B).</td></tr>
+<tr><td><strong>Anti-loop existente</strong></td><td>Vive em <code>config/jrlink.php</code> → <code>captura.ignorar_chats = ['Raspador']</code> + <code>ignorar_from_me</code>, aplicado em <code>JrLinkExtract::coletarUrls</code>. <strong>Preservado.</strong></td></tr>
+<tr><td><strong>Chats do piloto</strong></td><td><strong>82 grupos / 7.226 msgs</strong> + <strong>241 individuais / 6.238 msgs.</strong></td></tr>
+</tbody></table>
+
+<p><strong>Suas decisões no Passo 0:</strong> excluir os <strong>56 grupos <code>#JRxx</code></strong> (saída do disparador); excluir os <strong>4 grupos pessoais</strong> (Família Buscapé, Serviços Executados, Lesadas pela JANNA/VIRTUOSA, Ideias Mkt Alex); <strong>manter todos os grupos de imprensa/prefeitura/órgão</strong> (são fonte); individuais saem todos pela regra de grupo.</p>
+
+<hr>
+
+<h2>O QUE FOI CONSTRUÍDO</h2>
+
+<h3>PARTE A — Filtro de privacidade (opção B)</h3>
+
+<p>Regra única em <strong><code>app/Services/Jr/CapturaFiltro::aceita()</code></strong>, aplicada em <strong>dois pontos</strong> (defesa em profundidade):</p>
+
+<p>1. <strong>Na rota <code>/api/jr-pauta-capture</code></strong> — mensagem que não passa o filtro <strong>nem vira arquivo no disco</strong> (privacidade na origem; responde 200 igual pro Z-API não reenfileirar).</p>
+<p>2. <strong>No <code>jrpauta:ingest</code></strong> — mesmo que algum arquivo individual já tenha escapado pro disco no backlog antigo, <strong>não vira linha</strong> no banco.</p>
+
+<p>A regra:</p>
+<ul>
+<li>✅ <strong>Só grupo</strong> (<code>is_group=1</code>). Conversa individual nunca é gravada.</li>
+<li>❌ <strong>Denylist nominal</strong> (config <code>jrlink.captura.ignorar_chats</code>): <code>Raspador</code> (anti-loop), <code>Família Buscapé 🤪</code>, <code>Serviços Executados</code>, <code>Lesadas pela JANNA/ VIRTUOSA oficial</code>, <code>Ideias Mkt Alex</code>.</li>
+<li>❌ <strong>Denylist por regex</strong> (<code>jrlink.captura.denylist_regex</code>): <code>/Jornal Raz[aã]o\s*#JR\d+/iu</code> — os 56 grupos de distribuição.</li>
+</ul>
+
+<p><strong>Anti-loop preservado e reforçado:</strong> o corte do <code>Raspador</code> é pelo <strong>NOME do chat</strong>, não pelo <code>from_me</code> — porque o Z-API entrega a mensagem da própria instância com <code>from_me=0</code> (o flag não é confiável). A contraprova testou exatamente esse caso.</p>
+
+<h3>PARTE B — Religar a captura</h3>
+
+<ul>
+<li><code>jrpauta:ingest</code> ganhou <strong><code>--incremental</code></strong>: processa só os arquivos novos desde um cursor (gravado em <code>storage/app/jr-pauta-capture/.ingest-cursor</code>), em vez de reler os 56k do backlog a cada ciclo.</li>
+<li>Entrou no <strong>scheduler</strong> (<code>routes/console.php</code>): <code>jrpauta:ingest --incremental</code> a cada <strong>5 min</strong>.</li>
+<li><strong>O webhook não precisou de nada</strong> — já estava vivo. (Se um dia a instância cair, aí sim você reconecta o WhatsApp no painel Z-API; hoje não é o caso.)</li>
+</ul>
+
+<h3>PARTE C — Ponte captura → Radar</h3>
+
+<p>Novo comando <strong><code>jrpauta:bridge-radar</code></strong> (agendado <code>:02,:32</code>, logo antes do juiz <code>:05,:35</code>):</p>
+
+<ul>
+<li>Pega <strong>release de TEXTO</strong> de grupo permitido em <code>jr_pauta_capturas</code> e promove pra <code>jr_link_extracao</code> com <strong><code>origem=whatsapp</code></strong>.</li>
+<li>Usa o <strong>mesmo molde do canal Instagram</strong>: <code>categoria=concorrente</code>, gate de corpo + régua <code>concorrente_feed</code>, dedup permanente por <code>url_hash</code> (url canônica sintética <code>wa://capture/&lt;hash&gt;</code> — nunca colide com o caminho de links do <code>jrlink:extract</code>).</li>
+<li><strong>Janela pela HORA DA CAPTURA</strong> (<code>momment</code>), não pelo <code>created_at</code>, pra o backlog de 13 dias não entrar todo de uma vez e estourar o juiz. Cap por run (200) + janela 72h (configuráveis por env).</li>
+<li>Pega só release <strong>sem link http</strong> (link já é tratado pelo <code>jrlink:extract</code>, que também grava <code>origem=whatsapp</code>) — os dois caminhos são complementares.</li>
+</ul>
+
+<p><strong>Roteamento no juiz (igual ao IG, commit 988bf83):</strong> em <code>jrlink:juiz</code>, todo item <code>origem=whatsapp</code> não-julgado entra <strong>DIRETO no juiz</strong>, pulando o gate coarse (que foi calibrado pra manchete de portal e mataria o release antes de avaliar). Um <strong>aviso curto no INPUT do item</strong> diz que é mensagem de grupo/release, avaliar o assunto e não o formato.</p>
+
+<p>&gt; <strong>Prompt BASE do juiz intocado.</strong> <code>app/Services/Jr/JuizLlm.php</code> ficou byte-a-byte idêntico (md5 <code>51a09ef0…</code> antes e depois; heredoc do prompt <code>bc67d5d6…</code> idêntico). <strong><code>prompt_versao</code> segue <code>v3</code></strong> — não foi bumpado. Só mexi em roteamento + aviso no input (a mesma estratégia já validada no canal Instagram). Feed/portais inalterados.</p>
+
+<hr>
+
+<h2>CONTRAPROVA (executada na rota REAL, igual o Z-API faz)</h2>
+
+<p>Injetei 5 payloads sintéticos no formato exato do Z-API em <code><a href="https://jornaldetijucas.com.br/api/jr-pauta-capture" target="_blank" rel="noopener">https://jornaldetijucas.com.br/api/jr-pauta-capture</a></code>:</p>
+
+<table><thead><tr><th>#</th><th>Caso</th><th><code>isGroup</code></th><th>Resposta da rota</th><th>Virou arquivo?</th></tr></thead><tbody>
+<tr><td>A</td><td>Grupo permitido (<code>Prefeitura BC Imprensa</code>)</td><td>true</td><td><code>{"ok":true}</code></td><td>✅ <strong>SIM</strong></td></tr>
+<tr><td>B</td><td>Conversa individual</td><td>false</td><td><code>{"ok":true,"skipped":"privacy_filter"}</code></td><td>❌ não</td></tr>
+<tr><td>C</td><td>Grupo pessoal denylist (<code>Família Buscapé 🤪</code>)</td><td>true</td><td><code>skipped:privacy_filter</code></td><td>❌ não</td></tr>
+<tr><td>D</td><td><strong><code>Raspador</code> com <code>fromMe=false</code></strong> (anti-loop)</td><td>true</td><td><code>skipped:privacy_filter</code></td><td>❌ não</td></tr>
+<tr><td>E</td><td>Distribuição <code>✍️ Jornal Razão #JR18</code> (regex)</td><td>true</td><td><code>skipped:privacy_filter</code></td><td>❌ não</td></tr>
+</tbody></table>
+
+<p>Os três critérios do gate provados: <strong>(a)</strong> entra se for grupo permitido, <strong>(b)</strong> não entra se for individual ou grupo da denylist, <strong>(c)</strong> não entra em loop pelo chat de saída (<code>Raspador</code> cortado mesmo com <code>from_me=0</code>).</p>
+
+<p><strong>Pipeline completo</strong> com o caso A (depois removido): <code>jrpauta:ingest --incremental</code> gravou em <code>jr_pauta_capturas</code> → <code>jrpauta:bridge-radar</code> promoveu pra <code>jr_link_extracao</code> (<code>origem=whatsapp</code>, <code>eixo=concorrente</code>) → <code>jrlink:juiz</code> <strong>leu e julgou</strong> (<code>eh_pauta=1</code>, <code>temperatura_juiz=frio</code>, motivo: *"Mutirão de saúde é serviço/utilidade institucional de prefeitura, sem drama ou narrativa…"*, <code>prompt_versao=v3</code>). Todos os artefatos de teste foram <strong>apagados</strong> ao final (arquivo + 2 linhas de banco). Zero vestígio.</p>
+
+<p>Observação: já existem <strong>11 itens <code>origem=whatsapp</code> quentes</strong> julgados do caminho antigo (links). A aba aparecia "vazia" só porque eram &gt; janela do Radar (o último era 07/jun). Daqui pra frente, release novo de grupo de imprensa cai na régua automaticamente.</p>
+
+<hr>
+
+<h2>COMO TESTAR / OPERAR</h2>
+
+<ul>
+<li><strong>Ver o canal enchendo:</strong> o ciclo já roda sozinho (ingest 5/5min → ponte :02/:32 → juiz :05/:35). Conforme os grupos de imprensa postarem, os itens aparecem em <code>jr_link_extracao</code> com <code>origem=whatsapp</code> e, se o juiz marcar quente, na aba <strong>WhatsApp</strong> do <code>/radar</code>.</li>
+<li><strong>Forçar um ciclo na mão:</strong></li>
+</ul>
+<p>  <code>`</code></p>
+<p>  php artisan jrpauta:ingest --incremental</p>
+<p>  php artisan jrpauta:bridge-radar --dry      # vê o que promoveria sem gravar</p>
+<p>  php artisan jrpauta:bridge-radar            # promove</p>
+<p>  <code>`</code></p>
+<ul>
+<li><strong>Ajustar o filtro de grupos:</strong> edite <code>config/jrlink.php</code> → <code>captura.ignorar_chats</code> (nominal) ou <code>captura.denylist_regex</code>. Sem deploy: o app relê o config por request.</li>
+<li><strong>Backlog (opcional):</strong> o cursor foi posicionado pra seguir <strong>a partir de hoje</strong> — o backlog de 13 dias <strong>não</strong> foi ingerido pra não gerar custo de juiz de surpresa. Se quiser puxar o histórico, rode <code>php artisan jrpauta:ingest</code> (sem <code>--incremental</code>) uma vez e depois <code>jrpauta:bridge-radar --horas=336</code>. Custa chamadas de Opus (limitado pelo <code>cap_chamadas=300</code> por run).</li>
+</ul>
+
+<hr>
+
+<h2>TRAVAS RESPEITADAS</h2>
+
+<ul>
+<li>✅ <strong>Disparador 884 / workflow <code>g6ApLgldIyHKLwdq</code> / 56 grupos de produção:</strong> não tocados (na verdade, os #JR entraram na *denylist* pra nunca serem capturados).</li>
+<li>✅ <strong>Juiz:</strong> prompt base idêntico (md5 inalterado), <code>prompt_versao</code> segue <code>v3</code> (não bumpado). Só roteamento + aviso no input.</li>
+<li>✅ <strong>Caddy / dedup-svc:</strong> não tocados. Nenhum serviço reiniciado (o scheduler relê os comandos novos sozinho).</li>
+<li>✅ <strong>Anti-loop:</strong> preservado e provado na contraprova (caso D).</li>
+<li>✅ <strong>Commits locais, sem push.</strong> Sem <code>sed</code> em PHP (tudo edição na mão).</li>
+</ul>
+
+<hr>
+
+<h2>ARQUIVOS DO COMMIT <code>6a66e47</code></h2>
+
+<ul>
+<li><code>app/Services/Jr/CapturaFiltro.php</code> *(novo)* — regra única do filtro.</li>
+<li><code>app/Console/Commands/JrPautaBridgeRadar.php</code> *(novo)* — ponte captura→Radar.</li>
+<li><code>app/Console/Commands/JrPautaIngest.php</code> — filtro + <code>--incremental</code>.</li>
+<li><code>app/Console/Commands/JrLinkJuiz.php</code> — roteamento <code>origem=whatsapp</code> direto + aviso no input.</li>
+<li><code>config/jrlink.php</code> — bloco <code>captura</code> (privacidade) + <code>bridge_whatsapp</code>.</li>
+<li><code>routes/api.php</code> — filtro de privacidade na rota de captura.</li>
+<li><code>routes/console.php</code> — agendamento do ingest + ponte.</li>
+</ul>
+
+<p>*Relatório gerado em 2026-06-23. Nenhum serviço foi reiniciado; nenhum push foi feito.*</p>
+
+</div></body></html>
