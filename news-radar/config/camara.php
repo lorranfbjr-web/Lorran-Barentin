@@ -87,6 +87,19 @@ return [
         ],
     ],
 
+    // ── ITAPEMA (elegis2 — HTML aberto em site.itapema.sc.leg.br) ──
+    // Sonda 02/07/2026: lista-projeto paginada (30/pág, ?pagina=N), detalhe por
+    // cod_proposicao (data de criação/autor/situação), ementa SÓ no PDF da
+    // íntegra (extraída via PyMuPDF do venv scripts/pdf-venv, 1ª página).
+    // lista-propositura = Indicação/Requerimento (ruído, mesma régua dos
+    // tipos_relevantes do SAPL) — fica FORA por decisão 02/07.
+    'itapema' => [
+        'base' => env('JRCAM_ITAPEMA_BASE', 'https://site.itapema.sc.leg.br'),
+        'ano_min' => (int) env('JRCAM_ITAPEMA_ANO_MIN', 2025),
+        'max_paginas' => (int) env('JRCAM_ITAPEMA_MAX_PAGINAS', 12),
+        'python' => base_path('scripts/pdf-venv/bin/python'),
+    ],
+
     // Tipos de matéria RELEVANTES (lei-making): selecionados por DESCRIÇÃO
     // normalizada (sigla/id variam por instância). Excluímos ruído: indicação,
     // moção, requerimento, emenda, certificado, parecer, prestação de contas.

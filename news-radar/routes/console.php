@@ -133,6 +133,12 @@ Schedule::command('jr:legislador-ingest')
     ->cron('25 2,8,14,20 * * *')
     ->withoutOverlapping(600);
 
+// (4) ITAPEMA elegis2 (02/07) — forward com early-stop (--parar-vistos); item
+//     novo custa 2 GETs + PDF (ementa via PyMuPDF). 4×/dia, offset :45.
+Schedule::command('jr:itapema-ingest')
+    ->cron('45 2,8,14,20 * * *')
+    ->withoutOverlapping(600);
+
 // ── RADAR CÍVICO Fase 4 — MPSC (DOE PDF diário) — instaurações de procedimentos ──
 // ADITIVO/ISOLADO. O DOE-MPSC sai Seg-Sex; o forward varre os últimos dias úteis
 // (fim de semana = 404, pula). Parsing via PyMuPDF (venv dedicado). Grade /5.
