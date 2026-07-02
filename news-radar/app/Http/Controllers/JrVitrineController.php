@@ -177,6 +177,46 @@ class JrVitrineController extends Controller
         $agora = $assuntos->filter(fn ($a) => $a['idade_horas'] !== null && $a['idade_horas'] < 6)->values();
         $recentes = $assuntos->filter(fn ($a) => $a['idade_horas'] === null || $a['idade_horas'] >= 6)->values();
 
+        // ── DETECTOR DE VIRAL v0 (D3, 02/07/2026) — PASSIVO, server-rendered,
+        // sem push. Aceleração por assunto_id: taxa itens/hora na janela de 3h
+        // vs a taxa das 21h anteriores + nº de portais distintos em 3h.
+        // "Acelerando" = ≥3 itens E ≥2 portais nas 3h E taxa 3h > 2× a anterior.
+        $c3 = Carbon::now()->subHours(3);
+        $c24 = Carbon::now()->subHours(24);
+        $acel = DB::table('jr_link_extracao')
+            ->whereNotNull('assunto_id')
+            ->where('created_at', '>=', $c24)
+            ->selectRaw(
+                'assunto_id,
+                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) as n3h,
+                 COUNT(*) as n24h,
+                 COUNT(DISTINCT CASE WHEN created_at >= ? THEN host END) as portais3h',
+                [$c3, $c3]
+            )
+            ->groupBy('assunto_id')
+            ->havingRaw('n3h >= 3')
+            ->get()
+            ->filter(function ($r) {
+                $taxa3h = $r->n3h / 3.0;
+                $taxaAntes = max(0.05, ($r->n24h - $r->n3h) / 21.0); // piso evita div. por ~0
+                return $r->portais3h >= 2 && $taxa3h > 2 * $taxaAntes;
+            })
+            ->sortByDesc(fn ($r) => $r->n3h)
+            ->keyBy('assunto_id');
+
+        // Cruza com os assuntos da vitrine (label/link vêm do card existente).
+        $acelerando = $assuntos
+            ->filter(fn ($a) => isset($acel[$a['assunto_id']]))
+            ->map(function ($a) use ($acel) {
+                $m = $acel[$a['assunto_id']];
+                $a['acel_n3h'] = (int) $m->n3h;
+                $a['acel_n24h'] = (int) $m->n24h;
+                $a['acel_portais'] = (int) $m->portais3h;
+
+                return $a;
+            })
+            ->sortByDesc('acel_n3h')->take(6)->values();
+
         $stats = [
             'processados' => DB::table('jr_link_extracao')->where('created_at', '>=', $cut)->count(),
             'julgados' => DB::table('jr_link_extracao')->where('juiz_julgado_em', '>=', $cut)->count(),
@@ -191,6 +231,7 @@ class JrVitrineController extends Controller
         $editorias = $assuntos->pluck('editoria')->unique()->sort()->values()->all();
 
         return view('vitrine', [
+            'acelerando' => $acelerando,
             'agora' => $agora,
             'recentes' => $recentes,
             'stats' => $stats,

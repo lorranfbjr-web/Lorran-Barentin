@@ -171,6 +171,23 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
     </div>
   </div>
 
+  @if(($acelerando ?? collect())->isNotEmpty())
+  <section data-block="acelerando" style="margin-bottom:14px">
+    <div class="sec"><span class="dot" style="background:#ff5722"></span><h2>🔥 Acelerando agora</h2><span class="ct">{{ $acelerando->count() }}</span></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      @foreach($acelerando as $v)
+      <a href="{{ $v['url'] }}" target="_blank" rel="noopener" style="display:block;background:linear-gradient(90deg,#fff3ee,#fff);border:1px solid #ffd0bd;border-left:4px solid #ff5722;border-radius:10px;padding:10px 14px;text-decoration:none;color:inherit">
+        <div style="font-weight:700;font-size:15px;line-height:1.35">{{ $v['label'] }}</div>
+        <div style="font-size:12.5px;color:#8a5b4a;margin-top:3px">
+          {{ $v['acel_n3h'] }} itens nas últimas 3h · {{ $v['acel_portais'] }} portais · {{ $v['acel_n24h'] }} em 24h
+          @if($v['cidade']) · {{ $v['cidade'] }}@endif
+        </div>
+      </a>
+      @endforeach
+    </div>
+  </section>
+  @endif
+
   <section data-block="agora">
     <div class="sec"><span class="dot"></span><h2>Agora</h2><span class="ct" data-count></span></div>
     <div class="grid">
