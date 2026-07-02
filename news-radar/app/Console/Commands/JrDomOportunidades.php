@@ -88,6 +88,7 @@ class JrDomOportunidades extends Command
 
         $bar = $this->output->createProgressBar($lotes->count());
         $bar->start();
+        $t0 = microtime(true);
         $ok = 0;
         $erros = 0;
         $chamadas = 0;
@@ -143,6 +144,17 @@ class JrDomOportunidades extends Command
         $bar->finish();
         $this->newLine(2);
         $this->info(sprintf('Pontuados: %d atos OK, %d lotes com erro.', $ok, $erros));
+
+        // B5 — observabilidade: uma linha por ciclo (o watchdog lê daqui)
+        \App\Services\Jr\CivicoScoringLog::registrar('dom', [
+            'chamadas' => $chamadas,
+            'scorados' => $ok,
+            'falhas' => $erros,
+            'pendentes_apos' => DB::table('jr_dom_atos')->whereNull('score_pauta')
+                ->where('created_at', '>=', now()->subDays(7))->count(),
+            'modelo' => $scorer->modelo(),
+            'duracao_ms' => (int) ((microtime(true) - $t0) * 1000),
+        ]);
 
         $caminho = $this->renderizar();
         $this->info("Página: {$caminho}");
