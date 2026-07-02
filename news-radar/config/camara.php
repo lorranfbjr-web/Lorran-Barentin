@@ -65,6 +65,28 @@ return [
         ['cidade' => 'São José',         'host' => 'sapl.saojose.sc.leg.br',          'recencia' => '2020-09-16', 'vivo' => false],
     ],
 
+    // ── LEGISLADOR WEB (legislador.com.br — HTML ASP server-rendered, SEM gate) ──
+    // Sonda 02/07/2026 (CAMARAS-sonda.json): 7 cidades de interesse no mesmo
+    // sistema; UM conector genérico parametrizado por ID cobre todas. A página
+    // ProjetoTramite lista os projetos EM TRAMITAÇÃO (todos os anos) com tipo,
+    // nº/ano, origem (L/E), data e ementa — 1 GET por câmara.
+    // NB: o ASP responde 302 'Objeto movido' MAS com o conteúdo no corpo —
+    // o conector NÃO segue redirect (seguir = perder o corpo). Windows-1252.
+    'legislador' => [
+        'base' => env('JRCAM_LEGISLADOR_BASE', 'https://www.legislador.com.br/LegisladorWEB.ASP'),
+        // backfill leve: só projetos de ano >= este entram (forward-first)
+        'ano_min' => (int) env('JRCAM_LEGISLADOR_ANO_MIN', 2025),
+        'cidades' => [
+            ['cidade' => 'Penha',            'id' => 2],
+            ['cidade' => 'Jaraguá do Sul',   'id' => 5],
+            ['cidade' => 'São João Batista', 'id' => 34],
+            ['cidade' => 'Guabiruba',        'id' => 40],
+            ['cidade' => 'Corupá',           'id' => 79],
+            ['cidade' => 'Ilhota',           'id' => 92],
+            ['cidade' => 'Porto Belo',       'id' => 337],
+        ],
+    ],
+
     // Tipos de matéria RELEVANTES (lei-making): selecionados por DESCRIÇÃO
     // normalizada (sigla/id variam por instância). Excluímos ruído: indicação,
     // moção, requerimento, emenda, certificado, parecer, prestação de contas.

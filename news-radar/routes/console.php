@@ -123,6 +123,16 @@ Schedule::command('jr:camara-score')
     ->cron('35 * * * *')
     ->withoutOverlapping(600);
 
+// (3) LEGISLADOR WEB (02/07, goal radar-interesse) — 7 câmaras de interesse
+//     (Penha, Jaraguá, SJB, Guabiruba, Corupá, Ilhota, Porto Belo) no
+//     legislador.com.br. 1 GET/câmara + dedup por hash = leve; 4×/dia basta
+//     (proposição nova é evento diário). :25 na grade /5, fora dos ticks
+//     pesados (juiz 5,35 · dom */10); o jr:camara-ingest de :25 é horário e
+//     ambos são HTTP-leves (hosts diferentes).
+Schedule::command('jr:legislador-ingest')
+    ->cron('25 2,8,14,20 * * *')
+    ->withoutOverlapping(600);
+
 // ── RADAR CÍVICO Fase 4 — MPSC (DOE PDF diário) — instaurações de procedimentos ──
 // ADITIVO/ISOLADO. O DOE-MPSC sai Seg-Sex; o forward varre os últimos dias úteis
 // (fim de semana = 404, pula). Parsing via PyMuPDF (venv dedicado). Grade /5.
