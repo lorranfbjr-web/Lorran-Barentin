@@ -299,6 +299,22 @@ class JrWatchdog extends Command
                 $rows[] = ['fonte' => $nome, 'ultimo' => $ult, 'idade_h' => $idadeH, 'limiar_h' => $limiar + $folga, 'nivel' => $ok ? 'ok' : 'bad'];
             }
 
+            // por-câmara (02/07): o max(created_at) global esconde câmara individual
+            // parada — 12+ câmaras vivas agora (SAPL + Legislador + Itapema). Warn
+            // informativo (>7d sem linha nova); não derruba o nível geral (câmara
+            // pequena pode ficar dias sem projeto novo legitimamente).
+            $porCamara = DB::table('jr_camara_proposicoes')
+                ->selectRaw('municipio, max(created_at) as ult')
+                ->groupBy('municipio')->orderBy('municipio')->get();
+            foreach ($porCamara as $c) {
+                $idadeH = $c->ult ? round(Carbon::parse($c->ult)->diffInMinutes($agora) / 60, 1) : null;
+                $rows[] = [
+                    'fonte' => "camara · {$c->municipio}",
+                    'ultimo' => $c->ult, 'idade_h' => $idadeH, 'limiar_h' => 168,
+                    'nivel' => ($idadeH !== null && $idadeH <= 168) ? 'ok' : 'warn',
+                ];
+            }
+
             // fila de scoring DOM (janela forward de 7d — excedente morre sem score)
             $filaHoje = DB::table('jr_dom_atos')->whereNull('score_pauta')
                 ->whereDate('data_ato', $agora->toDateString())->count();
