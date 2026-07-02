@@ -34,6 +34,22 @@ return [
     //   Tijucas tem portal próprio (openresty, sem Interlegis);
     //   Canoinhas e São José bloqueiam probe (503 LiteSpeed) — recon manual pendente.
     // Demais ~31 prioritárias = AUSENTE (sem SAPL no host padrão) — ver scoping.
+    //
+    // RE-SONDA 02/07/2026 (D1, 26 cidades, direto no endpoint): NENHUM SAPL novo
+    // vivo — só os 2 já configurados (SBS 1.021 itens 2026; Rio do Sul 557).
+    // Onde as demais publicam HOJE (plataforma × viabilidade de conector):
+    //   FÁCIL : Itapema (ELegis2 site.itapema.sc.leg.br/elegis2, HTML público
+    //           paginado, qtd= até 1000); São João Batista (Legislador WEB
+    //           legislador.com.br?WCI=ProjetoConsulta&ID=34, GET paginado);
+    //           Balneário Camboriú (LEGISWEB/CamaraSPA, HTML estático indexável).
+    //   MÉDIA : Porto Belo (Legislador WEB ID=337), Guabiruba (Legislador WEB),
+    //           Bombinhas (Vision), Camboriú (SOFTCAM), Brusque (IPM) — TLS
+    //           reset/WAF contra IP de datacenter, conteúdo existe (indexado).
+    //   BESPOKE/INVIÁVEL: o bloco LEGISOFT (Tijucas, Canelinha, Nova Trento,
+    //           Biguaçu, Gaspar, Lages, Blumenau, Navegantes, Criciúma,
+    //           Joinville) + Palhoça/Floripa/São José/Chapecó — reCAPTCHA ou
+    //           Cloudflare bloqueando raspagem automatizada deste VPS.
+    // Tabela completa: goals/RELATORIO-matar-pendencias-20260702.md (D1).
     'camaras' => [
         ['cidade' => 'São Bento do Sul', 'host' => 'sapl.saobentodosul.sc.leg.br',   'recencia' => '2026-06-29', 'vivo' => true],
         ['cidade' => 'Rio do Sul',       'host' => 'sapl.camarariodosul.sc.gov.br',   'recencia' => '2026-06-26', 'vivo' => true],
