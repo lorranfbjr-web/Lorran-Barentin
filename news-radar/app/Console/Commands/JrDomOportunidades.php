@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\Jr\DomScorer;
+use App\Services\Jr\RankingExibicao;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -168,13 +169,11 @@ class JrDomOportunidades extends Command
      */
     private function renderizar(): string
     {
-        $atos = DB::table('jr_dom_atos')
-            ->whereNotNull('score_pauta')
-            ->where('score_pauta', '>=', 40) // só o que um editor levantaria a sobrancelha
-            ->orderByDesc('score_pauta')
-            ->orderByDesc('valor')
-            ->limit(500)
-            ->get();
+        // união 3-pernas (frescos ∪ interesse ∪ top) — fix de recência: item de
+        // ontem/hoje e de cidade de interesse SEMPRE entra na página.
+        $atos = RankingExibicao::coletar('jr_dom_atos',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            500);
 
         $dados = $atos->map(fn ($a) => [
             'municipio' => $a->municipio,
@@ -193,7 +192,8 @@ class JrDomOportunidades extends Command
             'apurar' => json_decode($a->o_que_apurar ?: '[]', true),
             'angulo' => $a->angulo_sugerido,
             'flags' => json_decode($a->flags ?: '[]', true),
-        ])->values()->all();
+            // exibição: tier + vago + fresco + score_x ('score' segue cru)
+        ] + RankingExibicao::avaliar((int) $a->score_pauta, $a->municipio, $a->data_pub, $a->objeto_limpo ?: $a->objeto))->values()->all();
 
         $totalScored = DB::table('jr_dom_atos')->whereNotNull('score_pauta')->count();
         $totalAtos = DB::table('jr_dom_atos')->count();
@@ -276,6 +276,7 @@ class JrDomOportunidades extends Command
        padding:7px 13px;border-radius:9px;text-decoration:none}
   .src.pdf{background:#fff;color:var(--navy);border:1px solid var(--navy);margin-left:6px}
   .empty{text-align:center;color:var(--muted);padding:40px 16px;font-size:14px}
+  .sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:14px 2px 2px;padding-top:8px;border-top:1px dashed var(--line)}
   footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
 </style>
 </head>
@@ -293,6 +294,7 @@ class JrDomOportunidades extends Command
 </div>
 <div class="controls">
   <input type="search" id="q" placeholder="🔎 município, objeto, fornecedor…">
+  <select id="cid"><option value="">Todas as cidades</option><option value="1">⭐ Cidades de interesse</option></select>
   <select id="mod"><option value="">Toda modalidade</option></select>
   <select id="ord">
     <option value="score">Ordenar: noticiabilidade</option>
@@ -352,7 +354,9 @@ function render(){
   const mod=document.getElementById("mod").value;
   const ord=document.getElementById("ord").value;
   const vmin=parseFloat(document.getElementById("vmin").value)||0;
+  const cid=document.getElementById("cid").value;
   let arr=DADOS.filter(d=>{
+    if(cid && !d.tier) return false;
     if(mod && d.modalidade!==mod) return false;
     if(vmin && !(d.valor>=vmin)) return false;
     if(q){ const hay=((d.municipio||"")+" "+(d.orgao||"")+" "+(d.objeto||"")+" "+(d.fornecedor||"")+" "+(d.gancho||"")+" "+(d.tipo_gancho||"")).toLowerCase(); if(!hay.includes(q)) return false; }
@@ -362,13 +366,19 @@ function render(){
     if(ord==="valor") return (b.valor||0)-(a.valor||0);
     if(ord==="data") return (b.data_pub||"").localeCompare(a.data_pub||"");
     if(ord==="muni") return (a.municipio||"").localeCompare(b.municipio||"");
-    return b.score-a.score;
+    return b.score_x-a.score_x;
   });
   document.getElementById("count").textContent=arr.length+" itens";
-  document.getElementById("lista").innerHTML = arr.length ? arr.map(card).join("") :
+  let html="";
+  if(ord==="score"){// cara do gol: frescos (48h) primeiro, resto vira Arquivo
+    const fresco=arr.filter(d=>d.fresco), velho=arr.filter(d=>!d.fresco);
+    html=(fresco.length?'<div class="sep">🔥 Últimas 48h</div>'+fresco.map(card).join(""):"")
+        +(velho.length?'<div class="sep">📁 Arquivo</div>'+velho.map(card).join(""):"");
+  }else{html=arr.map(card).join("");}
+  document.getElementById("lista").innerHTML = arr.length ? html :
     '<div class="empty">Nenhum ato bate os filtros.</div>';
 }
-["q","mod","ord","vmin"].forEach(id=>document.getElementById(id).addEventListener("input",render));
+["q","cid","mod","ord","vmin"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 render();
 </script>
 </body>

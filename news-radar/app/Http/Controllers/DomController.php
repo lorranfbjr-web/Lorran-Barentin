@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\Jr\DomConector;
 use App\Services\Jr\DomEntidades;
 use App\Services\Jr\DomGeografia;
+use App\Services\Jr\RankingExibicao;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -183,11 +184,11 @@ HTML;
 
     public function radar()
     {
-        $atos = DB::table('jr_dom_atos')
-            ->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
-            ->orderByDesc('score_pauta')->orderByDesc('valor')
-            ->limit(500)
-            ->get();
+        // união 3-pernas (frescos ∪ interesse ∪ top) — fix de recência: item de
+        // ontem/hoje e de cidade de interesse SEMPRE chega ao JSON.
+        $atos = RankingExibicao::coletar('jr_dom_atos',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            500);
 
         // OBJ6 — recorrência de fornecedor (best-effort, heurístico): nº de
         // municípios distintos em que o fornecedor aparece em TODA a base.
@@ -202,9 +203,16 @@ HTML;
                 }
             }
 
+            // exibição: tier + vago + fresco + score_x ('score' segue cru)
+            $rx = RankingExibicao::avaliar((int) $a->score_pauta, $a->municipio, $a->data_pub, $a->objeto_limpo ?: $a->objeto);
+
             return [
                 'municipio' => $a->municipio,
                 'regiao' => DomGeografia::regiao($a->municipio),
+                'tier' => $rx['tier'],
+                'vago' => $rx['vago'],
+                'fresco' => $rx['fresco'],
+                'score_x' => $rx['score_x'],
                 'orgao' => $a->orgao,
                 'categoria' => $a->categoria,
                 'modalidade' => $a->modalidade,
@@ -238,6 +246,7 @@ HTML;
         $nFisc = count(array_filter($dados, fn ($d) => $d['tipo'] === 'fiscalizacao'));
         $nServ = count(array_filter($dados, fn ($d) => $d['tipo'] === 'servico'));
         $nCinca = count(array_filter($dados, fn ($d) => $d['cinca']));
+        $nInt = count(array_filter($dados, fn ($d) => $d['tier'] > 0));
         $json = json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $body = <<<HTML
@@ -255,6 +264,10 @@ HTML;
     <option value="50000">≥ R$ 50 mil</option><option value="100000">≥ R$ 100 mil</option><option value="500000">≥ R$ 500 mil</option>
   </select>
   <span class="muted" id="count"></span>
+</div>
+<div class="lens">
+  <button type="button" class="lb on" data-int="">Todas as cidades</button>
+  <button type="button" class="lb" data-int="1">⭐ Interesse <b>{$nInt}</b></button>
 </div>
 <div class="lens">
   <button type="button" class="lb on" data-tipo="">Tudo</button>
@@ -317,7 +330,7 @@ function card(d){
     '</div></details>'+
   '</div>';
 }
-let tipoSel="",soCinca=false;
+let tipoSel="",soCinca=false,intSel="";
 function render(){
   const q=document.getElementById("q").value.toLowerCase().trim();
   const mod=document.getElementById("mod").value,ord=document.getElementById("ord").value;
@@ -326,6 +339,7 @@ function render(){
   let arr=DADOS.filter(d=>{
     if(tipoSel&&d.tipo!==tipoSel)return false;
     if(soCinca&&!d.cinca)return false;
+    if(intSel&&!d.tier)return false;
     if(soForn&&!d.forn_reps)return false;
     if(mod&&d.modalidade!==mod)return false;
     if(vmin&&!(d.valor>=vmin))return false;
@@ -335,13 +349,22 @@ function render(){
     if(ord==="valor")return(b.valor||0)-(a.valor||0);
     if(ord==="data")return(b.data_pub||"").localeCompare(a.data_pub||"");
     if(ord==="muni")return(a.municipio||"").localeCompare(b.municipio||"");
-    return b.score-a.score;});
+    return b.score_x-a.score_x;});
   document.getElementById("count").textContent=arr.length+" itens";
-  document.getElementById("lista").innerHTML=arr.length?arr.map(card).join(""):'<div class="empty">Nenhum ato bate os filtros.</div>';
+  let html="";
+  if(ord==="score"){// cara do gol: frescos (48h) primeiro, resto vira Arquivo
+    const fresco=arr.filter(d=>d.fresco), velho=arr.filter(d=>!d.fresco);
+    html=(fresco.length?'<div class="day-sep">🔥 Últimas 48h</div>'+fresco.map(card).join(""):"")
+        +(velho.length?'<div class="day-sep">📁 Arquivo (mais antigos)</div>'+velho.map(card).join(""):"");
+  }else{html=arr.map(card).join("");}
+  document.getElementById("lista").innerHTML=arr.length?html:'<div class="empty">Nenhum ato bate os filtros.</div>';
 }
 document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".lb[data-tipo]").forEach(x=>x.classList.remove("on"));
   b.classList.add("on");tipoSel=b.dataset.tipo;render();}));
+document.querySelectorAll(".lb[data-int]").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".lb[data-int]").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");intSel=b.dataset.int;render();}));
 // CINCATARINA é filtro de ENTIDADE (ortogonal à lente 🔴/🟢): toggle próprio.
 document.getElementById("bcinca").addEventListener("click",e=>{
   soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
@@ -578,6 +601,8 @@ td.muni .reg{display:block;margin-top:1px}
 .frec.rep{color:var(--muted);background:#eef1f8;border-color:var(--line)}
 .frec.cinca{color:#fff;background:var(--navy);border-color:var(--navy)}
 .lb.cinca.on{background:var(--amber);color:#1c1408;border-color:var(--amber)}
+.day-sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:10px 2px 0;padding-top:7px;border-top:1px dashed var(--line)}
+.day-sep:first-child{border-top:none;padding-top:0;margin-top:0}
 .oque{font-size:13.5px;margin:2px 0 4px}
 .why{font-size:13px;color:#333;background:#f8f9fc;border-left:3px solid var(--navy);padding:7px 10px;border-radius:0 8px 8px 0;margin:2px 0 8px}
 .why .lab{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:2px}
