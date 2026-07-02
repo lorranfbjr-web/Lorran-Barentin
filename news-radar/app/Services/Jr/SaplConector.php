@@ -67,14 +67,24 @@ class SaplConector
         if (isset($this->tiposCache[$host])) {
             return $this->tiposCache[$host];
         }
-        $j = $this->get($host, 'materia/tipomaterialegislativa/', ['limit' => 50]);
-        $this->dorme();
+        // PAGINAR (fix 02/07): o DRF do SAPL rende 10/página e IGNORA ?limit=50 —
+        // instância com >10 tipos perdia os das páginas seguintes (Luiz Alves tem
+        // PL=id6/PLC=id7 na página 2 → ingestão vinha quase vazia).
         $map = [];
-        foreach (($j['results'] ?? []) as $t) {
-            $map[(int) $t['id']] = [
-                'sigla' => (string) ($t['sigla'] ?? ''),
-                'descricao' => (string) ($t['descricao'] ?? ''),
-            ];
+        for ($page = 1; $page <= 10; $page++) {
+            $j = $this->get($host, 'materia/tipomaterialegislativa/', ['limit' => 50, 'page' => $page]);
+            $this->dorme();
+            $results = $j['results'] ?? [];
+            foreach ($results as $t) {
+                $map[(int) $t['id']] = [
+                    'sigla' => (string) ($t['sigla'] ?? ''),
+                    'descricao' => (string) ($t['descricao'] ?? ''),
+                ];
+            }
+            $tp = (int) ($j['pagination']['total_pages'] ?? 1);
+            if ($page >= $tp || ! $results) {
+                break;
+            }
         }
 
         return $this->tiposCache[$host] = $map;

@@ -50,9 +50,15 @@ return [
     //           Joinville) + Palhoça/Floripa/São José/Chapecó — reCAPTCHA ou
     //           Cloudflare bloqueando raspagem automatizada deste VPS.
     // Tabela completa: goals/RELATORIO-matar-pendencias-20260702.md (D1).
+    // SONDA 02/07/2026 (goal radar-interesse, CAMARAS-sonda.json): 3 SAPLs novos
+    // VIVOS nas cidades de interesse — Luiz Alves (313 itens 2026), Schroeder
+    // (299), Santo Amaro da Imperatriz (298). Forward-first + backfill leve 2025+.
     'camaras' => [
         ['cidade' => 'São Bento do Sul', 'host' => 'sapl.saobentodosul.sc.leg.br',   'recencia' => '2026-06-29', 'vivo' => true],
         ['cidade' => 'Rio do Sul',       'host' => 'sapl.camarariodosul.sc.gov.br',   'recencia' => '2026-06-26', 'vivo' => true],
+        ['cidade' => 'Luiz Alves',       'host' => 'sapl.luizalves.sc.leg.br',        'recencia' => '2026-07-02', 'vivo' => true],
+        ['cidade' => 'Schroeder',        'host' => 'sapl.schroeder.sc.leg.br',        'recencia' => '2026-07-02', 'vivo' => true],
+        ['cidade' => 'Santo Amaro da Imperatriz', 'host' => 'sapl.santoamarodaimperatriz.sc.leg.br', 'recencia' => '2026-07-02', 'vivo' => true],
         ['cidade' => 'Canoinhas',        'host' => 'sapl.canoinhas.sc.leg.br',        'recencia' => '2024-07-31', 'vivo' => false],
         ['cidade' => 'Imbuia',           'host' => 'sapl.imbuia.sc.leg.br',           'recencia' => '2023-06-29', 'vivo' => false],
         ['cidade' => 'Tijucas',          'host' => 'sapl.tijucas.sc.leg.br',          'recencia' => '2022-11-22', 'vivo' => false],
