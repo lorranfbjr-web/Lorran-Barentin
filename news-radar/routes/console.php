@@ -137,12 +137,27 @@ Schedule::command('jr:mpsc-score')
 
 // (3) SEGUNDA PASSADA vespertina — o DOE do DIA costuma sair depois das 08:45
 // (mesmo padrão do TCE em 01/07); a repetição é barata (dedup por hash).
+// NB (02/07): o app roda em UTC ⇒ '45 16' dispara às 13:45 LOCAIS. Mantida de
+// propósito (pega edição que sai cedo); a passada que garante a edição do DIA
+// é a NOTURNA em UTC abaixo (18:45–20:00 locais).
 Schedule::command('jr:mpsc-ingest --dias=3')
     ->cron('45 16 * * 1-6')
     ->withoutOverlapping(600);
 
 Schedule::command('jr:mpsc-score')
     ->cron('55 16 * * 1-6')
+    ->withoutOverlapping(600);
+
+// (4) PASSADA NOTURNA em UTC (02/07/2026, fix A4) — a "vespertina" acima nunca
+// rodou na hora pretendida (timezone UTC desloca a grade −3h). Estes horários
+// UTC = 19:50/20:00 locais pro MPSC, cobrindo a edição do dia que sai à noite.
+// Aditivo e idempotente (dedup por hash); grade /5 do timer.
+Schedule::command('jr:mpsc-ingest --dias=3')
+    ->cron('50 22 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:mpsc-score')
+    ->cron('0 23 * * 1-6')
     ->withoutOverlapping(600);
 
 // ── RADAR CÍVICO Fase 5 — TCE-SC (DOTC-e PDF diário) — decisões/julgamentos ──
@@ -159,12 +174,25 @@ Schedule::command('jr:tce-score')
     ->cron('0 10 * * 1-6')
     ->withoutOverlapping(600);
 
+// NB (02/07): '50 16' UTC = 13:50 local — mantida (barata, dedup por hash);
+// a garantia da edição do dia é a passada noturna UTC abaixo (fix A4).
 Schedule::command('jr:tce-ingest --dias=3')
     ->cron('50 16 * * 1-6')
     ->withoutOverlapping(600);
 
 Schedule::command('jr:tce-score')
     ->cron('0 17 * * 1-6')
+    ->withoutOverlapping(600);
+
+// PASSADA NOTURNA em UTC (02/07/2026, fix A4): 21:45/21:55 UTC = 18:45/18:55
+// locais — horário em que a edição do DIA do DOTC-e já existe (01/07 ela só
+// apareceu à noite). Aditivo, idempotente por hash, grade /5.
+Schedule::command('jr:tce-ingest --dias=3')
+    ->cron('45 21 * * 1-6')
+    ->withoutOverlapping(600);
+
+Schedule::command('jr:tce-score')
+    ->cron('55 21 * * 1-6')
     ->withoutOverlapping(600);
 
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no Telegram ──
