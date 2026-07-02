@@ -39,9 +39,12 @@ class JrWatchdog extends Command
 
         $checks['cron'] = $this->lintCron();
         $checks['canais'] = $this->frescorCanais((int) $this->option('horas'));
+        $checks['whatsapp'] = $this->capturaWhatsapp();
         $checks['servicos'] = $this->servicos();
         $checks['pipeline'] = $this->pipeline();
         $checks['juiz'] = $this->juiz();
+        $checks['civico'] = $this->civico();
+        $checks['claude'] = $this->claudeCli();
 
         $html = $this->renderHtml($checks, $agora);
         File::put(public_path('health.html'), $html);
@@ -221,6 +224,136 @@ class JrWatchdog extends Command
         }
     }
 
+    /**
+     * v1 — PONTO CEGO corrigido: mede a CAPTURA WhatsApp na fonte (mtime do último
+     * raw do webhook + última linha de jr_pauta_capturas), não só pela
+     * jr_link_extracao downstream (que some quando a ponte segura o release).
+     */
+    private function capturaWhatsapp(): array
+    {
+        $rows = [];
+        try {
+            $dir = storage_path('app/jr-pauta-capture');
+            $rawIdadeMin = null;
+            $r = Process::timeout(20)->run("ls -t " . escapeshellarg($dir) . " 2>/dev/null | head -1");
+            $ultimo = trim($r->output());
+            if ($ultimo !== '' && is_file($dir . '/' . $ultimo)) {
+                $rawIdadeMin = (int) round((time() - filemtime($dir . '/' . $ultimo)) / 60);
+            }
+
+            $ultCaptura = DB::table('jr_pauta_capturas')->max('created_at');
+            $capIdadeMin = $ultCaptura ? (int) Carbon::parse($ultCaptura)->diffInMinutes(Carbon::now()) : null;
+
+            // raw parado = webhook/instância morta (bad); raw vivo mas tabela parada
+            // = ingest travado (bad); os dois vivos = ok. Grupos têm horas quietas
+            // de madrugada => tolerância de 4h no raw e 6h na tabela.
+            $rawOk = $rawIdadeMin !== null && $rawIdadeMin <= 240;
+            $capOk = $capIdadeMin !== null && $capIdadeMin <= 360;
+            $nivel = ($rawOk && $capOk) ? 'ok' : 'bad';
+            $resumo = sprintf(
+                'raw webhook: %s · ingest (jr_pauta_capturas): %s',
+                $rawIdadeMin === null ? 'NUNCA' : "há {$rawIdadeMin} min",
+                $capIdadeMin === null ? 'NUNCA' : "há {$capIdadeMin} min"
+            );
+            if (! $rawOk) {
+                $resumo .= ' — CAPTURA PARADA (webhook/instância)';
+            } elseif (! $capOk) {
+                $resumo .= ' — INGEST PARADO (raw chega, tabela não anda)';
+            }
+            $rows[] = ['raw_min' => $rawIdadeMin, 'tabela_min' => $capIdadeMin];
+
+            return ['nivel' => $nivel, 'resumo' => $resumo, 'rows' => $rows];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: ' . $e->getMessage(), 'rows' => []];
+        }
+    }
+
+    /**
+     * v1 — RADAR CÍVICO: frescor das 4 fontes + fila de scoring do DOM (atos sem
+     * score na janela forward). Fim de semana/segunda cedo relaxa o limiar (as
+     * fontes publicam em dia útil).
+     */
+    private function civico(): array
+    {
+        // [tabela, limiar_horas em dia útil]
+        $fontes = [
+            'dom' => ['jr_dom_atos', 8],
+            'camara' => ['jr_camara_proposicoes', 48],
+            'mpsc' => ['jr_mpsc_extratos', 30],
+            'tce' => ['jr_tce_decisoes', 30],
+        ];
+        $agora = Carbon::now();
+        // sáb/dom/madrugada de segunda: nada publica => +48h de tolerância
+        $folga = ($agora->isWeekend() || ($agora->isMonday() && $agora->hour < 12)) ? 48 : 0;
+
+        $rows = [];
+        $ruins = 0;
+        try {
+            foreach ($fontes as $nome => [$tabela, $limiar]) {
+                $ult = DB::table($tabela)->max('created_at');
+                $idadeH = $ult ? round(Carbon::parse($ult)->diffInMinutes($agora) / 60, 1) : null;
+                $ok = $idadeH !== null && $idadeH <= ($limiar + $folga);
+                if (! $ok) {
+                    $ruins++;
+                }
+                $rows[] = ['fonte' => $nome, 'ultimo' => $ult, 'idade_h' => $idadeH, 'limiar_h' => $limiar + $folga, 'nivel' => $ok ? 'ok' : 'bad'];
+            }
+
+            // fila de scoring DOM (janela forward de 7d — excedente morre sem score)
+            $filaHoje = DB::table('jr_dom_atos')->whereNull('score_pauta')
+                ->whereDate('data_ato', $agora->toDateString())->count();
+            $fila7d = DB::table('jr_dom_atos')->whereNull('score_pauta')
+                ->where('created_at', '>=', $agora->copy()->subDays(7))->count();
+            $nivelFila = $fila7d < 1000 ? 'ok' : ($fila7d < 2500 ? 'warn' : 'bad');
+            if ($nivelFila === 'bad') {
+                $ruins++;
+            }
+            $rows[] = ['fonte' => 'fila-scoring-dom', 'ultimo' => "hoje={$filaHoje} · 7d={$fila7d}", 'idade_h' => null, 'limiar_h' => null, 'nivel' => $nivelFila];
+
+            $nivel = $ruins === 0 ? ($nivelFila === 'warn' ? 'warn' : 'ok') : 'bad';
+
+            return [
+                'nivel' => $nivel,
+                'resumo' => $ruins === 0
+                    ? "4 fontes frescas · fila scoring DOM: {$filaHoje} hoje / {$fila7d} na janela 7d"
+                    : "{$ruins} problema(s) — ver tabela · fila DOM 7d={$fila7d}",
+                'rows' => $rows,
+            ];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: ' . $e->getMessage(), 'rows' => []];
+        }
+    }
+
+    /**
+     * v1 — sessão claude-cli viva? O scoring cívico inteiro (Sonnet via claude-cli)
+     * para em silêncio se o login Max expira. Ping barato de 1 turno.
+     */
+    private function claudeCli(): array
+    {
+        try {
+            $t0 = microtime(true);
+            $r = Process::timeout(90)->run([
+                'claude', '-p', 'Responda somente: pong',
+                '--model', (string) config('dom.scoring.modelo', 'claude-sonnet-4-6'),
+                '--output-format', 'json',
+                '--max-turns', '1',
+            ]);
+            $ms = (int) ((microtime(true) - $t0) * 1000);
+            $json = json_decode(trim($r->output()), true);
+            $vivo = $r->successful() && is_array($json) && ! ($json['is_error'] ?? false) && ($json['result'] ?? '') !== '';
+
+            return [
+                'nivel' => $vivo ? 'ok' : 'bad',
+                'resumo' => $vivo
+                    ? "sessão viva ({$ms} ms)"
+                    : 'SESSÃO MORTA/EXPIRADA — scoring cívico parado (exit ' . $r->exitCode() . ': ' . mb_substr(trim($r->errorOutput() ?: $r->output()), 0, 160) . ')',
+                'rows' => [],
+            ];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'bad', 'resumo' => 'ping falhou: ' . $e->getMessage(), 'rows' => []];
+        }
+    }
+
     private function cor(string $nivel): string
     {
         return ['ok' => '#3fb950', 'warn' => '#e3b341', 'bad' => '#f85149'][$nivel] ?? '#9aa3b2';
@@ -256,6 +389,22 @@ class JrWatchdog extends Command
         }
         $secoes .= $this->bloco($dot($c['nivel']).' Serviços', $c['resumo'], '<table><tr><th>unit</th><th>estado</th></tr>'.$linhas.'</table>');
 
+        // captura whatsapp (v1 — mede na fonte, não no downstream)
+        $c = $checks['whatsapp'];
+        $secoes .= $this->bloco($dot($c['nivel']).' Captura WhatsApp (raw + ingest)', $c['resumo'], '');
+
+        // radar cívico (v1)
+        $c = $checks['civico'];
+        $linhas = '';
+        foreach ($c['rows'] as $r) {
+            $linhas .= '<tr><td>'.$dot($r['nivel']).' '.htmlspecialchars($r['fonte']).'</td><td>'.htmlspecialchars((string) $r['ultimo']).'</td><td style="text-align:right">'.($r['idade_h'] ?? '-').'h</td><td style="text-align:right">'.($r['limiar_h'] ?? '-').'h</td></tr>';
+        }
+        $secoes .= $this->bloco($dot($c['nivel']).' Radar Cívico (fontes + fila scoring)', $c['resumo'], '<table><tr><th>fonte</th><th>último item</th><th>idade</th><th>limiar</th></tr>'.$linhas.'</table>');
+
+        // sessão claude-cli (v1)
+        $c = $checks['claude'];
+        $secoes .= $this->bloco($dot($c['nivel']).' Sessão claude-cli (scoring cívico)', $c['resumo'], '');
+
         // pipeline + juiz (só resumo)
         $secoes .= $this->bloco($dot($checks['pipeline']['nivel']).' Pipeline 24h', $checks['pipeline']['resumo'], '');
         $secoes .= $this->bloco($dot($checks['juiz']['nivel']).' Juiz', $checks['juiz']['resumo'], '');
@@ -281,7 +430,7 @@ class JrWatchdog extends Command
     private function renderMd(array $checks, Carbon $agora): string
     {
         $m = "# WATCHDOG — estado (v0, read-only)\n\nGerado: ".$agora->format('Y-m-d H:i')." UTC\n\n";
-        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz'] as $k => $nome) {
+        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli'] as $k => $nome) {
             $m .= "## {$nome}\n- **[".strtoupper($checks[$k]['nivel'])."]** ".$checks[$k]['resumo']."\n\n";
         }
         $m .= "_Não notifica e não muta nada. Dashboard: public/health.html_\n";

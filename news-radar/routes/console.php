@@ -175,3 +175,13 @@ Schedule::command('jr:tce-score')
 Schedule::command('jrcivico:alertar')
     ->everyFiveMinutes()
     ->withoutOverlapping(600);
+
+// ── WATCHDOG v1 — vigia READ-ONLY (02/07/2026) ──
+// Regenera public/health.html (página PASSIVA, sem push — Lorran NÃO quer
+// notificação de saúde): lint de cron, frescor feed/whatsapp/instagram, captura
+// WhatsApp medida NA FONTE (raw do webhook + jr_pauta_capturas), serviços,
+// Radar Cívico (4 fontes + fila de scoring DOM) e sessão claude-cli (ping).
+// */15 na grade /5 do timer; offset :00 não conflita (é leve e read-only).
+Schedule::command('jrlink:watchdog')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(600);
