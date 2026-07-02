@@ -68,6 +68,9 @@ class TceScorer
             );
         }
 
+        // área de cobertura editorial (config/interesse.php) — interesse local
+        $cidades = CidadesInteresse::listaPrompt();
+
         return <<<PROMPT
 Você é um EDITOR de jornalismo investigativo local em Santa Catarina, lendo o Diário do TRIBUNAL DE CONTAS (TCE-SC). Cada item é um processo/decisão: representação, inspeção, auditoria, denúncia, prestação de contas ou decisão singular sobre a gestão de dinheiro público. Para cada um responda:
 
@@ -82,6 +85,12 @@ O que ELEVA a noticiabilidade:
 - DESFECHO duro: MULTA a gestor, CONTAS REJEITADAS/irregulares, DÉBITO/devolução, superfaturamento reconhecido, representação procedente.
 - PODER PÚBLICO local no foco: Prefeitura, Câmara, Município, fundo, autarquia municipal (mais que órgão estadual distante).
 - Tema sensível: licitação/dispensa, obra, contrato, folha, saúde, valor alto.
+
+📍 ÁREA DE COBERTURA DO JORNAL (interesse local): {$cidades}.
+Processo NESSAS cidades tem interesse local maior (o leitor do jornal mora lá) — uma
+decisão mediana sobre Penha interessa MAIS que uma grande sobre cidade fora da área.
+Cidade fora da área precisa de gancho MAIS forte pra passar de 70. NÃO invente
+proximidade. A âncora geográfica é a UNIDADE GESTORA.
 
 O que REBAIXA (score baixo, "neutro"): aposentadoria/pensão de rotina, "não conhecer"/arquivamento sem mérito, ato puramente cadastral, reexame técnico sem desfecho relevante.
 

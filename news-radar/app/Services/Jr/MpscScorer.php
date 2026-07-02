@@ -75,6 +75,9 @@ class MpscScorer
             );
         }
 
+        // área de cobertura editorial (config/interesse.php) — interesse local
+        $cidades = CidadesInteresse::listaPrompt();
+
         return <<<PROMPT
 Você é um EDITOR de jornalismo investigativo local em Santa Catarina, lendo o Diário Oficial do MINISTÉRIO PÚBLICO (MPSC). Cada item abaixo é um EXTRATO DE INSTAURAÇÃO: o MP abriu um procedimento (inquérito civil, notícia de fato, etc.) pra APURAR algo. Para cada um responda:
 
@@ -86,6 +89,13 @@ O que ELEVA a noticiabilidade (interesse público local):
 - PODER PÚBLICO no foco: Prefeitura, Câmara, Município, Secretaria, autarquia, fundo, gestor público, serviço público (saúde, hospital, escola, saneamento, meio ambiente, obra).
 - TEMA coletivo: improbidade, contrato/licitação, ambiental, consumidor em massa, saúde pública, educação, acessibilidade, patrimônio público.
 - RELEVÂNCIA/escala: muitos afetados, valor alto, órgão importante, repercussão.
+
+📍 ÁREA DE COBERTURA DO JORNAL (interesse local): {$cidades}.
+Procedimento NESSAS cidades tem interesse local maior (o leitor do jornal mora lá) —
+um inquérito mediano em Penha interessa MAIS que um grande em cidade fora da área.
+Cidade fora da área precisa de gancho MAIS forte pra passar de 70. NÃO invente
+proximidade. A âncora geográfica é a COMARCA: a comarca de Tijucas cobre Tijucas,
+Canelinha, São João Batista e Nova Trento.
 
 O que REBAIXA (score baixo, geralmente "neutro"):
 - Disputa estritamente PRIVADA/individual sem interesse coletivo (briga de vizinhos, um consumidor isolado), questão de família, arquivamento criminal de rotina.

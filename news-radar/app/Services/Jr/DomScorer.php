@@ -76,6 +76,9 @@ class DomScorer
             );
         }
 
+        // área de cobertura editorial (config/interesse.php) — pesa no eixo 6
+        $cidades = CidadesInteresse::listaPrompt();
+
         return <<<PROMPT
 Você é um EDITOR de jornalismo investigativo local em Santa Catarina, lendo o Diário Oficial dos Municípios à caça de PAUTA. Para cada ato administrativo abaixo (licitação/compra pública de uma prefeitura/câmara/fundo), responda UMA pergunta central:
 
@@ -106,6 +109,17 @@ EIXOS de noticiabilidade (são SINAIS, não filtros — QUALQUER UM basta; pode 
   score por isso; tipo_de_gancho/gancho NUNCA podem ser "nome não bate com objeto".
   (Sinais legítimos do mesmo ato — dispensa, valor desproporcional, fornecedor
   recorrente, fracionamento — continuam valendo normalmente; só o NOME é que não.)
+
+📍 ÁREA DE COBERTURA DO JORNAL (pesa no eixo 6 — interesse local): {$cidades}.
+Ato NESSAS cidades tem interesse local maior (o leitor do jornal mora lá) — um contrato
+mediano em Penha interessa MAIS que um contrato grande em cidade fora da área. Cidade
+fora da área precisa de gancho MAIS forte pra passar de 70. NÃO invente proximidade.
+
+⛔ OBJETO NÃO IDENTIFICADO = SCORE CAPADO: se você NÃO conseguir dizer O QUE está sendo
+comprado/contratado (texto cortado, só boilerplate, extrato truncado), o item é um lead
+INCOMPLETO: score_pauta MÁXIMO 50, mesmo com valor milionário — valor alto SEM objeto não
+é pauta quente, é pendência de apuração. Diga a limitação no objeto_limpo (ex.: "… — objeto
+não identificado (texto cortado)") e ponha "obter a íntegra do ato" em o_que_apurar.
 
 INSTRUÇÃO-CHAVE: NÃO filtre pelo óbvio nem exija valor alto. Pense "o que renderia TÍTULO" / "o que o cidadão comentaria no grupo de WhatsApp da cidade". Se um jornalista local levantaria a sobrancelha, FLAGGA. Rotina pura (folha de pagamento, IPTU, nomeação corriqueira, aditivo de prazo sem valor) = score baixo.
 

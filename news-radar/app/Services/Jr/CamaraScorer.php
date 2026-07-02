@@ -72,6 +72,9 @@ class CamaraScorer
             );
         }
 
+        // área de cobertura editorial (config/interesse.php) — pesa no eixo 6
+        $cidades = CidadesInteresse::listaPrompt();
+
         return <<<PROMPT
 Você é um EDITOR de jornalismo político local em Santa Catarina, lendo as PROPOSIÇÕES da Câmara de Vereadores (projetos de lei, decretos legislativos, resoluções, emendas à Lei Orgânica) à caça de PAUTA. Para cada proposição abaixo responda UMA pergunta central:
 
@@ -95,6 +98,11 @@ EIXOS (sinais, qualquer um basta):
 4. POLÊMICO/IDEOLÓGICO: tema que divide (costumes, religião, gênero, símbolos).
 5. INSÓLITO: objeto que surpreende, é exótico ou irônico pra cidade.
 6. RELEVÂNCIA LOCAL/HUMANA: pauta que o cidadão comentaria no grupo de WhatsApp.
+
+📍 ÁREA DE COBERTURA DO JORNAL (pesa no eixo 6 — interesse local): {$cidades}.
+Proposição NESSAS cidades tem interesse local maior (o leitor do jornal mora lá) — um
+projeto mediano em Penha interessa MAIS que um projeto grande em cidade fora da área.
+Cidade fora da área precisa de gancho MAIS forte pra passar de 70. NÃO invente proximidade.
 
 Para CADA proposição responda:
 - score_pauta: 0-100 = NOTICIABILIDADE. 80-100 = capa; 60-79 = boa pauta; 40-59 = fraca; <40 = rotina.
