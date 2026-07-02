@@ -3,6 +3,7 @@
 namespace App\Services\Jr;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use OpenAI\Laravel\Facades\OpenAI;
 
@@ -482,7 +483,11 @@ PROMPT;
         ]);
 
         if (! $r->successful()) {
-            throw new \RuntimeException('claude-cli exit ' . $r->exitCode() . ': ' . mb_substr($r->errorOutput(), 0, 300));
+            // B4 (02/07): o claude-cli imprime a causa (limite de uso, auth
+            // expirada…) no STDOUT quando --output-format json — o stderr vem
+            // vazio e o blackout de 30/06 ficou indiagnosticável. Loga os dois.
+            $causa = trim($r->errorOutput()) !== '' ? $r->errorOutput() : $r->output();
+            throw new \RuntimeException('claude-cli exit ' . $r->exitCode() . ': ' . mb_substr(trim($causa), 0, 300));
         }
 
         $json = json_decode(trim($r->output()), true);
@@ -555,7 +560,15 @@ PROMPT;
 
         $faltando = array_diff($idsEsperados, array_keys($out));
         if ($faltando) {
-            throw new \RuntimeException('Juiz não devolveu os ids: ' . implode(',', $faltando));
+            // B4 (02/07): tolerância PARCIAL — antes 1 id omitido descartava o
+            // lote inteiro (23 vereditos bons fora, e o retry com prompt idêntico
+            // falhava igual). Agora: se veio ALGO, devolve o parcial e loga os
+            // faltantes (eles voltam à fila no próximo ciclo — o comando só
+            // seleciona não-julgados). Lote 100% vazio continua sendo erro.
+            if (empty($out)) {
+                throw new \RuntimeException('Juiz não devolveu os ids: ' . implode(',', $faltando));
+            }
+            Log::warning('[JuizLlm] veredito parcial — ids omitidos pelo modelo (voltam à fila): ' . implode(',', $faltando));
         }
 
         return $out;

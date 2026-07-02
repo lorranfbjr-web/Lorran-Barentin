@@ -440,6 +440,11 @@ class JrLinkJuiz extends Command
             }
 
             foreach ($chunk as $r) {
+                // B4 (02/07): veredito parcial — item omitido pelo modelo fica
+                // não-julgado e volta na fila do próximo ciclo.
+                if (! isset($vereditos[(int) $r->id])) {
+                    continue;
+                }
                 $this->aplicarVeredito($r, $vereditos[(int) $r->id], $juiz, $promptVersao, $cfg, $velhoPorId[(int) $r->id] ?? null);
                 $julgados++;
             }
