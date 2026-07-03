@@ -30,3 +30,8 @@ Thumbs.db
 # Radar Cívico — venv dedicado de parsing de PDF (PyMuPDF). Recriar com:
 #   python3 -m venv scripts/pdf-venv && scripts/pdf-venv/bin/pip install pymupdf
 /scripts/pdf-venv
+
+# Artefatos de runtime servidos em /public (gerados pelos jobs, não são código)
+/public/_tmp_jrlink
+/public/propostas
+/public/jr-rankings.json
