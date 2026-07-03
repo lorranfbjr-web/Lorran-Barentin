@@ -25,48 +25,88 @@ class RadarCivicoController extends Controller
 {
     private const CINCA_ORGAO = 'Interfederativo Santa Catarina';
 
-    /** Teto por fonte (mantém a página leve). */
-    private const LIMITE = 400;
+    /** Teto de itens por PÁGINA (aceite: HTML < 300KB no 390px). Página com
+     *  2 fontes (ex.: /justica) divide o teto entre elas. */
+    private const LIMITE_PAGINA = 180;
 
+    /**
+     * GOAL SIMPLIFICAR (03/07): o hub-abas com iframes FALHOU no uso real
+     * (mobile travava no iframe da vitrine). Páginas independentes, leves,
+     * server-rendered, SEM iframe — reusando os MESMOS renderizadores/queries.
+     */
+    private const PAGINAS = [
+        'dom' => ['fontes' => ['dom'], 'titulo' => '🧾 Diário Oficial — DOM/SC', 'sub' => 'licitações, compras e atos municipais'],
+        'camaras' => ['fontes' => ['camara'], 'titulo' => '📜 Câmaras de SC', 'sub' => 'proposições das câmaras municipais (SAPL)'],
+        'justica' => ['fontes' => ['mpsc', 'tce'], 'titulo' => '⚖️ Justiça — MPSC + TCE', 'sub' => 'inquéritos do MPSC e decisões/multas do TCE-SC'],
+        'prefeituras' => ['fontes' => ['prefeitura'], 'titulo' => '📣 Prefeituras', 'sub' => 'releases oficiais — versão de uma parte, checar sempre'],
+    ];
+
+    /** fonte → página nova (redirects de links antigos + deep-links de alerta). */
+    public const FONTE_PAGINA = [
+        'dom' => '/dom', 'camara' => '/camaras', 'mpsc' => '/justica',
+        'tce' => '/justica', 'prefeitura' => '/prefeituras',
+    ];
+
+    /**
+     * /radar-civico agora é um ÍNDICE minimalista: 5 cartões-link (um por
+     * página) com contador e "último item há X min" + link pra /mesa.
+     * Links antigos do hub NÃO quebram: ?fonte= e ?painel= redirecionam.
+     */
     public function index()
     {
-        $itens = array_merge(
-            $this->dom(),
-            $this->camara(),
-            $this->mpsc(),
-            $this->tce(),
-            $this->prefeitura(),
-        );
+        $fonte = (string) request()->query('fonte', '');
+        if (isset(self::FONTE_PAGINA[$fonte])) {
+            return redirect(self::FONTE_PAGINA[$fonte], 308);
+        }
+        $painel = (string) request()->query('painel', '');
+        if ($painel === 'noticias') {
+            return redirect('/radar', 308);
+        }
+        if ($painel === 'mesa') {
+            return redirect('/mesa', 308);
+        }
 
-        // dedup cross-fonte (best-effort): mesma fonte+url já é única; aqui
-        // colapsa repetição óbvia por assinatura município+objeto curto.
+        return response($this->indiceHtml())
+            ->header('Content-Type', 'text/html; charset=UTF-8');
+    }
+
+    /** Página independente por fonte: /dom · /camaras · /justica · /prefeituras. */
+    public function pagina(string $slug)
+    {
+        $cfg = self::PAGINAS[$slug] ?? null;
+        abort_unless($cfg, 404);
+
+        $limite = intdiv(self::LIMITE_PAGINA, count($cfg['fontes']));
+        $itens = [];
+        foreach ($cfg['fontes'] as $f) {
+            $itens = array_merge($itens, $this->{$f === 'camara' ? 'camara' : $f}($limite));
+        }
+
         $itens = $this->dedup($itens);
-
-        // ordena por score de EXIBIÇÃO (tier + decay + cap de vago); o score
-        // cru continua no card e nos consumidores (Mesa/alertas).
         usort($itens, fn ($a, $b) => $b['score_x'] <=> $a['score_x']);
+
+        // corte FINAL por página (coletar() devolve limite+150 pelas pernas
+        // frescos/interesse): fresco SEMPRE sobrevive primeiro, arquivo completa.
+        if (count($itens) > self::LIMITE_PAGINA) {
+            $frescos = array_values(array_filter($itens, fn ($i) => $i['fresco']));
+            $velhos = array_values(array_filter($itens, fn ($i) => ! $i['fresco']));
+            $itens = array_slice(array_merge($frescos, $velhos), 0, self::LIMITE_PAGINA);
+            usort($itens, fn ($a, $b) => $b['score_x'] <=> $a['score_x']);
+        }
 
         $stats = $this->stats($itens);
         $json = json_encode($itens, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        // pré-seleção via URL: /radar-civico?cidades=interesse (favoritável)
+        // pré-seleção via URL (?cidades=interesse continua valendo por página)
         $intIni = request()->query('cidades') === 'interesse' ? '1' : '';
-        // BLOCO 4 (02/07): aba única — ?fonte=dom|camara|mpsc|tce|prefeitura
-        // pré-seleciona a fonte; ?painel=noticias|mesa abre o painel embutido.
-        $fonteIni = (string) request()->query('fonte', '');
-        $fonteIni = array_key_exists($fonteIni, self::TABELAS) ? $fonteIni : '';
-        $painelIni = in_array(request()->query('painel'), ['noticias', 'mesa'], true)
-            ? (string) request()->query('painel') : '';
 
-        // já-na-fila: marca as estrelas que já estão na Mesa de Pauta (se a tabela
-        // existir — a Mesa é aditiva e pode ainda não ter sido migrada).
         $selecionados = [];
         if (DB::getSchemaBuilder()->hasTable('jr_pauta_fila')) {
             $selecionados = DB::table('jr_pauta_fila')->pluck('ato_ref')->all();
         }
         $selJson = json_encode($selecionados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return response($this->html($json, $stats, $selJson, $intIni, $fonteIni, $painelIni))
+        return response($this->html($json, $stats, $selJson, $intIni, $cfg['fontes'], $cfg['titulo'], $cfg['sub']))
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -108,13 +148,13 @@ class RadarCivicoController extends Controller
 
     // ───────────────────────── fontes → forma comum ─────────────────────────
 
-    private function dom(): array
+    private function dom(int $limite): array
     {
         // união 3-pernas (frescos ∪ interesse ∪ top) — item de ontem/hoje e de
         // cidade de interesse SEMPRE chega ao JSON (fix do bug "Ontem = 0").
         $rows = RankingExibicao::coletar('jr_dom_atos',
             fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
-            self::LIMITE);
+            $limite);
 
         return $rows->map(fn ($a) => $this->base('dom', $a) + [
             'orgao' => $a->orgao,
@@ -129,7 +169,7 @@ class RadarCivicoController extends Controller
         ])->all();
     }
 
-    private function camara(): array
+    private function camara(int $limite): array
     {
         // Piso de recência: feeds mortos (SAPL parado — Canoinhas 2024, Tijucas
         // 2022, São José 2020) não são pauta atual; só proposição dos últimos N
@@ -139,7 +179,7 @@ class RadarCivicoController extends Controller
         $rows = RankingExibicao::coletar('jr_camara_proposicoes',
             fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)
                 ->whereNotNull('data_pub')->where('data_pub', '>=', $piso),
-            self::LIMITE);
+            $limite);
 
         return $rows->map(fn ($a) => $this->base('camara', $a) + [
             'orgao' => $a->orgao,
@@ -152,7 +192,7 @@ class RadarCivicoController extends Controller
         ])->all();
     }
 
-    private function mpsc(): array
+    private function mpsc(int $limite): array
     {
         $rotulos = [
             'inquerito_civil' => 'Inquérito Civil', 'noticia_de_fato' => 'Notícia de Fato',
@@ -161,7 +201,7 @@ class RadarCivicoController extends Controller
         ];
         $rows = RankingExibicao::coletar('jr_mpsc_extratos',
             fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
-            self::LIMITE);
+            $limite);
 
         return $rows->map(fn ($a) => $this->base('mpsc', $a) + [
             'orgao' => $a->orgao,
@@ -174,11 +214,11 @@ class RadarCivicoController extends Controller
         ])->all();
     }
 
-    private function tce(): array
+    private function tce(int $limite): array
     {
         $rows = RankingExibicao::coletar('jr_tce_decisoes',
             fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
-            self::LIMITE);
+            $limite);
 
         return $rows->map(fn ($a) => $this->base('tce', $a) + [
             'orgao' => $a->unidade_gestora,
@@ -192,11 +232,11 @@ class RadarCivicoController extends Controller
     }
 
     /** BLOCO 3/4 (02/07): notícia institucional de prefeitura — release oficial (🟢). */
-    private function prefeitura(): array
+    private function prefeitura(int $limite): array
     {
         $rows = RankingExibicao::coletar('jr_prefeitura_noticias',
             fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
-            self::LIMITE);
+            $limite);
 
         return $rows->map(fn ($a) => $this->base('prefeitura', $a) + [
             'orgao' => $a->orgao,
@@ -218,12 +258,18 @@ class RadarCivicoController extends Controller
         // pegadinha do 'cinca' documentada abaixo).
         $rx = RankingExibicao::avaliar((int) $a->score_pauta, $a->municipio, $a->data_pub, $a->objeto_limpo);
 
+        // GOAL SIMPLIFICAR (03/07): campos longos APARADOS pro JSON da página
+        // ficar leve (aceite < 300KB) — a íntegra continua no botão "ler a
+        // íntegra do ato" (lazy) e o dado cru intacto no banco.
+        $apurar = array_slice((array) json_decode($a->o_que_apurar ?: '[]', true), 0, 3);
+        $apurar = array_map(fn ($x) => mb_substr((string) $x, 0, 140), $apurar);
+
         return [
             'source' => $source,
             'ato_ref' => $source . ':' . $a->id,   // chave estável p/ a Mesa de Pauta (★)
             'municipio' => $a->municipio,
             'regiao' => DomGeografia::regiao($a->municipio),
-            'objeto' => $a->objeto_limpo ?: null,
+            'objeto' => $a->objeto_limpo ? mb_substr($a->objeto_limpo, 0, 240) : null,
             'data_pub' => $a->data_pub,
             'url_fonte' => $a->url_fonte,
             'score' => (int) $a->score_pauta,
@@ -235,11 +281,11 @@ class RadarCivicoController extends Controller
             'fresco' => $rx['fresco'],
             'score_x' => $rx['score_x'],
             'tipo' => $a->tipo,
-            'gancho_curto' => $a->gancho_curto,
-            'gancho' => $a->gancho,
+            'gancho_curto' => $a->gancho_curto ? mb_substr($a->gancho_curto, 0, 120) : null,
+            'gancho' => $a->gancho ? mb_substr($a->gancho, 0, 220) : null,
             'tipo_gancho' => $a->tipo_de_gancho,
-            'apurar' => json_decode($a->o_que_apurar ?: '[]', true),
-            'angulo' => $a->angulo_sugerido,
+            'apurar' => $apurar,
+            'angulo' => $a->angulo_sugerido ? mb_substr($a->angulo_sugerido, 0, 180) : null,
             // 'cinca' fica por conta de cada fonte (PHP `+` mantém a chave da
             // ESQUERDA; default aqui sobrescreveria o cinca=true do DOM).
         ];
@@ -283,15 +329,111 @@ class RadarCivicoController extends Controller
         return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca, 'interesse' => $interesse, 'anun' => $anun];
     }
 
-    private function html(string $json, array $s, string $selJson, string $intIni = '', string $fonteIni = '', string $painelIni = ''): string
+    /**
+     * ÍNDICE /radar-civico — 5 cartões-link grandes, zero JS pesado (só o
+     * reencaminhador de deep-link antigo #ato-…), mobile-first.
+     */
+    private function indiceHtml(): string
     {
         $gerado = Carbon::now()->format('d/m/Y H:i');
-        $p = $s['por'];
+
+        // contador + "último item há X min" por página (queries baratas)
+        $cards = [
+            ['href' => '/radar', 'emoji' => '📰', 'nome' => 'Notícias', 'desc' => 'vitrine dos portais (juiz)'] + $this->pulsoNoticias(),
+            ['href' => '/dom', 'emoji' => '🧾', 'nome' => 'Diário Oficial', 'desc' => 'licitações e atos (DOM/SC)'] + $this->pulso('jr_dom_atos'),
+            ['href' => '/camaras', 'emoji' => '📜', 'nome' => 'Câmaras', 'desc' => 'proposições municipais'] + $this->pulso('jr_camara_proposicoes'),
+            ['href' => '/justica', 'emoji' => '⚖️', 'nome' => 'Justiça', 'desc' => 'MPSC + TCE'] + $this->pulso('jr_mpsc_extratos', 'jr_tce_decisoes'),
+            ['href' => '/prefeituras', 'emoji' => '📣', 'nome' => 'Prefeituras', 'desc' => 'releases oficiais'] + $this->pulso('jr_prefeitura_noticias'),
+        ];
+
+        $lis = '';
+        foreach ($cards as $c) {
+            $ult = $c['ultimo'] !== null ? 'último há ' . $c['ultimo'] : 'sem itens';
+            $lis .= '<a class="c" href="' . $c['href'] . '"><span class="e">' . $c['emoji'] . '</span>'
+                . '<span class="t"><b>' . $c['nome'] . '</b><small>' . $c['desc'] . '</small></span>'
+                . '<span class="n">' . number_format($c['total'], 0, ',', '.') . '<small>' . $ult . '</small></span></a>' . "\n";
+        }
 
         return <<<HTML
 <!DOCTYPE html><html lang="pt-BR"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
 <title>Radar Cívico de SC</title>
+<style>
+:root{--navy:#0D2481;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--navy);color:#fff;padding:18px 16px}
+header h1{margin:0;font-size:20px;font-weight:800}header .sub{font-size:12px;opacity:.85;margin-top:3px}
+.wrap{max-width:560px;margin:0 auto;padding:14px}
+.c{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:10px;text-decoration:none;color:var(--ink)}
+.c:active{background:#eef1f8}
+.e{font-size:28px;flex:0 0 auto}
+.t{flex:1;min-width:0}.t b{font-size:16px;display:block}.t small{color:var(--muted);font-size:12px}
+.n{text-align:right;font-weight:800;font-size:18px;color:var(--navy)}.n small{display:block;font-weight:600;font-size:10.5px;color:var(--muted)}
+.mesa{display:block;text-align:center;background:var(--navy);color:#fff;font-weight:800;border-radius:14px;padding:15px;text-decoration:none;margin-top:14px}
+footer{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+</style></head><body>
+<header><h1>🛰️ Radar Cívico de SC</h1><div class="sub">Jornal Razão — uso editorial interno</div></header>
+<div class="wrap">
+{$lis}<a class="mesa" href="/mesa">📌 Mesa de Pauta ›</a>
+</div>
+<footer>gerado em {$gerado} · cada item é FATO público + lead pra apurar, nunca acusação</footer>
+<script>
+// deep-link antigo do hub (#ato-fonte-id) → página nova da fonte
+if(location.hash.indexOf("#ato-")===0){var m={dom:"/dom",camara:"/camaras",mpsc:"/justica",tce:"/justica",prefeitura:"/prefeituras"};
+var f=location.hash.split("-")[1];if(m[f])location.replace(m[f]+location.hash);}
+</script>
+</body></html>
+HTML;
+    }
+
+    /** contagem + idade do item mais novo (data de ingestão) de 1..n tabelas. */
+    private function pulso(string ...$tabelas): array
+    {
+        $total = 0;
+        $max = null;
+        foreach ($tabelas as $t) {
+            $total += (int) DB::table($t)->whereNotNull('score_pauta')->where('score_pauta', '>=', 40)->count();
+            $ult = DB::table($t)->max('created_at');
+            if ($ult && (! $max || $ult > $max)) {
+                $max = $ult;
+            }
+        }
+
+        return ['total' => $total, 'ultimo' => $max ? Carbon::parse($max)->locale('pt_BR')->diffForHumans(null, true, true) : null];
+    }
+
+    /** pulso da vitrine de notícias (jr_link_extracao, quentes 48h). */
+    private function pulsoNoticias(): array
+    {
+        $total = (int) DB::table('jr_link_extracao')
+            ->where('temperatura_juiz', 'quente')
+            ->where('created_at', '>=', Carbon::now()->subHours(48))
+            ->count();
+        $max = DB::table('jr_link_extracao')->max('created_at');
+
+        return ['total' => $total, 'ultimo' => $max ? Carbon::parse($max)->locale('pt_BR')->diffForHumans(null, true, true) : null];
+    }
+
+    private function html(string $json, array $s, string $selJson, string $intIni, array $fontes, string $titulo, string $sub): string
+    {
+        $gerado = Carbon::now()->format('d/m/Y H:i');
+        $p = $s['por'];
+
+        // filtro por fonte SÓ quando a página tem >1 fonte (ex.: /justica)
+        $srcsHtml = '';
+        if (count($fontes) > 1) {
+            $nomes = ['dom' => '🧾 DOM', 'camara' => '📜 Câmaras', 'mpsc' => '⚖️ MPSC', 'tce' => '💰 TCE', 'prefeitura' => '📣 Prefeituras'];
+            $srcsHtml = '<div class="srcs"><button type="button" class="sb on" data-src="">Todas <b>' . $s['total'] . '</b></button>';
+            foreach ($fontes as $f) {
+                $srcsHtml .= '<button type="button" class="sb" data-src="' . $f . '">' . ($nomes[$f] ?? $f) . ' <b>' . ($p[$f] ?? 0) . '</b></button>';
+            }
+            $srcsHtml .= '</div>';
+        }
+
+        return <<<HTML
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>{$titulo} · Radar Cívico JR</title>
 <style>
 :root{--navy:#0D2481;--red:#E63946;--green:#2D6A4F;--amber:#D4A373;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa;--card:#fff;
   --c-dom:#0D2481;--c-camara:#7c3aed;--c-mpsc:#b45309;--c-tce:#0f766e;--c-prefeitura:#166534}
@@ -322,6 +464,7 @@ header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12p
 .frec.vago{color:#7a5b12;background:#fdf6e1;border:1px solid #f0e0b0}
 .frec.anun{color:#1c1408;background:#fde68a;border:1px solid #f4b400}
 .ib.anun.on{background:#f4b400;color:#1c1408;border-color:#f4b400}
+.voltar{color:#fff;font-size:12px;text-decoration:none;opacity:.85;display:inline-block;margin-bottom:4px}
 .day-sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:10px 2px 0;padding-top:7px;border-top:1px dashed var(--line)}
 .day-sep:first-child{border-top:none;padding-top:0;margin-top:0}
 main{display:flex;flex-direction:column;gap:9px}
@@ -336,12 +479,6 @@ main{display:flex;flex-direction:column;gap:9px}
 .l1{line-height:1.25;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .src-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:999px;color:#fff}
 .src-dom{background:var(--c-dom)}.src-camara{background:var(--c-camara)}.src-mpsc{background:var(--c-mpsc)}.src-tce{background:var(--c-tce)}.src-prefeitura{background:var(--c-prefeitura)}
-.panes{display:flex;gap:6px;flex-wrap:wrap;padding:9px 16px;background:var(--navy)}
-.pb{font:inherit;font-size:12.5px;font-weight:800;padding:7px 12px;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:transparent;color:#fff;cursor:pointer;text-decoration:none}
-.pb.on{background:#fff;color:var(--navy);border-color:#fff}
-.pane-frame{display:none;width:100%;border:none;min-height:calc(100vh - 130px)}
-.pane-frame.on{display:block}
-body.painel-aberto .disc,body.painel-aberto .wrap,body.painel-aberto footer{display:none}
 .muni{font-weight:800;font-size:15px}.reg{font-weight:600;color:var(--muted);font-size:12px}
 .lens-dot{font-size:13px}
 .l2{font-size:13.5px;margin:4px 0;color:#222}
@@ -374,26 +511,11 @@ summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}deta
 .empty{text-align:center;color:var(--muted);padding:36px 16px}
 footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
 </style></head><body>
-<header><a class="mesa-link" href="/mesa">📌 Mesa de Pauta ›</a><h1>🛰️ Radar Cívico de SC — HUB</h1>
-<div class="sub">Notícias · DOM · Câmaras · MPSC · TCE · Prefeituras — a aba única do JR</div></header>
-<nav class="panes">
-  <button type="button" class="pb on" data-pane="">🛰️ Radar Cívico</button>
-  <button type="button" class="pb" data-pane="noticias">📰 Notícias</button>
-  <button type="button" class="pb" data-pane="mesa">📌 Mesa</button>
-</nav>
-<iframe class="pane-frame" id="pane-noticias" data-src="/radar?embed=1" title="Radar de Notícias"></iframe>
-<iframe class="pane-frame" id="pane-mesa" data-src="/mesa" title="Mesa de Pauta"></iframe>
+<header><a class="mesa-link" href="/mesa">📌 Mesa de Pauta ›</a><a class="voltar" href="/radar-civico">‹ Radar Cívico</a><h1>{$titulo}</h1>
+<div class="sub">{$sub}</div></header>
 <div class="disc">⚖️ Cada item é um <b>FATO</b> público e um <b>LEAD pra apurar</b> — não uma acusação. Nota de prefeitura = versão oficial.</div>
 <div class="wrap">
-<div class="srcs">
-  <button type="button" class="sb on" data-src="">Todas <b>{$s['total']}</b></button>
-  <button type="button" class="sb" data-src="dom">🧾 DOM <b>{$p['dom']}</b></button>
-  <button type="button" class="sb" data-src="camara">📜 Câmaras <b>{$p['camara']}</b></button>
-  <button type="button" class="sb" data-src="mpsc">⚖️ MPSC <b>{$p['mpsc']}</b></button>
-  <button type="button" class="sb" data-src="tce">💰 TCE <b>{$p['tce']}</b></button>
-  <button type="button" class="sb" data-src="prefeitura">📣 Prefeituras <b>{$p['prefeitura']}</b></button>
-</div>
-<div class="lens">
+{$srcsHtml}<div class="lens">
   <button type="button" class="lb on" data-tipo="">Tudo</button>
   <button type="button" class="lb" data-tipo="fiscalizacao">🔴 Fiscalização <b>{$s['fisc']}</b></button>
   <button type="button" class="lb" data-tipo="servico">🟢 Serviço <b>{$s['serv']}</b></button>
@@ -418,7 +540,7 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <div class="muted small">Une as fontes do radar cívico · a página enche sozinha conforme cada faro termina.</div>
 <main id="lista"></main>
 </div>
-<footer>Radar Cívico de SC · gerado em {$gerado} · fontes: DOM/SC (FECAM/CIGA) · Câmaras (SAPL) · MPSC · TCE-SC · Jornal Razão — uso editorial interno</footer>
+<footer><a href="/radar-civico">‹ voltar ao Radar Cívico</a> · gerado em {$gerado} · Jornal Razão — uso editorial interno</footer>
 <script>
 const DADOS={$json};
 const SEL=new Set({$selJson});
@@ -433,19 +555,7 @@ const dayLabel=dp=>{if(!dp)return"sem data";if(dp===Y_HOJE)return"Hoje";if(dp===
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
-let srcSel="{$fonteIni}",tipoSel="",soCinca=false,soAnun=false,daySel="",intSel="{$intIni}";
-// BLOCO 4 — painéis embutidos (Notícias = vitrine com juiz/clusters intactos; Mesa = fila).
-// iframes carregam lazy (src só no 1º clique) pra não pesar o hub no celular.
-let paneSel="{$painelIni}";
-function showPane(p){
-  paneSel=p;
-  document.querySelectorAll(".pb").forEach(x=>x.classList.toggle("on",x.dataset.pane===p));
-  document.querySelectorAll(".pane-frame").forEach(f=>f.classList.remove("on"));
-  document.body.classList.toggle("painel-aberto",!!p);
-  if(p){const f=document.getElementById("pane-"+p);if(f){if(!f.src)f.src=f.dataset.src;f.classList.add("on");}}
-}
-document.querySelectorAll(".pb").forEach(b=>b.addEventListener("click",()=>showPane(b.dataset.pane)));
-if(paneSel)showPane(paneSel);
+let srcSel="",tipoSel="",soCinca=false,soAnun=false,daySel="",intSel="{$intIni}";
 function card(d){
   const apurar=(d.apurar||[]).map(b=>'<li>'+esc(b)+'</li>').join("");
   const meta=(d.meta||[]).map(m=>'<span class="pill">'+esc(m)+'</span>').join("");
@@ -528,8 +638,6 @@ document.querySelectorAll("#ints .ib[data-int]").forEach(b=>b.addEventListener("
 document.querySelector('#ints .ib[data-int="'+intSel+'"]').classList.add("on");
 // BLOCO 6 — toggle "só anunciantes" (independente do filtro de interesse)
 document.getElementById("banun").addEventListener("click",e=>{soAnun=!soAnun;e.currentTarget.classList.toggle("on",soAnun);render();});
-// pré-seleção de fonte via URL (?fonte=…): liga o botão certo
-if(srcSel){document.querySelectorAll(".sb").forEach(x=>x.classList.toggle("on",x.dataset.src===srcSel));}
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 // link pro card vindo do alerta do Telegram (#ato-<source>-<id>): rola, abre e pisca
 function jumpHash(){

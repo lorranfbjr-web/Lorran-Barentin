@@ -312,9 +312,12 @@ class JrCivicoAlertar extends Command
                 $ic = self::ICONE[$p['source']] ?? '•';
                 $oque = mb_substr(trim($p['objeto']), 0, 140);
                 $porque = mb_substr(trim($p['gancho']), 0, 160);
+                // GOAL SIMPLIFICAR (03/07): deep-link aponta pra PÁGINA da fonte
+                // (/dom, /justica…) — o hub-abas acabou; jumpHash vive em cada página.
+                $pagina = \App\Http\Controllers\RadarCivicoController::FONTE_PAGINA[$p['source']] ?? '/radar-civico';
                 $link = $p['url_fonte'] !== ''
                     ? $p['url_fonte']
-                    : ($base !== '' ? $base . '/radar-civico#ato-' . str_replace(':', '-', $p['ato_ref']) : '');
+                    : ($base !== '' ? $base . $pagina . '#ato-' . str_replace(':', '-', $p['ato_ref']) : '');
 
                 $linha = "*{$p['score']}* · {$ic} " . strtoupper($p['source']);
                 if ($oque !== '') {

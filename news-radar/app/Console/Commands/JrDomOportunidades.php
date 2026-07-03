@@ -209,11 +209,11 @@ class JrDomOportunidades extends Command
         $html = <<<STUB
 <!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<meta http-equiv="refresh" content="0;url=/radar-civico?fonte=dom">
-<title>Radar de Oportunidades → Hub</title></head>
+<meta http-equiv="refresh" content="0;url=/dom">
+<title>Radar de Oportunidades → /dom</title></head>
 <body style="font-family:sans-serif;padding:24px;text-align:center">
-<p>O Radar de Oportunidades agora vive no <a href="/radar-civico?fonte=dom"><b>Hub /radar-civico</b></a> (fonte 🧾 DOM).</p>
-<script>location.replace("/radar-civico?fonte=dom");</script></body></html>
+<p>O Radar de Oportunidades agora vive na página <a href="/dom"><b>/dom</b></a> (🧾 Diário Oficial).</p>
+<script>location.replace("/dom");</script></body></html>
 STUB;
 
         $caminho = public_path('oportunidades.html');

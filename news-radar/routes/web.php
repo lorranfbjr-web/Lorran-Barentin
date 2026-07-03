@@ -7,16 +7,10 @@ use Illuminate\Support\Facades\Route;
 // sem middleware). Só leitura; a escrita (POST /v1/jrlink/feedback) e o painel
 // (/v1/jrlink/radar) seguem protegidos pelo JrPanelKey em api.php. Declarada
 // ANTES do catch-all do SPA pra não ser engolida.
-// BLOCO 4 (02/07): a vitrine deixou de ser aba solta — vive DENTRO do hub
-// /radar-civico (painel 📰 Notícias, iframe ?embed=1). Link antigo redireciona;
-// pipeline de notícias (juiz/clusters/assuntos) 100% intacto.
-Route::get('/radar', function () {
-    if (request()->query('embed') === '1') {
-        return app(\App\Http\Controllers\JrVitrineController::class)->index(request());
-    }
-
-    return redirect('/radar-civico?painel=noticias', 308);
-});
+// GOAL SIMPLIFICAR (03/07): o hub-abas falhou no uso real (iframe travava no
+// celular) — /radar VOLTA a ser a página própria da vitrine, standalone.
+// ?embed=1 segue aceito (links antigos), renderiza a mesma vitrine.
+Route::get('/radar', [\App\Http\Controllers\JrVitrineController::class, 'index']);
 
 // Goal 3 — ferramenta de produção. Container (texto dos portais + links, sem
 // LLM) e reescrita unificada (LLM, manual). ATRÁS de JrPanelKey: expõe texto de
@@ -37,16 +31,20 @@ Route::middleware(\App\Http\Middleware\JrPanelKey::class)->group(function () {
 // jr_dom_atos ao vivo; /dom-busca consulta o Solr do DOM ao vivo). Subsistema
 // ISOLADO (não toca juiz/radar editorial). Antes do catch-all do SPA.
 Route::get('/dom-todos', [\App\Http\Controllers\DomController::class, 'todos']);
-// BLOCO 4 (02/07): /dom-radar virou atalho do hub (fonte DOM). /dom-todos e
-// /dom-busca seguem como ferramentas específicas (busca Solr ao vivo).
-Route::get('/dom-radar', fn () => redirect('/radar-civico?fonte=dom', 308));
+// GOAL SIMPLIFICAR (03/07): /dom-radar aponta pra página nova /dom.
+Route::get('/dom-radar', fn () => redirect('/dom', 308));
 Route::get('/dom-busca', [\App\Http\Controllers\DomController::class, 'busca']);
 // /oportunidades.html (estático) agora é um stub de redirect gerado pelo
 // jr:dom-oportunidades — ver JrDomOportunidades::renderizar.
 
-// RADAR CÍVICO DE SC — Fase 7: une DOM + Câmaras + MPSC + TCE num radar só
-// (filtro por fonte + dual-lens + busca). Server-rendered, lê as tabelas ao vivo.
+// RADAR CÍVICO DE SC — GOAL SIMPLIFICAR (03/07): páginas INDEPENDENTES por
+// fonte (leves, server-rendered, sem iframe) + /radar-civico como ÍNDICE
+// minimalista. Links antigos (?fonte=, ?painel=) redirecionam no index().
 Route::get('/radar-civico', [\App\Http\Controllers\RadarCivicoController::class, 'index']);
+Route::get('/dom', [\App\Http\Controllers\RadarCivicoController::class, 'pagina'])->defaults('slug', 'dom');
+Route::get('/camaras', [\App\Http\Controllers\RadarCivicoController::class, 'pagina'])->defaults('slug', 'camaras');
+Route::get('/justica', [\App\Http\Controllers\RadarCivicoController::class, 'pagina'])->defaults('slug', 'justica');
+Route::get('/prefeituras', [\App\Http\Controllers\RadarCivicoController::class, 'pagina'])->defaults('slug', 'prefeituras');
 // Fase 2 — íntegra do ato (lazy, read-only): texto_bruto do trecho daquele assunto.
 Route::get('/radar-civico/ato/{source}/{id}', [\App\Http\Controllers\RadarCivicoController::class, 'ato'])
     ->where('source', 'dom|camara|mpsc|tce|prefeitura')->where('id', '\d+');
