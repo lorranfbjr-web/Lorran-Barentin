@@ -20,6 +20,7 @@ class RascunhoCivico
         'camara' => 'jr_camara_proposicoes',
         'mpsc' => 'jr_mpsc_extratos',
         'tce' => 'jr_tce_decisoes',
+        'prefeitura' => 'jr_prefeitura_noticias',
     ];
 
     private const FONTE_NOME = [
@@ -27,6 +28,7 @@ class RascunhoCivico
         'camara' => 'Câmara Municipal (portal SAPL)',
         'mpsc' => 'Ministério Público de SC (DOE-MPSC)',
         'tce' => 'Tribunal de Contas de SC (DOTC-e)',
+        'prefeitura' => 'Notícia institucional da Prefeitura (release oficial)',
     ];
 
     public function __construct(private JuizLlm $juiz) {}
@@ -158,6 +160,10 @@ REGRAS (inegociáveis):
   Diário Oficial…"). Não invente nomes, valores, datas ou falas que não estejam no ato.
 - Se o ato é raso (só uma intimação/extrato), deixe o corpo curto e jogue o resto
   no checklist — não encha linguiça.
+- Se a fonte é NOTÍCIA INSTITUCIONAL de prefeitura (release): é a VERSÃO OFICIAL
+  de uma parte interessada — o rascunho DEVE sinalizar isso ("segundo a
+  Prefeitura…", "informou a assessoria…") e o checklist DEVE incluir ouvir o
+  outro lado / checar o dado de forma independente.
 
 ATO:
 {$bloco}

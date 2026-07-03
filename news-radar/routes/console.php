@@ -222,11 +222,25 @@ Schedule::command('jr:tce-score')
     ->cron('55 21 * * 1-6')
     ->withoutOverlapping(600);
 
-// ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no Telegram ──
-// ADITIVO/ISOLADO. Digest por ciclo (anti-flood) das pautas quentes E novas;
-// dedup em jr_civico_alertas. FAIL-CLOSED: sem TELEGRAM_BOT_TOKEN +
-// RADAR_CIVICO_ALERT_CHAT_ID no .env, NÃO envia (só loga) — então deixar
-// agendado é inócuo até o Lorran configurar o alvo. Grade /5 do timer.
+// ── RADAR CÍVICO BLOCO 3 (02/07) — NOTÍCIA institucional de prefeitura ──
+// ADITIVO/ISOLADO. 14 prefeituras de interesse (config/prefeitura.php),
+// forward-first (~15 mais recentes por fonte), dedup por hash(url), data
+// sanitizada (Recencia). Release = versão oficial; o scorer (lente 🟢) marca
+// e o rascunho sinaliza. Grade /5 do timer; educado (1 req/s/host).
+Schedule::command('jr:prefeitura-ingest')
+    ->cron('20 6,12,18,23 * * *')
+    ->withoutOverlapping(1200);
+
+Schedule::command('jr:prefeitura-score --limit=40')
+    ->cron('40 6,12,18,23 * * *')
+    ->withoutOverlapping(1800);
+
+// ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no WHATSAPP ──
+// (BLOCO 2, 02/07: saiu do Telegram — grupo interno via instância de alerta
+// JRLINK_ALERT_ZAPI_*.) ADITIVO/ISOLADO. Digest por ciclo (anti-flood) das
+// pautas quentes E novas (data_pub ≤7d, BLOCO 1); dedup em jr_civico_alertas.
+// FAIL-CLOSED: sem instância/grupo no .env, NÃO envia (só loga). Ao religar
+// fonte, rodar `jrcivico:alertar --seed` antes (baseline anti-flood).
 Schedule::command('jrcivico:alertar')
     ->everyFiveMinutes()
     ->withoutOverlapping(600);

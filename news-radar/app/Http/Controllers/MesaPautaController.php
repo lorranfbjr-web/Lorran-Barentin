@@ -40,7 +40,7 @@ class MesaPautaController extends Controller
     public function selecionar(Request $r)
     {
         $d = $r->validate([
-            'ato_ref' => ['required', 'string', 'max:64', 'regex:/^(dom|camara|mpsc|tce|tjsc):\d+$/'],
+            'ato_ref' => ['required', 'string', 'max:64', 'regex:/^(dom|camara|mpsc|tce|tjsc|prefeitura):\d+$/'],
             'source' => ['required', 'string', 'max:16'],
             'municipio' => ['nullable', 'string', 'max:120'],
             'regiao' => ['nullable', 'string', 'max:120'],

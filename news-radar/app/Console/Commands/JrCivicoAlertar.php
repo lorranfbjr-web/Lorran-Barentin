@@ -40,9 +40,10 @@ class JrCivicoAlertar extends Command
         'camara' => 'jr_camara_proposicoes',
         'mpsc' => 'jr_mpsc_extratos',
         'tce' => 'jr_tce_decisoes',
+        'prefeitura' => 'jr_prefeitura_noticias', // BLOCO 3: release oficial (🟢 serviço/1ª-mão)
     ];
 
-    private const ICONE = ['dom' => '🧾', 'camara' => '📜', 'mpsc' => '⚖️', 'tce' => '💰', 'tjsc' => '👨‍⚖️'];
+    private const ICONE = ['dom' => '🧾', 'camara' => '📜', 'mpsc' => '⚖️', 'tce' => '💰', 'tjsc' => '👨‍⚖️', 'prefeitura' => '📣'];
 
     public function handle(): int
     {
