@@ -213,7 +213,6 @@ class JrDomOportunidades extends Command
 <title>Radar de Oportunidades → Hub</title></head>
 <body style="font-family:sans-serif;padding:24px;text-align:center">
 <p>O Radar de Oportunidades agora vive no <a href="/radar-civico?fonte=dom"><b>Hub /radar-civico</b></a> (fonte 🧾 DOM).</p>
-<p style="color:#6b7280;font-size:12px">{$totalScored} scorados de {$totalAtos} atos · {$municipios} municípios · gerado {$geradoEm}</p>
 <script>location.replace("/radar-civico?fonte=dom");</script></body></html>
 STUB;
 
