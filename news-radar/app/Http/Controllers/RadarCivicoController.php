@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Jr\CidadesInteresse;
 use App\Services\Jr\DomGeografia;
 use App\Services\Jr\RankingExibicao;
 use Illuminate\Support\Carbon;
@@ -227,6 +228,9 @@ class RadarCivicoController extends Controller
             'url_fonte' => $a->url_fonte,
             'score' => (int) $a->score_pauta,
             'tier' => $rx['tier'],
+            // BLOCO 6 (03/07): anunciante ativo na cidade → badge 💰 + filtro.
+            // SÓ exibição; não entra em score nenhum (nem no score_x acima).
+            'anun' => CidadesInteresse::anunciante($a->municipio),
             'vago' => $rx['vago'],
             'fresco' => $rx['fresco'],
             'score_x' => $rx['score_x'],
@@ -266,15 +270,17 @@ class RadarCivicoController extends Controller
         $serv = 0;
         $cinca = 0;
         $interesse = 0;
+        $anun = 0;
         foreach ($itens as $it) {
             $por[$it['source']] = ($por[$it['source']] ?? 0) + 1;
             $fisc += $it['tipo'] === 'fiscalizacao' ? 1 : 0;
             $serv += $it['tipo'] === 'servico' ? 1 : 0;
             $cinca += ! empty($it['cinca'] ?? null) ? 1 : 0;
             $interesse += ($it['tier'] ?? 0) > 0 ? 1 : 0;
+            $anun += ! empty($it['anun']) ? 1 : 0;
         }
 
-        return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca, 'interesse' => $interesse];
+        return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca, 'interesse' => $interesse, 'anun' => $anun];
     }
 
     private function html(string $json, array $s, string $selJson, string $intIni = '', string $fonteIni = '', string $painelIni = ''): string
@@ -314,6 +320,8 @@ header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12p
 .ib{font:inherit;font-size:12.5px;font-weight:700;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);cursor:pointer}
 .ib.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .frec.vago{color:#7a5b12;background:#fdf6e1;border:1px solid #f0e0b0}
+.frec.anun{color:#1c1408;background:#fde68a;border:1px solid #f4b400}
+.ib.anun.on{background:#f4b400;color:#1c1408;border-color:#f4b400}
 .day-sep{font-size:12px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.5px;margin:10px 2px 0;padding-top:7px;border-top:1px dashed var(--line)}
 .day-sep:first-child{border-top:none;padding-top:0;margin-top:0}
 main{display:flex;flex-direction:column;gap:9px}
@@ -400,6 +408,7 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <div class="days" id="ints">
   <button type="button" class="ib" data-int="">Todas as cidades</button>
   <button type="button" class="ib" data-int="1">⭐ Cidades de interesse <b>{$s['interesse']}</b></button>
+  <button type="button" class="ib anun" id="banun" title="cidades com anunciante ativo — só exibição, não muda score">💰 Só anunciantes <b>{$s['anun']}</b></button>
 </div>
 <div class="bar">
   <input type="search" id="q" placeholder="🔎 cidade, objeto, órgão, gancho…">
@@ -424,7 +433,7 @@ const dayLabel=dp=>{if(!dp)return"sem data";if(dp===Y_HOJE)return"Hoje";if(dp===
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
-let srcSel="{$fonteIni}",tipoSel="",soCinca=false,daySel="",intSel="{$intIni}";
+let srcSel="{$fonteIni}",tipoSel="",soCinca=false,soAnun=false,daySel="",intSel="{$intIni}";
 // BLOCO 4 — painéis embutidos (Notícias = vitrine com juiz/clusters intactos; Mesa = fila).
 // iframes carregam lazy (src só no 1º clique) pra não pesar o hub no celular.
 let paneSel="{$painelIni}";
@@ -444,6 +453,7 @@ function card(d){
   const hook=d.gancho_curto||d.gancho||"";
   const lens=d.tipo==='fiscalizacao'?'<span class="lens-dot" title="fiscalização">🔴</span>':(d.tipo==='servico'?'<span class="lens-dot" title="serviço/1ª-mão">🟢</span>':'');
   const cinca=d.cinca?'<span class="frec cinca">🏛️ CINCATARINA</span>':'';
+  const anun=d.anun?'<span class="frec anun" title="cidade com anunciante ativo — só exibição, não muda o score">💰 anunciante</span>':'';
   const vago=d.vago?'<span class="frec vago" title="objeto não identificado — lead incompleto">⚠️ objeto vago</span>':'';
   return '<div class="card" id="ato-'+d.ato_ref.replace(":","-")+'">'+
     '<div class="face">'+
@@ -452,7 +462,7 @@ function card(d){
         '<div class="l1"><span class="src-badge src-'+d.source+'">'+(SRCI[d.source]||"")+' '+esc(SRCN[d.source]||d.source)+'</span>'+lens+'<span class="muni">'+esc(d.municipio||"—")+'</span>'+reg+'</div>'+
         '<div class="l2">'+esc(d.objeto||"")+'</div>'+
         (hook?'<div class="l3">'+esc(hook)+'</div>':'')+
-        ((cinca||vago)?'<div class="badges">'+cinca+vago+'</div>':'')+
+        ((cinca||anun||vago)?'<div class="badges">'+cinca+anun+vago+'</div>':'')+
       '</div>'+
       '<button type="button" class="star'+(SEL.has(d.ato_ref)?' on':'')+'" data-ref="'+esc(d.ato_ref)+'" title="selecionar pra Mesa de Pauta">★</button>'+
     '</div>'+
@@ -482,6 +492,7 @@ function render(){
     if(srcSel&&d.source!==srcSel)return false;
     if(tipoSel&&d.tipo!==tipoSel)return false;
     if(soCinca&&!d.cinca)return false;
+    if(soAnun&&!d.anun)return false;
     if(intSel&&!d.tier)return false;
     if(daySel){const dp=String(d.data_pub||"");
       if(daySel==="hoje"&&dp!==Y_HOJE)return false;
@@ -512,9 +523,11 @@ document.querySelectorAll(".lb[data-tipo]").forEach(b=>b.addEventListener("click
 document.getElementById("bcinca").addEventListener("click",e=>{soCinca=!soCinca;e.currentTarget.classList.toggle("on",soCinca);render();});
 document.querySelectorAll(".db").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".db").forEach(x=>x.classList.remove("on"));b.classList.add("on");daySel=b.dataset.day;render();}));
-document.querySelectorAll("#ints .ib").forEach(b=>b.addEventListener("click",()=>{
-  document.querySelectorAll("#ints .ib").forEach(x=>x.classList.remove("on"));b.classList.add("on");intSel=b.dataset.int;render();}));
+document.querySelectorAll("#ints .ib[data-int]").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("#ints .ib[data-int]").forEach(x=>x.classList.remove("on"));b.classList.add("on");intSel=b.dataset.int;render();}));
 document.querySelector('#ints .ib[data-int="'+intSel+'"]').classList.add("on");
+// BLOCO 6 — toggle "só anunciantes" (independente do filtro de interesse)
+document.getElementById("banun").addEventListener("click",e=>{soAnun=!soAnun;e.currentTarget.classList.toggle("on",soAnun);render();});
 // pré-seleção de fonte via URL (?fonte=…): liga o botão certo
 if(srcSel){document.querySelectorAll(".sb").forEach(x=>x.classList.toggle("on",x.dataset.src===srcSel));}
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));

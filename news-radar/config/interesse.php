@@ -31,6 +31,13 @@ return [
             . 'Araquari,São Francisco do Sul'
         ))))),
 
+    // ── BLOCO 6 (03/07): cidades com ANUNCIANTE ATIVO — só badge 💰 + filtro
+    // no hub /radar-civico. NÃO pesa score (nem de exibição). Fonte: painel de
+    // campanhas GAM (/home/jr/campanhas-painel/log/campanhas.jsonl); default =
+    // Tijucas (Samae Tijucas, ordem APPROVED 16/06→31/08/2026). Env CSV sobrepõe.
+    'anunciantes' => array_values(array_filter(array_map('trim', explode(',',
+        (string) env('JR_ANUNCIANTES_CIDADES', 'Tijucas'))))),
+
     // ── pesos no score de EXIBIÇÃO (não tocam score_pauta no banco) ──
     'pesos' => [
         'tier1' => (int) env('JR_INTERESSE_BONUS_T1', 12),

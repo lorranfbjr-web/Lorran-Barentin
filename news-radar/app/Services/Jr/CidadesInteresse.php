@@ -17,6 +17,9 @@ class CidadesInteresse
     /** @var array<string,int>|null nomeNormalizado => tier(1|2) */
     private static ?array $indice = null;
 
+    /** @var array<string,bool>|null nomeNormalizado => true (anunciante ativo) */
+    private static ?array $indiceAnun = null;
+
     /** 1 = núcleo/cobertura, 2 = vizinha, 0 = fora do interesse. */
     public static function tier(?string $municipio): int
     {
@@ -25,6 +28,28 @@ class CidadesInteresse
         }
 
         return self::indice()[DomGeografia::normalizar($municipio)] ?? 0;
+    }
+
+    /**
+     * BLOCO 6 (03/07): cidade com ANUNCIANTE ATIVO (config interesse.anunciantes,
+     * env JR_ANUNCIANTES_CIDADES). SÓ EXIBIÇÃO — badge 💰 + filtro no hub;
+     * NÃO pesa score algum (nem o de exibição).
+     */
+    public static function anunciante(?string $municipio): bool
+    {
+        if (! $municipio) {
+            return false;
+        }
+
+        if (self::$indiceAnun === null) {
+            $idx = [];
+            foreach ((array) config('interesse.anunciantes') as $m) {
+                $idx[DomGeografia::normalizar($m)] = true;
+            }
+            self::$indiceAnun = $idx;
+        }
+
+        return self::$indiceAnun[DomGeografia::normalizar($municipio)] ?? false;
     }
 
     public static function bonus(int $tier): int
