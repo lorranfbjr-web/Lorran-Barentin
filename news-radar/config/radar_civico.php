@@ -48,6 +48,23 @@ return [
     ],
 
     /*
+     * GOAL SIMPLIFICAR (03/07) — BLOCO 2: filtro ANTI-GARBAGE de grupo.
+     * Regras duras POR GRUPO em cima do gate existente (GrupoFiltro::civico /
+     * ::noticia): tier0/vago/rotina nunca; núcleo (cidades_prioritarias) >= 70;
+     * fiscalização t1 >= 80, t2 >= 85; serviço só núcleo; notícia t1 >= 80,
+     * t2 >= 85. Fora do grupo ≠ descartado: segue no site/Mesa/score intacto.
+     * Auditoria 03/07: corta 65% do volume mantendo o interesse da região.
+     */
+    'grupo_filtro' => [
+        'ligado' => (bool) env('RADAR_GRUPO_FILTRO', true),
+        'nucleo_min' => (int) env('RADAR_GRUPO_NUCLEO_MIN', 70),
+        'fisc_t1' => (int) env('RADAR_GRUPO_FISC_T1', 80),
+        'fisc_t2' => (int) env('RADAR_GRUPO_FISC_T2', 85),
+        'noticia_t1' => (int) env('RADAR_GRUPO_NOTICIA_T1', 80),
+        'noticia_t2' => (int) env('RADAR_GRUPO_NOTICIA_T2', 85),
+    ],
+
+    /*
      * BLOCO 2 (02/07): o radar cívico SAIU do Telegram — o bot do Telegram
      * (@jornalrazaopubli_bot) voltou a ser 100% do Gerador v3 → aprovação FB.
      * Alertas e rascunhos do radar agora vão pro WHATSAPP via instância de

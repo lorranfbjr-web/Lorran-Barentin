@@ -188,6 +188,17 @@ class JrLinkQuenteFria extends Command
                 && $score >= $corte
                 && $idadeDias <= $frescorDias;
 
+            // GOAL SIMPLIFICAR (03/07) — BLOCO 2: anti-garbage de grupo.
+            // Reprovado no filtro = FRIA (só painel); score no banco intacto.
+            $gfMotivo = '';
+            if ($quente) {
+                $gf = \App\Services\Jr\GrupoFiltro::noticia($cidade, $score);
+                if (! $gf['ok']) {
+                    $quente = false;
+                    $gfMotivo = ' · grupo-filtro: ' . $gf['motivo'];
+                }
+            }
+
             return [
                 'id' => (int) $r->id,
                 'titulo' => (string) $r->titulo,
@@ -197,8 +208,8 @@ class JrLinkQuenteFria extends Command
                 'tier' => $tier,
                 'classe' => $quente ? 'quente' : 'fria',
                 'score_composto' => $score,
-                'motivo' => sprintf('juiz=%s · editorial=%d · tier%d%+d · idade=%dd(-%d)',
-                    $r->temperatura_juiz, (int) $r->score_editorial, $tier, $bonus, $idadeDias, $decay),
+                'motivo' => sprintf('juiz=%s · editorial=%d · tier%d%+d · idade=%dd(-%d)%s',
+                    $r->temperatura_juiz, (int) $r->score_editorial, $tier, $bonus, $idadeDias, $decay, $gfMotivo),
             ];
         });
     }

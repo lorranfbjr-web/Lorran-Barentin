@@ -220,7 +220,7 @@ class JrCivicoAlertar extends Command
                 ->where('data_pub', '>=', $corte)
                 ->where('data_pub', '<=', $hoje)
                 ->where(fn ($q) => $q->whereNull('data_suspeita')->orWhere('data_suspeita', '!=', 1))
-                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho', 'data_pub', 'objeto_limpo', 'url_fonte']);
+                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho', 'data_pub', 'objeto_limpo', 'url_fonte', 'tipo']);
 
             foreach ($rows as $a) {
                 $score = (int) $a->score_pauta;
@@ -234,6 +234,13 @@ class JrCivicoAlertar extends Command
                     $motivo = 'cidade';
                 }
                 if ($motivo === null) {
+                    continue;
+                }
+
+                // GOAL SIMPLIFICAR (03/07) — BLOCO 2: anti-garbage POR GRUPO em
+                // cima do gate acima. Barrados seguem no site/Mesa (score intacto).
+                $gf = \App\Services\Jr\GrupoFiltro::civico($muni, $score, (string) ($a->tipo ?? ''), (string) ($a->objeto_limpo ?? ''));
+                if (! $gf['ok']) {
                     continue;
                 }
 
@@ -252,6 +259,21 @@ class JrCivicoAlertar extends Command
         }
 
         usort($out, fn ($x, $y) => $y['score'] <=> $x['score']);
+
+        // GOAL SIMPLIFICAR (03/07) — BLOCO 2: repetição NUNCA em grupo. Dedup
+        // por assinatura cidade+objeto (cross-fonte; o dedup por ato_ref já
+        // existe via unique de jr_civico_alertas).
+        $vistos = [];
+        $out = array_values(array_filter($out, function ($p) use (&$vistos) {
+            $sig = mb_strtolower($p['municipio'] . '|' . mb_substr(trim($p['objeto']), 0, 60));
+            if (isset($vistos[$sig])) {
+                return false;
+            }
+            $vistos[$sig] = true;
+
+            return true;
+        }));
+
         return $out;
     }
 
