@@ -100,7 +100,7 @@ class RascunhoCivico
         $linhas = [];
         $linhas[] = '📝 RASCUNHO — revisar antes de publicar';
         if (! empty($ctx['municipio'])) {
-            $linhas[] = '📍 ' . $ctx['municipio'] . (! empty($ctx['fonte_nome']) ? ' · ' . $ctx['fonte_nome'] : '');
+            $linhas[] = '📍 '.$ctx['municipio'].(! empty($ctx['fonte_nome']) ? ' · '.$ctx['fonte_nome'] : '');
         }
         $linhas[] = '';
         $linhas[] = $r['titulo'];
@@ -116,12 +116,12 @@ class RascunhoCivico
         if (! empty($r['checklist'])) {
             $linhas[] = '✅ Apurar antes de fechar:';
             foreach ($r['checklist'] as $c) {
-                $linhas[] = '• ' . $c;
+                $linhas[] = '• '.$c;
             }
             $linhas[] = '';
         }
         if (! empty($ctx['url_fonte'])) {
-            $linhas[] = '🔗 Fonte: ' . $ctx['url_fonte'];
+            $linhas[] = '🔗 Fonte: '.$ctx['url_fonte'];
         }
         $linhas[] = '';
         $linhas[] = '⚠️ Gerado do ato oficial — FATO + LEAD, não acusação. Confira tudo.';
@@ -131,14 +131,14 @@ class RascunhoCivico
 
     private function prompt(array $ato): string
     {
-        $apurar = empty($ato['apurar']) ? '(nada listado)' : '- ' . implode("\n- ", $ato['apurar']);
+        $apurar = empty($ato['apurar']) ? '(nada listado)' : '- '.implode("\n- ", $ato['apurar']);
         $ctx = [
-            'Fonte oficial: ' . $ato['fonte_nome'],
-            'Município: ' . ($ato['municipio'] ?: '—'),
-            'Órgão: ' . ($ato['orgao'] ?: '—'),
-            'Objeto: ' . ($ato['objeto'] ?: '—'),
-            'Gancho de pauta: ' . ($ato['gancho'] ?: '—'),
-            'Ângulo sugerido: ' . ($ato['angulo'] ?: '—'),
+            'Fonte oficial: '.$ato['fonte_nome'],
+            'Município: '.($ato['municipio'] ?: '—'),
+            'Órgão: '.($ato['orgao'] ?: '—'),
+            'Objeto: '.($ato['objeto'] ?: '—'),
+            'Gancho de pauta: '.($ato['gancho'] ?: '—'),
+            'Ângulo sugerido: '.($ato['angulo'] ?: '—'),
             'Texto integral do ato (fonte):',
             trim((string) ($ato['texto_bruto'] ?: '—')),
             'Pontos a apurar já mapeados:',
@@ -160,6 +160,10 @@ REGRAS (inegociáveis):
   Diário Oficial…"). Não invente nomes, valores, datas ou falas que não estejam no ato.
 - Se o ato é raso (só uma intimação/extrato), deixe o corpo curto e jogue o resto
   no checklist — não encha linguiça.
+- O CORPO é texto PUBLICÁVEL, sem bastidor: NUNCA escreva frases como "o release
+  não detalha", "a apuração deve verificar", "esses pontos precisam ser
+  confirmados", "não foi informado" — tudo o que falta apurar vai SÓ no
+  checklist, nunca no corpo. Corpo = só o que JÁ se sabe, pronto pra publicar.
 - Se a fonte é NOTÍCIA INSTITUCIONAL de prefeitura (release): é a VERSÃO OFICIAL
   de uma parte interessada — o rascunho DEVE sinalizar isso ("segundo a
   Prefeitura…", "informou a assessoria…") e o checklist DEVE incluir ouvir o
