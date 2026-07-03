@@ -57,7 +57,11 @@ class JrTceIngest extends Command
                     'interessado' => $e['interessado'],
                     'responsavel' => $e['responsavel'],
                     'unidade_gestora' => $e['unidade_gestora'],
-                    'municipio' => $e['municipio'],
+                    // BLOCO 8 (02/07): TCE vem com municipio sujo/NULL — fallback
+                    // extrai da unidade gestora ("Fundo … de <Município>") pra
+                    // grafia oficial (filtro de interesse e cidade do alerta).
+                    'municipio' => $e['municipio']
+                        ?: \App\Services\Jr\DomGeografia::municipioNoFim((string) ($e['unidade_gestora'] ?? '')),
                     'relator' => $e['relator'],
                     'decisao' => $e['decisao'],
                     'desfecho' => $e['desfecho'],

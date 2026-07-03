@@ -139,13 +139,15 @@ Schedule::command('jr:itapema-ingest')
     ->cron('45 2,8,14,20 * * *')
     ->withoutOverlapping(600);
 
-// (5) FIRECRAWL (Fase 2 — SoftCâmaras/LEGISOFT, 30 cidades gated) — BLOQUEADO
-//     02/07: sem FIRECRAWL_API_KEY (falta o Lorran contratar/colar a chave).
-//     Quando chegar: .env + JRCAM_FIRECRAWL_ATIVO=true, PoC --poc --dry,
-//     validar parsers e DESCOMENTAR abaixo. Cadência gentil de propósito:
-//     1×/dia (1 request/câmara/dia — crédito do serviço + educação).
-// Schedule::command('jr:firecrawl-ingest')
-//     ->cron('30 7 * * *')
+// (5) FIRECRAWL (BLOCO 5, 02/07) — PoC PROVADA: search→scrape profundo stealth
+//     ingeriu Canelinha (11) + Nova Trento (3) por 129 créditos reais.
+//     PROPOSITALMENTE SEM SCHEDULE: cada rodada custa ~60-150 créditos metered
+//     (restam ~845 free) — rodar diário esgotaria a conta em dias. Ligar a
+//     cadência é DECISÃO DE PLANO do Lorran (Hobby ~R$83/mês ou runner no PC).
+//     Rodada manual: php artisan jr:firecrawl-ingest --teto=150
+//     (LEGISOFT segue bloqueado — reCAPTCHA visível até no stealth.)
+// Schedule::command('jr:firecrawl-ingest --teto=150')
+//     ->cron('30 7 * * 1')   // semanal, SE o Lorran aprovar o custo
 //     ->withoutOverlapping(3600);
 
 // ── RADAR CÍVICO Fase 4 — MPSC (DOE PDF diário) — instaurações de procedimentos ──
