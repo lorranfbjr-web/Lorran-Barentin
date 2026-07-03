@@ -60,3 +60,10 @@ Route::prefix('v1/jrlink')
         Route::get('/radar', [\App\Http\Controllers\JrRadarController::class, 'index']);
         Route::post('/feedback', [\App\Http\Controllers\JrFeedbackController::class, 'store']);
     });
+
+// ── BLOCO 2 (03/07) — APROVAÇÃO POR ✅ NO WHATSAPP (webhook da instância de
+// ALERTA "3…", NUNCA 276/884). Rota ADITIVA, fora do CSRF (api stateless),
+// protegida por token secreto no path (fail-closed: sem env, 404 sempre).
+// Reply/reação ✅ no grupo RASCUNHOS → DRAFT no WP (nunca publica) → link no
+// grupo. ❌ → descarta e registra feedback. Ver ZapAprovacaoController.
+Route::post('/jr/zap-alerta-hook/{token}', \App\Http\Controllers\ZapAprovacaoController::class);

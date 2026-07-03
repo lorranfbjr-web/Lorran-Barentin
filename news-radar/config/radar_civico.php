@@ -91,6 +91,20 @@ return [
     ],
 
     /*
+     * BLOCO 2 (03/07): APROVAÇÃO POR ✅ NO WHATSAPP — flywheel salto 2.
+     * Webhook on-message-received SÓ da instância de alerta ("3…"). Token
+     * secreto no path da rota (sem env = rota morta). Allowlist de aprovadores
+     * = participantes do grupo RASCUNHOS autorizados a criar DRAFT com ✅.
+     */
+    'aprovacao' => [
+        'hook_token' => env('JRLINK_ALERT_HOOK_TOKEN', ''),
+        'aprovadores' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('RADAR_CIVICO_APROVADORES', ''))
+        ))),
+    ],
+
+    /*
      * BLOCO 1 (03/07): AUTO-RASCUNHO SELETIVO — flywheel salto 1.
      * O gate é E-lógico (TUDO tem que valer): fonte 🟢 serviço/1ª-mão (SÓ
      * jr_prefeitura_noticias — release oficial; DOM/câmara/MPSC/TCE NUNCA

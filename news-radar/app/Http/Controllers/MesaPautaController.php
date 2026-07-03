@@ -145,6 +145,20 @@ class MesaPautaController extends Controller
         $grupo = (string) config('radar_civico.canais.rascunhos');
         $messageId = $grupo !== '' ? $zap->texto($texto, $grupo) : null;
 
+        // BLOCO 2 (03/07): registra a entrega → o ✅ (reply/reação) no grupo
+        // casa o messageId aqui e cria o DRAFT no WP (ZapAprovacaoController).
+        if ($messageId !== null) {
+            DB::table('jr_rascunho_entregas')->updateOrInsert(
+                ['ato_ref' => $p->ato_ref, 'tipo' => 'mesa'],
+                [
+                    'message_id' => $messageId,
+                    'payload' => json_encode($r + ['municipio' => (string) ($p->municipio ?? ''), 'url_fonte' => (string) ($p->url_fonte ?? '')], JSON_UNESCAPED_UNICODE),
+                    'updated_at' => $now,
+                    'created_at' => $now,
+                ]
+            );
+        }
+
         return response()->json([
             'ok' => true,
             'rascunho' => $texto,

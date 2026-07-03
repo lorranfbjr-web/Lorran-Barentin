@@ -104,6 +104,8 @@ class JrCivicoAutoRascunho extends Command
                 'tipo' => 'auto',
                 'message_id' => $messageId,
                 'gate_motivo' => $c['gate_motivo'],
+                // payload estruturado = insumo do DRAFT WP quando vier o ✅ (Bloco 2)
+                'payload' => json_encode($r + ['municipio' => $c['municipio'], 'url_fonte' => $c['url_fonte']], JSON_UNESCAPED_UNICODE),
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now(),
             ]);
