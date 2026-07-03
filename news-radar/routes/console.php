@@ -139,6 +139,15 @@ Schedule::command('jr:itapema-ingest')
     ->cron('45 2,8,14,20 * * *')
     ->withoutOverlapping(600);
 
+// (5) FIRECRAWL (Fase 2 — SoftCâmaras/LEGISOFT, 30 cidades gated) — BLOQUEADO
+//     02/07: sem FIRECRAWL_API_KEY (falta o Lorran contratar/colar a chave).
+//     Quando chegar: .env + JRCAM_FIRECRAWL_ATIVO=true, PoC --poc --dry,
+//     validar parsers e DESCOMENTAR abaixo. Cadência gentil de propósito:
+//     1×/dia (1 request/câmara/dia — crédito do serviço + educação).
+// Schedule::command('jr:firecrawl-ingest')
+//     ->cron('30 7 * * *')
+//     ->withoutOverlapping(3600);
+
 // ── RADAR CÍVICO Fase 4 — MPSC (DOE PDF diário) — instaurações de procedimentos ──
 // ADITIVO/ISOLADO. O DOE-MPSC sai Seg-Sex; o forward varre os últimos dias úteis
 // (fim de semana = 404, pula). Parsing via PyMuPDF (venv dedicado). Grade /5.

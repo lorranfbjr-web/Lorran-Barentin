@@ -100,6 +100,62 @@ return [
         'python' => base_path('scripts/pdf-venv/bin/python'),
     ],
 
+    // ── FIRECRAWL (Fase 2 das câmaras — SoftCâmaras + LEGISOFT, 30 cidades) ──
+    // Sonda 02/07/2026: os 2 grupos ficam atrás de reCAPTCHA invisível
+    // (SoftCâmaras = 'lsrecaptcha', IP 170.81.43.171; LEGISOFT = /captcha,
+    // IP 45.164.94.x) que bloqueia curl de QUALQUER IP. Via sancionada: o
+    // serviço comercial Firecrawl renderiza a página publicada — NÃO fazemos
+    // bypass de verificação de bot por conta própria.
+    // BLOQUEADO 02/07: sem FIRECRAWL_API_KEY no .env. Pronto-pra-plugar —
+    // roteiro no docblock do FirecrawlConector. 'poc' => true marca as 2
+    // câmaras da prova (1 por plataforma) pro jr:firecrawl-ingest --poc.
+    // Grafia das 30 cidades validada contra DomGeografia::municipios() 02/07.
+    // Chapecó (SPA Cittatec — mapear XHR pode dispensar Firecrawl) e Joinville
+    // (Cloudflare) são FASE 3 — de fora daqui de propósito. ALESC parqueada.
+    'firecrawl' => [
+        'ativo' => (bool) env('JRCAM_FIRECRAWL_ATIVO', false),
+        'api_key' => env('FIRECRAWL_API_KEY', ''),
+        'api_base' => env('FIRECRAWL_API_BASE', 'https://api.firecrawl.dev/v1'),
+        'ano_min' => (int) env('JRCAM_FIRECRAWL_ANO_MIN', 2025),
+        // ms de espera pós-load no render (reCAPTCHA invisível + hidratação)
+        'wait_ms' => (int) env('JRCAM_FIRECRAWL_WAIT_MS', 5000),
+        'cidades' => [
+            // SOFTCAMARAS — listagem em /proposicoes (padrão único, 23 sites no host)
+            ['cidade' => 'Canelinha',             'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaracanelinha.sc.gov.br',      'url' => 'https://www.camaracanelinha.sc.gov.br/proposicoes',      'poc' => true],
+            ['cidade' => 'Nova Trento',           'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaranovatrento.sc.gov.br',     'url' => 'https://www.camaranovatrento.sc.gov.br/proposicoes'],
+            ['cidade' => 'Bombinhas',             'plataforma' => 'softcamaras', 'url_base' => 'https://www.camarabombinhas.sc.gov.br',      'url' => 'https://www.camarabombinhas.sc.gov.br/proposicoes'],
+            ['cidade' => 'Camboriú',              'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaracamboriu.sc.gov.br',       'url' => 'https://www.camaracamboriu.sc.gov.br/proposicoes'],
+            ['cidade' => 'Balneário Camboriú',    'plataforma' => 'softcamaras', 'url_base' => 'https://www.balneariocamboriu.sc.leg.br',    'url' => 'https://www.balneariocamboriu.sc.leg.br/proposicoes'],
+            ['cidade' => 'Navegantes',            'plataforma' => 'softcamaras', 'url_base' => 'https://www.navegantes.sc.leg.br',           'url' => 'https://www.navegantes.sc.leg.br/proposicoes'],
+            ['cidade' => 'Balneário Piçarras',    'plataforma' => 'softcamaras', 'url_base' => 'https://www.camarapicarras.sc.gov.br',       'url' => 'https://www.camarapicarras.sc.gov.br/proposicoes'],
+            ['cidade' => 'Brusque',               'plataforma' => 'softcamaras', 'url_base' => 'https://www.camarabrusque.sc.gov.br',        'url' => 'https://www.camarabrusque.sc.gov.br/proposicoes'],
+            ['cidade' => 'Botuverá',              'plataforma' => 'softcamaras', 'url_base' => 'https://www.camarabotuvera.sc.gov.br',       'url' => 'https://www.camarabotuvera.sc.gov.br/proposicoes'],
+            ['cidade' => 'Pomerode',              'plataforma' => 'softcamaras', 'url_base' => 'https://www.cmpomerode.sc.gov.br',           'url' => 'https://www.cmpomerode.sc.gov.br/proposicoes'],
+            ['cidade' => 'Indaial',               'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaraindaial.sc.gov.br',        'url' => 'https://www.camaraindaial.sc.gov.br/proposicoes'],
+            ['cidade' => 'Timbó',                 'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaratimbo.sc.gov.br',          'url' => 'https://www.camaratimbo.sc.gov.br/proposicoes'],
+            ['cidade' => 'Guaramirim',            'plataforma' => 'softcamaras', 'url_base' => 'https://www.guaramirim.sc.leg.br',           'url' => 'https://www.guaramirim.sc.leg.br/proposicoes'],
+            ['cidade' => 'Massaranduba',          'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaramassaranduba.sc.gov.br',   'url' => 'https://www.camaramassaranduba.sc.gov.br/proposicoes'],
+            ['cidade' => 'Florianópolis',         'plataforma' => 'softcamaras', 'url_base' => 'https://www.cmf.sc.gov.br',                  'url' => 'https://www.cmf.sc.gov.br/proposicoes'],
+            ['cidade' => 'São José',              'plataforma' => 'softcamaras', 'url_base' => 'https://www.cmsj.sc.gov.br',                 'url' => 'https://www.cmsj.sc.gov.br/proposicoes'],
+            ['cidade' => 'Palhoça',               'plataforma' => 'softcamaras', 'url_base' => 'https://www.cmp.sc.gov.br',                  'url' => 'https://www.cmp.sc.gov.br/proposicoes'],
+            ['cidade' => 'Biguaçu',               'plataforma' => 'softcamaras', 'url_base' => 'https://www.cmb.sc.gov.br',                  'url' => 'https://www.cmb.sc.gov.br/proposicoes'],
+            ['cidade' => 'Governador Celso Ramos', 'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaragcr.sc.gov.br',           'url' => 'https://www.camaragcr.sc.gov.br/proposicoes'],
+            ['cidade' => 'Antônio Carlos',        'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaraantoniocarlos.sc.gov.br',  'url' => 'https://www.camaraantoniocarlos.sc.gov.br/proposicoes'],
+            ['cidade' => 'Nova Veneza',           'plataforma' => 'softcamaras', 'url_base' => 'https://www.cvnv.sc.gov.br',                 'url' => 'https://www.cvnv.sc.gov.br/proposicoes'],
+            ['cidade' => 'Xaxim',                 'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaraxaxim.sc.gov.br',          'url' => 'https://www.camaraxaxim.sc.gov.br/proposicoes'],
+            ['cidade' => 'Major Gercino',         'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaramajorgercino.sc.gov.br',   'url' => 'https://www.camaramajorgercino.sc.gov.br/proposicoes'],
+            // LEGISOFT — docs em /documento/<slug>-<id>; Blumenau usa o
+            // subdomínio digital.* com filtros na URL (tipo:…/ano:…)
+            ['cidade' => 'Tijucas',               'plataforma' => 'legisoft',    'url_base' => 'https://www.camaratijucas.sc.gov.br',        'url' => 'https://www.camaratijucas.sc.gov.br/pag/proposicoes-legislativas', 'poc' => true],
+            ['cidade' => 'Itajaí',                'plataforma' => 'legisoft',    'url_base' => 'https://cvi.sc.gov.br',                      'url' => 'https://cvi.sc.gov.br/'],
+            ['cidade' => 'Gaspar',                'plataforma' => 'legisoft',    'url_base' => 'https://camaragaspar.sc.gov.br',             'url' => 'https://camaragaspar.sc.gov.br/'],
+            ['cidade' => 'Criciúma',              'plataforma' => 'legisoft',    'url_base' => 'https://camaracriciuma.sc.gov.br',           'url' => 'https://camaracriciuma.sc.gov.br/'],
+            ['cidade' => 'Içara',                 'plataforma' => 'legisoft',    'url_base' => 'https://camaraicara.sc.gov.br',              'url' => 'https://camaraicara.sc.gov.br/'],
+            ['cidade' => 'Forquilhinha',          'plataforma' => 'legisoft',    'url_base' => 'https://camaraforquilhinha.sc.gov.br',       'url' => 'https://camaraforquilhinha.sc.gov.br/'],
+            ['cidade' => 'Blumenau',              'plataforma' => 'legisoft',    'url_base' => 'https://digital.camarablu.sc.gov.br',        'url' => 'https://digital.camarablu.sc.gov.br/documentos/tipo:legislativo-2/ano:2026/'],
+        ],
+    ],
+
     // Tipos de matéria RELEVANTES (lei-making): selecionados por DESCRIÇÃO
     // normalizada (sigla/id variam por instância). Excluímos ruído: indicação,
     // moção, requerimento, emenda, certificado, parecer, prestação de contas.

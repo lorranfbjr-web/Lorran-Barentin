@@ -346,6 +346,11 @@ class JrWatchdog extends Command
      */
     private function claudeCli(): array
     {
+        $modelo = (string) config('dom.scoring.modelo', 'claude-sonnet-4-6');
+        if (! str_starts_with($modelo, 'claude')) {
+            return ['nivel' => 'ok', 'resumo' => "scoring em OpenAI ({$modelo}) — ping claude-cli dispensado", 'rows' => []];
+        }
+
         try {
             $t0 = microtime(true);
             $r = Process::timeout(90)->run([

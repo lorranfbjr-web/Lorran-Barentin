@@ -3,6 +3,7 @@
 namespace App\Services\Jr;
 
 use Illuminate\Support\Facades\Process;
+use OpenAI\Laravel\Facades\OpenAI;
 
 /**
  * Faro MPSC — pontua extratos de instauração de procedimentos do MP pela ótica
@@ -42,7 +43,7 @@ class MpscScorer
         $ultimoErro = null;
         for ($t = 1; $t <= 2; $t++) {
             try {
-                return $this->parse($this->chamarClaudeCli($prompt), $itens);
+                return $this->parse($this->chamarLlm($prompt), $itens);
             } catch (\Throwable $e) {
                 $ultimoErro = $e;
             }
@@ -124,6 +125,32 @@ EXTRATOS:
 
 {$lista}
 PROMPT;
+    }
+
+    private function chamarLlm(string $prompt): string
+    {
+        if (! str_starts_with($this->modelo, 'claude')) {
+            return $this->chamarOpenai($prompt);
+        }
+
+        return $this->chamarClaudeCli($prompt);
+    }
+
+    private function chamarOpenai(string $prompt): string
+    {
+        $params = [
+            'model' => $this->modelo,
+            'messages' => [['role' => 'user', 'content' => $prompt]],
+        ];
+        // gpt-4*: deterministico; familia gpt-5/o* (reasoning): effort low segura custo.
+        if (str_starts_with($this->modelo, 'gpt-4')) {
+            $params['temperature'] = 0;
+        } else {
+            $params['reasoning_effort'] = 'low';
+        }
+        $r = OpenAI::chat()->create($params);
+
+        return (string) ($r->choices[0]->message->content ?? '');
     }
 
     private function chamarClaudeCli(string $prompt): string

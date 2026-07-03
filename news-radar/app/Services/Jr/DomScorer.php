@@ -3,6 +3,7 @@
 namespace App\Services\Jr;
 
 use Illuminate\Support\Facades\Process;
+use OpenAI\Laravel\Facades\OpenAI;
 
 /**
  * Radar de Oportunidades — pontua atos do DOM/SC pela ótica de um EDITOR de
@@ -45,7 +46,7 @@ class DomScorer
         $ultimoErro = null;
         for ($tentativa = 1; $tentativa <= 2; $tentativa++) {
             try {
-                $texto = $this->chamarClaudeCli($prompt);
+                $texto = $this->chamarLlm($prompt);
 
                 return $this->parse($texto, $itens);
             } catch (\Throwable $e) {
@@ -152,6 +153,32 @@ ATOS:
 
 {$lista}
 PROMPT;
+    }
+
+    private function chamarLlm(string $prompt): string
+    {
+        if (! str_starts_with($this->modelo, 'claude')) {
+            return $this->chamarOpenai($prompt);
+        }
+
+        return $this->chamarClaudeCli($prompt);
+    }
+
+    private function chamarOpenai(string $prompt): string
+    {
+        $params = [
+            'model' => $this->modelo,
+            'messages' => [['role' => 'user', 'content' => $prompt]],
+        ];
+        // gpt-4*: deterministico; familia gpt-5/o* (reasoning): effort low segura custo.
+        if (str_starts_with($this->modelo, 'gpt-4')) {
+            $params['temperature'] = 0;
+        } else {
+            $params['reasoning_effort'] = 'low';
+        }
+        $r = OpenAI::chat()->create($params);
+
+        return (string) ($r->choices[0]->message->content ?? '');
     }
 
     private function chamarClaudeCli(string $prompt): string
