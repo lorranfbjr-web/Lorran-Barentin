@@ -287,18 +287,64 @@ class RadarNotificador
             return [];
         }
 
+        // BLOCO 5 (simplificar 03/07): GUARDA DE COERÊNCIA — a linha "N portais
+        // cobrindo" não confia mais cegamente no cluster (over-merge misturava
+        // matérias distintas na mesma mensagem, ex. pesquisa Lula no meio dos
+        // links da saída de Michelle do PL). Só entra membro cujo título tem
+        // overlap mínimo de tokens com o título do REPRESENTANTE; link perdido
+        // é melhor que link errado.
+        $repTitulo = $novos->filter(fn ($r) => $r->cluster_id)
+            ->mapWithKeys(fn ($r) => [(int) $r->cluster_id => (string) $r->titulo])->all();
+
         return DB::table('jr_link_extracao')
             ->whereIn('cluster_id', $clusterIds)->where('duplicada', false)
-            ->get(['cluster_id', 'url', 'host', 'fonte_tipo', 'score'])
+            ->get(['cluster_id', 'url', 'host', 'fonte_tipo', 'score', 'titulo', 'cluster_rep'])
             ->groupBy('cluster_id')
-            ->map(function ($membros) {
+            ->map(function ($membros, $cid) use ($repTitulo) {
+                $repToks = $this->toksTitulo($repTitulo[(int) $cid] ?? '');
+
                 return $membros
+                    ->filter(function ($m) use ($repToks) {
+                        if ($m->cluster_rep) {
+                            return true; // o próprio representante sempre entra
+                        }
+                        $toks = $this->toksTitulo((string) $m->titulo);
+                        if (count($repToks) < 3 || count($toks) < 3) {
+                            return true; // título curto demais pra julgar — mantém
+                        }
+                        $inter = count(array_intersect_key($toks, $repToks));
+
+                        // 0.4: num cluster SÃO os membros são quase-duplicatas
+                        // (>=50% de tokens em comum); "mesma crise, fato
+                        // diferente" (pesquisa Lula × saída de Michelle) fica
+                        // em 0.38 e cai fora. Link perdido > link errado.
+                        return $inter / min(count($toks), count($repToks)) >= 0.4;
+                    })
                     ->groupBy(fn ($m) => $m->fonte_tipo ?: $m->host ?: '?')
                     ->map(fn ($g, $nome) => [
                         'nome' => $nome,
                         'url' => $g->sortByDesc('score')->first()->url,
                     ])->values();
             })->all();
+    }
+
+    /** @return array<string,true> tokens normalizados >=4 chars do título. */
+    private function toksTitulo(string $t): array
+    {
+        $t = mb_strtolower($t, 'UTF-8');
+        $t = strtr($t, ['á' => 'a', 'à' => 'a', 'â' => 'a', 'ã' => 'a', 'é' => 'e', 'ê' => 'e', 'í' => 'i',
+            'ó' => 'o', 'ô' => 'o', 'õ' => 'o', 'ú' => 'u', 'ç' => 'c']);
+        $t = preg_replace('/[^a-z0-9 ]/', ' ', $t);
+        static $stop = ['depois' => 1, 'apos' => 1, 'durante' => 1, 'contra' => 1, 'sobre' => 1,
+            'para' => 1, 'pela' => 1, 'pelo' => 1, 'entre' => 1, 'santa' => 1, 'catarina' => 1];
+        $out = [];
+        foreach (explode(' ', trim(preg_replace('/\s+/', ' ', $t))) as $w) {
+            if (mb_strlen($w) >= 4 && ! isset($stop[$w])) {
+                $out[$w] = true;
+            }
+        }
+
+        return $out;
     }
 
     /** POST send-text na Z-API. Retorna messageId ou null. */

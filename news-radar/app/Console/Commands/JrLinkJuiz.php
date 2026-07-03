@@ -300,6 +300,13 @@ class JrLinkJuiz extends Command
             if (! $ca || ! $cb || $ca === $cb) {
                 continue;
             }
+            // BLOCO 5 (simplificar 03/07): BRIEFING/resumão multi-notícia nunca
+            // entra em merge de evento — o "QUARTA, 1/7: Michelle…" era fundido
+            // TODO ciclo num cluster de fato único e contaminava o digest.
+            if ($this->pareceBriefing((string) $byId[$p['id_a']]->titulo)
+                || $this->pareceBriefing((string) $byId[$p['id_b']]->titulo)) {
+                continue;
+            }
             $key = min($ca, $cb) . ':' . max($ca, $cb);
             if (isset($vistos[$key])) {
                 continue;
@@ -323,8 +330,15 @@ class JrLinkJuiz extends Command
             if (! ($veredito[$n] ?? false)) {
                 continue;
             }
-            $ca = $remap[$p['ca']] ?? $p['ca'];
-            $cb = $remap[$p['cb']] ?? $p['cb'];
+            // BLOCO 5 (simplificar 03/07): SEM remap em cadeia — cluster que já
+            // participou de UMA fusão neste ciclo não funde de novo (um "sim"
+            // errado do LLM propagava A→B→C e misturava 3 histórias).
+            if (isset($remap[$p['ca']]) || isset($remap[$p['cb']])
+                || in_array($p['ca'], $remap, true) || in_array($p['cb'], $remap, true)) {
+                continue;
+            }
+            $ca = $p['ca'];
+            $cb = $p['cb'];
             if ($ca === $cb) {
                 continue;
             }
@@ -352,6 +366,19 @@ class JrLinkJuiz extends Command
         }
 
         return $fundidos;
+    }
+
+    /**
+     * BLOCO 5 (simplificar 03/07): título de BRIEFING/resumão do dia (página
+     * multi-notícia) — "QUARTA, 1/7: …", "Giro de notícias…", "Resumo do dia…".
+     * Nunca é um evento único; fundir contamina o cluster e o digest.
+     */
+    private function pareceBriefing(string $titulo): bool
+    {
+        return (bool) preg_match(
+            '/^\s*(segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\s*(-feira)?\s*,?\s*\d{1,2}\s*[\/\.]\s*\d{1,2}/iu',
+            $titulo)
+            || (bool) preg_match('/^\s*(giro de not[ií]cias|resumo do dia|boletim do dia|manchetes d)/iu', $titulo);
     }
 
     /**
