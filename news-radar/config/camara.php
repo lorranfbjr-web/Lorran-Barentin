@@ -120,9 +120,14 @@ return [
         // ms de espera pós-load no render (reCAPTCHA invisível + hidratação)
         'wait_ms' => (int) env('JRCAM_FIRECRAWL_WAIT_MS', 5000),
         'cidades' => [
-            // SOFTCAMARAS — listagem em /proposicoes (padrão único, 23 sites no host)
-            ['cidade' => 'Canelinha',             'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaracanelinha.sc.gov.br',      'url' => 'https://www.camaracanelinha.sc.gov.br/proposicoes',      'poc' => true],
-            ['cidade' => 'Nova Trento',           'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaranovatrento.sc.gov.br',     'url' => 'https://www.camaranovatrento.sc.gov.br/proposicoes'],
+            // SOFTCAMARAS — a LISTAGEM /proposicoes é gated; a via que FUNCIONA
+            // (provada 02/07) é search→scrape de URL PROFUNDA com stealth (BLOCO 5).
+            // firecrawl_ativo=true SÓ na PoC (Canelinha + Nova Trento, coladas em
+            // Tijucas); as demais estão PRONTAS-MAS-DESATIVADAS — escalar consome
+            // crédito metered e é decisão de plano do Lorran (Hobby ~R$83/mês vs
+            // runner headless no PC do escritório).
+            ['cidade' => 'Canelinha',             'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaracanelinha.sc.gov.br',      'url' => 'https://www.camaracanelinha.sc.gov.br/proposicoes',      'poc' => true, 'firecrawl_ativo' => true],
+            ['cidade' => 'Nova Trento',           'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaranovatrento.sc.gov.br',     'url' => 'https://www.camaranovatrento.sc.gov.br/proposicoes',     'firecrawl_ativo' => true],
             ['cidade' => 'Bombinhas',             'plataforma' => 'softcamaras', 'url_base' => 'https://www.camarabombinhas.sc.gov.br',      'url' => 'https://www.camarabombinhas.sc.gov.br/proposicoes'],
             ['cidade' => 'Camboriú',              'plataforma' => 'softcamaras', 'url_base' => 'https://www.camaracamboriu.sc.gov.br',       'url' => 'https://www.camaracamboriu.sc.gov.br/proposicoes'],
             ['cidade' => 'Balneário Camboriú',    'plataforma' => 'softcamaras', 'url_base' => 'https://www.balneariocamboriu.sc.leg.br',    'url' => 'https://www.balneariocamboriu.sc.leg.br/proposicoes'],

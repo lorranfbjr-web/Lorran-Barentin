@@ -5,34 +5,39 @@ namespace App\Services\Jr;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Conector FIRECRAWL — câmaras SoftCâmaras + LEGISOFT (Fase 2, goal 02/07/2026).
+ * Conector FIRECRAWL — câmaras SoftCâmaras gated (BLOCO 5, goal 02/07/2026).
  *
- * Os 2 grupos cobrem 30 cidades tier1/tier2 (Tijucas, Canelinha, Nova Trento,
- * Bombinhas, Navegantes, Brusque, Floripa, São José, Palhoça, Biguaçu, GCR,
- * Camboriú, BC, Piçarras, Itajaí, Criciúma, Gaspar…) atrás de reCAPTCHA
- * invisível (lsrecaptcha no SoftCâmaras, /captcha no LEGISOFT) que bloqueia
- * curl de QUALQUER IP. A via sancionada pelo Lorran é o serviço comercial
- * Firecrawl (api.firecrawl.dev), que renderiza a página publicada e devolve
- * HTML/markdown — NÃO contornamos verificação de bot por conta própria.
+ * ESTRATÉGIA PROVADA 02/07 (a única que passa): a LISTAGEM /proposicoes é
+ * gated (reCAPTCHA invisível), mas as URLs PROFUNDAS (/tramitacoes/…) abrem
+ * com proxy "stealth". Então:
+ *   1. POST /v2/search  "site:<host> projeto de lei <ano>"  → descobre URLs
+ *      profundas indexadas (barato);
+ *   2. POST /v2/scrape  proxy:"stealth" de CADA URL profunda (≈5 créditos) →
+ *      parseia a proposição (tipo/nº/ano, ementa, data) → jr_camara_proposicoes.
+ * A tentativa anterior (scrape da listagem gated) está em
+ * ~/backups/radar-interesse-20260702/parte3-tentativa-errada/ — NÃO repetir.
+ * LEGISOFT segue BLOQUEADO (reCAPTCHA visível persiste até no stealth).
  *
- * ESTADO 02/07/2026: BLOQUEADO — sem FIRECRAWL_API_KEY no .env (falta o Lorran
- * contratar e colar a chave). Este conector fica PRONTO-PRA-PLUGAR:
- *   1. colar FIRECRAWL_API_KEY=fc-... no .env
- *   2. JRCAM_FIRECRAWL_ATIVO=true
- *   3. PoC: php artisan jr:firecrawl-ingest --poc --dry  (Canelinha + Tijucas)
- *   4. validar os parsers contra o HTML real (escritos hoje só com a EVIDÊNCIA
- *      da sonda — padrões de URL indexados pelo Google — porque as páginas são
- *      inacessíveis sem o serviço; ajustar regex se o markup divergir)
- *   5. descomentar o schedule em routes/console.php (1 request/câmara/dia)
- *
- * READ-ONLY e educado (cadência no schedule, não em rajada). ISOLADO: só
- * alimenta jr_camara_proposicoes — o CamaraScorer existente pontua sem mudança.
+ * 💳 METERED: plano free (~1000 créditos). Ledger interno (estimativa: search=2,
+ * scrape stealth=5) + teto RÍGIDO imposto pelo comando (default 300). 402/401 =
+ * para na hora. NÃO contornamos verificação de bot por conta própria — o
+ * Firecrawl é a via comercial sancionada.
  */
 class FirecrawlConector
 {
+    /** Estimativa de custo por operação (créditos) — calibrada no PoC 02/07:
+     * 1 search + 3 scrapes stealth = 19 créditos reais (≈6/scrape). */
+    public const CUSTO_SEARCH = 2;
+
+    public const CUSTO_SCRAPE_STEALTH = 6;
+
     private array $cfg;
 
     private float $pausa;
+
+    private int $creditosGastos = 0;
+
+    private bool $semCredito = false;
 
     public function __construct(?array $cfg = null)
     {
@@ -51,7 +56,7 @@ class FirecrawlConector
     public function motivoBloqueio(): string
     {
         if ((string) $this->cfg['api_key'] === '') {
-            return 'FIRECRAWL_API_KEY ausente no .env (falta contratar o Firecrawl e colar a chave)';
+            return 'FIRECRAWL_API_KEY ausente no .env';
         }
 
         return 'JRCAM_FIRECRAWL_ATIVO=false (chave-geral desligada na config)';
@@ -62,146 +67,148 @@ class FirecrawlConector
         usleep((int) ($this->pausa * 1_000_000));
     }
 
-    /**
-     * Renderiza $url via Firecrawl /v1/scrape e devolve ['html'=>…,'markdown'=>…]
-     * ou null. waitFor dá tempo do reCAPTCHA invisível resolver e a listagem
-     * hidratar. Retry 1x (crédito é cobrado por request — não insistir).
-     */
-    public function scrape(string $url): ?array
+    /** Créditos ESTIMADOS gastos por esta instância (ledger do teto). */
+    public function creditosGastos(): int
     {
-        $endpoint = rtrim((string) $this->cfg['api_base'], '/') . '/scrape';
-        for ($tentativa = 1; $tentativa <= 2; $tentativa++) {
-            try {
-                $r = Http::withToken((string) $this->cfg['api_key'])
-                    ->timeout(90)
-                    ->post($endpoint, [
-                        'url' => $url,
-                        'formats' => ['html', 'markdown'],
-                        'onlyMainContent' => false,
-                        'waitFor' => (int) $this->cfg['wait_ms'],
-                    ]);
-                $j = $r->json();
-                if ($r->successful() && ($j['success'] ?? false)) {
-                    return [
-                        'html' => (string) ($j['data']['html'] ?? ''),
-                        'markdown' => (string) ($j['data']['markdown'] ?? ''),
-                    ];
-                }
-                // 402 = sem crédito; 401 = chave inválida — insistir não resolve
-                if (in_array($r->status(), [401, 402], true)) {
-                    return null;
-                }
-            } catch (\Throwable $e) {
-                // cai no retry
+        return $this->creditosGastos;
+    }
+
+    /** true se a API devolveu 402 (crédito acabou) — parar tudo. */
+    public function semCredito(): bool
+    {
+        return $this->semCredito;
+    }
+
+    /** Créditos restantes REAIS da conta (GET /v2/team/credit-usage) ou null. */
+    public function creditosRestantesReais(): ?int
+    {
+        try {
+            $r = Http::withToken((string) $this->cfg['api_key'])->timeout(20)
+                ->get($this->url('/v2/team/credit-usage'));
+            if ($r->successful()) {
+                return (int) ($r->json('data.remainingCredits') ?? $r->json('data.remaining_credits'));
             }
-            sleep(3);
+        } catch (\Throwable) {
         }
 
         return null;
     }
 
     /**
-     * Proposições da câmara $cam (entrada de config.camara.firecrawl.cidades),
-     * ano >= $anoMin, roteando o parser pela plataforma.
-     *
-     * @return array<int,array> itens no formato de jr_camara_proposicoes
+     * Passo 1 — descobre URLs profundas (/tramitacoes/…) da câmara via
+     * /v2/search. @return array<int,string> URLs únicas, mais recentes primeiro.
      */
-    public function proposicoes(array $cam, int $anoMin): array
+    public function descobrirUrls(array $cam, int $ano, int $limite = 20): array
     {
-        $r = $this->scrape((string) $cam['url']);
-        if ($r === null || $r['html'] === '') {
-            throw new \RuntimeException("Firecrawl {$cam['cidade']}: sem HTML utilizável");
-        }
-        // gate ainda na frente = o render não passou (crédito/config) — não parsear lixo
-        if (preg_match('/Bot Verification|Verifica..o de seguran/iu', mb_substr($r['html'], 0, 4000))) {
-            throw new \RuntimeException("Firecrawl {$cam['cidade']}: página ainda é o gate (render não passou)");
+        $host = parse_url((string) $cam['url_base'], PHP_URL_HOST);
+        $q = "site:{$host} projeto de lei {$ano}";
+
+        $r = $this->post('/v2/search', ['query' => $q, 'limit' => $limite]);
+        $this->creditosGastos += self::CUSTO_SEARCH;
+        if ($r === null) {
+            return [];
         }
 
-        return match ($cam['plataforma']) {
-            'softcamaras' => $this->parseSoftcamaras($r['html'], $cam, $anoMin),
-            'legisoft' => $this->parseLegisoft($r['html'], $cam, $anoMin),
-            default => throw new \RuntimeException("Firecrawl: plataforma desconhecida '{$cam['plataforma']}'"),
-        };
+        $urls = [];
+        foreach ((array) ($r['data']['web'] ?? $r['data'] ?? []) as $hit) {
+            $u = (string) ($hit['url'] ?? '');
+            // só URL PROFUNDA de tramitação/proposição individual (a listagem é gated)
+            if ($u !== '' && preg_match('#/(tramitacoes|proposicoes)/.*\d#', $u)) {
+                $urls[$u] = true;
+            }
+        }
+
+        return array_keys($urls);
     }
 
     /**
-     * SOFTCAMARAS — evidência da sonda 02/07: listagem em /proposicoes, itens
-     * linkando /proposicoes/<Categoria>/<ano>/<pag>/<autor>/<id> e/ou
-     * /tramitacoes/<x>/<id>, com texto tipo "Projeto de Lei Ordinária
-     * Executivo nº 0068/2026" (indexado pelo Google em Canelinha/Camboriú).
-     * VALIDAR contra o HTML real no PoC — regex tolerante de propósito.
-     *
-     * @return array<int,array>
+     * Passo 2 — scrape stealth de UMA URL profunda. Devolve
+     * ['markdown'=>…,'html'=>…] ou null. Sem retry agressivo (crédito).
      */
-    private function parseSoftcamaras(string $html, array $cam, int $anoMin): array
+    public function scrapeProfundo(string $url): ?array
     {
-        $out = [];
-        $rx = '/<a[^>]+href="[^"]*\/(?:tramitacoes|proposicoes)\/[^"]*?(\d+)"[^>]*>(.*?)<\/a>/su';
-        if (! preg_match_all($rx, $html, $ms, PREG_SET_ORDER)) {
-            return $out;
-        }
-        foreach ($ms as $m) {
-            [, $docId, $rotuloHtml] = $m;
-            $rotulo = trim(preg_replace('/\s+/u', ' ',
-                html_entity_decode(strip_tags($rotuloHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
-            // "Projeto de Lei Ordinária Executivo nº 0068/2026" → tipo + nº/ano
-            if (! preg_match('/^(.*?)\s*(?:n[ºo°.]*\s*)?0*(\d+)\/(\d{4})\b/iu', $rotulo, $t)) {
-                continue;
-            }
-            $ano = (int) $t[3];
-            if ($ano < $anoMin) {
-                continue;
-            }
-            $tipo = trim(preg_replace('/\s+(?:Executivo|Legislativo)$/iu', '', trim($t[1])));
-            $out[$docId] = $this->item($cam, (int) $docId, $tipo, (int) $t[2], $ano, $rotulo,
-                rtrim((string) $cam['url_base'], '/') . "/tramitacoes/1/{$docId}");
+        $r = $this->post('/v2/scrape', [
+            'url' => $url,
+            'formats' => ['markdown', 'html'],
+            'onlyMainContent' => false,
+            'proxy' => 'stealth',
+            'waitFor' => (int) $this->cfg['wait_ms'],
+        ], 120);
+        $this->creditosGastos += self::CUSTO_SCRAPE_STEALTH;
+        if ($r === null) {
+            return null;
         }
 
-        return array_values($out); // keyed por docId = dedup na própria página
-    }
-
-    /**
-     * LEGISOFT — evidência da sonda 02/07: documentos em /documento/<slug>-<id>
-     * (Blumenau usa digital.* com filtros /documentos/tipo:…/ano:…). Rótulo do
-     * anchor carrega o título ("Projeto de Lei Nº 123/2026 — ementa…").
-     * VALIDAR contra o HTML real no PoC.
-     *
-     * @return array<int,array>
-     */
-    private function parseLegisoft(string $html, array $cam, int $anoMin): array
-    {
-        $out = [];
-        $rx = '/<a[^>]+href="[^"]*\/documentos?\/[^"]*?-?(\d+)\/?"[^>]*>(.*?)<\/a>/su';
-        if (! preg_match_all($rx, $html, $ms, PREG_SET_ORDER)) {
-            return $out;
-        }
-        foreach ($ms as $m) {
-            [, $docId, $rotuloHtml] = $m;
-            $rotulo = trim(preg_replace('/\s+/u', ' ',
-                html_entity_decode(strip_tags($rotuloHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
-            if (! preg_match('/^(.*?)\s*(?:n[ºo°.]*\s*)?0*(\d+)\/(\d{4})\b\s*[—–:-]?\s*(.*)$/iu', $rotulo, $t)) {
-                continue;
-            }
-            $ano = (int) $t[3];
-            if ($ano < $anoMin) {
-                continue;
-            }
-            $out[$docId] = $this->item($cam, (int) $docId, trim($t[1]), (int) $t[2], $ano, $rotulo,
-                rtrim((string) $cam['url_base'], '/') . "/documento/{$docId}",
-                trim($t[4]) ?: null);
-        }
-
-        return array_values($out);
-    }
-
-    /** Item no formato de jr_camara_proposicoes (mesmo contrato dos irmãos). */
-    private function item(array $cam, int $docId, string $tipo, int $numero, int $ano,
-        string $titulo, string $urlFonte, ?string $ementa = null): array
-    {
         return [
-            'host' => parse_url((string) $cam['url_base'], PHP_URL_HOST) ?: $cam['plataforma'],
+            'markdown' => (string) ($r['data']['markdown'] ?? ''),
+            'html' => (string) ($r['data']['html'] ?? ''),
+        ];
+    }
+
+    /**
+     * Passo 3 — parseia a página de detalhe (markdown) numa proposição no
+     * formato de jr_camara_proposicoes. Devolve null se não achar tipo+nº/ano.
+     */
+    public function parseDetalhe(string $markdown, string $url, array $cam, int $anoMin): ?array
+    {
+        $md = trim($markdown);
+        if ($md === '' || preg_match('/Bot Verification|Verifica..o de seguran/iu', mb_substr($md, 0, 2000))) {
+            return null; // gate ainda na frente
+        }
+
+        // "Projeto de Lei Ordinária (ou similar) nº 0068/2026" — 1ª ocorrência forte
+        if (! preg_match('/\b(Projeto de (?:Lei(?: Complementar| Ordin[áa]ria)?|Decreto|Resolu[çc][ãa]o)|Mo[çc][ãa]o|Indica[çc][ãa]o|Requerimento|Emenda)[^\n]{0,40}?n?[ºo°.\s]*0*(\d{1,5})\/(\d{4})/iu', $md, $t)) {
+            return null;
+        }
+        $ano = (int) $t[3];
+        if ($ano < $anoMin) {
+            return null;
+        }
+        $tipo = trim(preg_replace('/\s+/u', ' ', $t[1]));
+        $numero = (int) $t[2];
+
+        // data: preferir a rotulada ("Data ...: dd/mm/aaaa"), senão 1ª dd/mm/aaaa
+        $dataPub = null;
+        if (preg_match('/Data[^\n:]{0,30}:?\s*\**\s*(\d{2}\/\d{2}\/\d{4})/iu', $md, $d)
+            || preg_match('/(\d{2}\/\d{2}\/\d{4})/', $md, $d)) {
+            $dataPub = sprintf('%s-%s-%s', substr($d[1], 6, 4), substr($d[1], 3, 2), substr($d[1], 0, 2));
+        }
+
+        // ementa — no SoftCâmaras ela vem em CAPS, estilo legislativo ("ALTERA A
+        // LEI…", "DISPÕE SOBRE…"), muitas vezes como texto de link markdown.
+        // Estratégia: (1) desembrulha links, (2) corta boilerplate do site,
+        // (3) prefere frase iniciada em verbo legislativo CAPS; fallback = linha
+        // longa não-boilerplate.
+        $texto = preg_replace('/\[([^\]]+)\]\([^)]*\)/u', '$1', $md); // [txt](url) → txt
+        $ementa = null;
+        if (preg_match('/\b((?:ALTERA|DISP[ÕO]E|INSTITUI|AUTORIZA|DENOMINA|CRIA|ESTABELECE|APROVA|FIXA|CONCEDE|REVOGA|ABRE|RECONHECE|DECLARA|REGULAMENTA|PRO[ÍI]BE|OBRIGA|INCLUI)\b[^\n_]{20,500})/u', $texto, $e)) {
+            $ementa = trim(preg_replace('/\s+/u', ' ', $e[1]), " *_");
+        } elseif (preg_match('/Ementa[^\n:]{0,10}:?\s*\**\s*\n?\s*([^\n]{20,600})/iu', $texto, $e)) {
+            $ementa = trim($e[1], " *_");
+        } else {
+            foreach (preg_split('/\n+/', $texto) as $linha) {
+                $linha = trim(preg_replace('/\s+/u', ' ', strip_tags($linha)), " *#|_");
+                if (mb_strlen($linha) > mb_strlen((string) $ementa) && mb_strlen($linha) >= 60
+                    && ! preg_match('/^(https?:|!\[|menu|in[íi]cio|acessibilidade)/iu', $linha)
+                    && ! preg_match('/Todas as Situa|car[áa]ter apenas informativo|Em Tramita[çc][ãa]o:|Apensada|Pesquisar|Filtrar/iu', $linha)) {
+                    $ementa = $linha;
+                }
+            }
+        }
+
+        // autores, se rotulados
+        $autores = null;
+        if (preg_match('/Autor(?:ia|es)?[^\n:]{0,10}:?\s*\**\s*([^\n]{3,160})/iu', $md, $a)) {
+            $autores = trim($a[1], " *");
+        }
+
+        // docId da URL (último número do path) — unicidade real é o hash
+        $docId = preg_match('/(\d+)\/?$/', parse_url($url, PHP_URL_PATH) ?? '', $i) ? (int) $i[1] : crc32($url);
+
+        return [
+            'host' => parse_url((string) $cam['url_base'], PHP_URL_HOST) ?: 'softcamaras',
             'materia_id' => $docId,
-            'hash' => sha1("firecrawl:{$cam['plataforma']}:{$cam['cidade']}:{$docId}"),
+            'hash' => sha1("firecrawl:softcamaras:{$cam['cidade']}:{$tipo}:{$numero}/{$ano}"),
             'municipio' => $cam['cidade'],
             'orgao' => 'Câmara Municipal de ' . $cam['cidade'],
             'tipo_sigla' => null,
@@ -210,13 +217,43 @@ class FirecrawlConector
             'numero' => $numero,
             'ano' => $ano,
             'ementa' => $ementa,
-            'autores' => null,
-            'em_tramitacao' => true, // listagem corrente; refinamento fica pro PoC
-            'data_pub' => null,      // data não vem na listagem — detalhe fica pro PoC
-            'titulo' => $titulo,
-            'url_fonte' => $urlFonte,
+            'autores' => $autores,
+            'em_tramitacao' => true,
+            'data_pub' => $dataPub, // Recencia::sanitizar aplica o clamp no ingest
+            'titulo' => "{$tipo} nº {$numero}/{$ano}",
+            'url_fonte' => $url,
             'url_pdf' => null,
-            'texto_bruto' => $ementa,
+            'texto_bruto' => mb_substr($md, 0, 4000),
         ];
+    }
+
+    // ───────────────────────── HTTP ─────────────────────────
+
+    /** POST autenticado; null em erro. 402 (sem crédito) arma o kill switch. */
+    private function post(string $path, array $body, int $timeout = 60): ?array
+    {
+        try {
+            $r = Http::withToken((string) $this->cfg['api_key'])
+                ->timeout($timeout)
+                ->post($this->url($path), $body);
+            $j = $r->json();
+            if ($r->successful() && ($j['success'] ?? false)) {
+                return $j;
+            }
+            if ($r->status() === 402) {
+                $this->semCredito = true; // crédito ACABOU — parar tudo
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
+    }
+
+    /** api_base pode vir com /v1 histórico — normaliza pra raiz e monta o path. */
+    private function url(string $path): string
+    {
+        $base = preg_replace('#/v\d+/?$#', '', rtrim((string) $this->cfg['api_base'], '/'));
+
+        return $base . $path;
     }
 }
