@@ -237,6 +237,15 @@ Schedule::command('jr:prefeitura-score --limit=40')
     ->cron('40 6,12,18,23 * * *')
     ->withoutOverlapping(1800);
 
+// ── BLOCO 1 (03/07) — AUTO-RASCUNHO SELETIVO (flywheel salto 1) ──
+// 10min depois do score de prefeitura (único insumo 🟢 do gate). Guard-rails
+// no comando: gate E-lógico (fonte 🟢 + score + tier1 + frescor + categoria
+// baixo risco, blocklist 🔴 vence), cap diário, dedup em jr_rascunho_entregas,
+// janela de silêncio do Bloco 0b, fail-closed sem credencial. NÃO publica.
+Schedule::command('jrcivico:auto-rascunho')
+    ->cron('50 6,12,18,23 * * *')
+    ->withoutOverlapping(1800);
+
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no WHATSAPP ──
 // (BLOCO 2, 02/07: saiu do Telegram — grupo interno via instância de alerta
 // JRLINK_ALERT_ZAPI_*.) ADITIVO/ISOLADO. Digest por ciclo (anti-flood) das

@@ -162,24 +162,13 @@ class JrCivicoAlertar extends Command
     }
 
     /**
-     * BLOCO 0b (03/07): dentro da janela de silêncio (hora LOCAL, formato
-     * "HH-HH"; "22-06" cruza a meia-noite) o alerta não envia nem registra.
-     * Faixa inválida/vazia = sem silêncio (fail-open: alerta é o produto).
+     * BLOCO 0b (03/07): dentro da janela de silêncio (hora LOCAL) o alerta não
+     * envia nem registra. Lógica compartilhada em JanelaSilencio (o auto-
+     * rascunho e o kit social respeitam a mesma janela).
      */
     private function emSilencio(array $cfg): bool
     {
-        $faixa = trim((string) ($cfg['silencio'] ?? ''));
-        if ($faixa === '' || ! preg_match('/^(\d{1,2})-(\d{1,2})$/', $faixa, $m)) {
-            return false;
-        }
-        $ini = min(23, (int) $m[1]);
-        $fim = min(23, (int) $m[2]);
-        if ($ini === $fim) {
-            return false; // faixa nula (ex.: "8-8") = silêncio desligado
-        }
-        $h = (int) Carbon::now((string) ($cfg['tz_local'] ?? 'America/Sao_Paulo'))->format('G');
-
-        return $ini < $fim ? ($h >= $ini && $h < $fim) : ($h >= $ini || $h < $fim);
+        return \App\Services\Jr\JanelaSilencio::ativa($cfg);
     }
 
     /**

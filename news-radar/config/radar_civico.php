@@ -89,4 +89,44 @@ return [
         'client_token' => env('JRLINK_ALERT_ZAPI_CLIENT_TOKEN', ''),
         'modelo' => env('RADAR_CIVICO_RASCUNHO_MODELO', 'claude-opus-4-8'),
     ],
+
+    /*
+     * BLOCO 1 (03/07): AUTO-RASCUNHO SELETIVO — flywheel salto 1.
+     * O gate é E-lógico (TUDO tem que valer): fonte 🟢 serviço/1ª-mão (SÓ
+     * jr_prefeitura_noticias — release oficial; DOM/câmara/MPSC/TCE NUNCA
+     * entram no auto) · score >= score_min · cidade tier1 · data_pub fresca ·
+     * categoria de baixo risco (allowlist) SEM nenhuma palavra vermelha
+     * (blocklist vence sempre). 🔴 fiscalização/polícia/morte/judicial/
+     * político continua SÓ alertando — humano decide.
+     * Guard-rails: cap diário, dedup por ato_ref (jr_rascunho_entregas),
+     * mesma janela de silêncio do alerta, SEM foto (Trava #0 intocada).
+     */
+    'auto_rascunho' => [
+        'score_min' => (int) env('RADAR_CIVICO_AUTORASCUNHO_MIN', 80),
+        'max_dia' => (int) env('RADAR_CIVICO_AUTORASCUNHO_DIA', 5),
+        'frescor_horas' => (int) env('RADAR_CIVICO_AUTORASCUNHO_FRESCOR_H', 48),
+        // categoria de BAIXO RISCO: precisa casar >=1 (concurso, obra/serviço,
+        // campanha de saúde, utilidade pública). Minúsculas, sem acento não —
+        // o matcher normaliza o texto antes.
+        'baixo_risco' => [
+            'concurso', 'processo seletivo', 'convoca', 'matricula', 'inscri',
+            'mutirao', 'castracao', 'vacina', 'campanha', 'unidade de saude',
+            'atendimento', 'obra', 'pavimenta', 'asfalto', 'construcao',
+            'interdit', 'transporte', 'curso', 'capacitacao', 'horario',
+            'funcionamento', 'utilidade', 'servico', 'defesa civil', 'alerta',
+            'agendamento', 'gratuit', 'cronograma', 'coleta',
+        ],
+        // palavra VERMELHA: qualquer uma derruba o item do auto (segue só
+        // alertando). Fiscalização, polícia, morte, judicial, político.
+        'vermelho' => [
+            'investiga', 'inquerito', 'apura', 'denunci', 'improbidade',
+            'irregularidade', 'fiscaliza', 'policia', 'policial', 'crime',
+            'homicidio', 'morte', 'morto', 'faleceu', 'obito', 'corpo',
+            'acidente', 'judicial', 'justica', 'liminar', 'acao civil',
+            'ministerio publico', 'promotor', 'tribunal', 'eleicao',
+            'eleitoral', 'partido', 'candidat', 'vereador', 'impeachment',
+            'cassacao', 'prisao', 'preso', 'trafico', 'estupro', 'violencia',
+            'condenacao', 'condenado', 'multa a', 'processo contra',
+        ],
+    ],
 ];
