@@ -115,6 +115,18 @@ return [
      * Guard-rails: cap diário, dedup por ato_ref (jr_rascunho_entregas),
      * mesma janela de silêncio do alerta, SEM foto (Trava #0 intocada).
      */
+    /*
+     * BLOCO 4 (03/07): TRIAGEM QUENTE/FRIA do fluxo julgado (jr_link_extracao).
+     * Compõe sinais existentes: temperatura_juiz + score_editorial + recência
+     * (decay do interesse.php) + tier de cidade. Quente → digest no canal
+     * sugestões; fria → só painel. NADA muda score no banco.
+     */
+    'quente_fria' => [
+        'score_min' => (int) env('RADAR_QF_SCORE_MIN', 70),      // corte do composto
+        'max_itens_run' => (int) env('RADAR_QF_MAX_ITENS', 8),   // top-N detalhado por digest
+        'frescor_dias' => (int) env('RADAR_QF_FRESCOR_DIAS', 3), // mais velho que isso nunca é quente
+    ],
+
     'auto_rascunho' => [
         'score_min' => (int) env('RADAR_CIVICO_AUTORASCUNHO_MIN', 80),
         'max_dia' => (int) env('RADAR_CIVICO_AUTORASCUNHO_DIA', 5),

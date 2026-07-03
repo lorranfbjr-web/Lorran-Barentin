@@ -246,6 +246,16 @@ Schedule::command('jrcivico:auto-rascunho')
     ->cron('50 6,12,18,23 * * *')
     ->withoutOverlapping(1800);
 
+// ── BLOCO 4 (03/07) — TRIAGEM QUENTE/FRIA do fluxo julgado ──
+// Depois do juiz (:05/:35): compõe sinais existentes (temperatura_juiz +
+// score_editorial + recência + tier cidade), quente → digest no canal
+// sugestões (silêncio+cap do Bloco 0b), fria → só painel. Dedup em
+// jr_quente_fria; 1ª rodada (03/07) entregou digest único do backlog 24h —
+// os ciclos seguintes só triam o recém-julgado (sem flood por construção).
+Schedule::command('jrlink:quente-fria')
+    ->cron('12,42 * * * *')
+    ->withoutOverlapping(600);
+
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no WHATSAPP ──
 // (BLOCO 2, 02/07: saiu do Telegram — grupo interno via instância de alerta
 // JRLINK_ALERT_ZAPI_*.) ADITIVO/ISOLADO. Digest por ciclo (anti-flood) das
