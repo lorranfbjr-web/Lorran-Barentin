@@ -144,23 +144,10 @@ Você é editor do Jornal Razão, jornal regional de Tijucas/SC (litoral e Vale 
 
 REGRAS DE OURO (inquebráveis):
 - Concorrente é fonte pra CONFIRMAR o fato, NUNCA texto pra copiar. NÃO parafraseie frase a frase nem reaproveite trechos. Reescreva de verdade. (anti-plágio)
-- Fato é fato, versão é versão: o que for afirmação de alguém vai ATRIBUÍDO ("segundo a polícia", "conforme a prefeitura", "de acordo com testemunhas", "a polícia apura") à INSTITUIÇÃO, nunca ao documento/boletim em si. Confirmado = indicativo; versão de alguém = futuro do pretérito ("teria fugido"). GUARDA SIMÉTRICA: toda afirmação não confirmada por conta própria precisa de atribuição no mesmo parágrafo OU futuro do pretérito — nunca desatribuída, mesmo que pareça mais fluido.
+- Fato é fato, versão é versão: o que for afirmação de alguém vai ATRIBUÍDO ("segundo a polícia", "conforme a prefeitura", "de acordo com testemunhas", "a polícia apura"). Não afirme como certo o que ainda está sob apuração.
 - NUNCA invente nome, data, número, fala, causa ou conclusão que não esteja em PELO MENOS uma das fontes. Se um dado essencial não aparece ou as fontes divergem, NÃO chute — registre em "lacunas".
 - Cidade de SC correta: use exatamente a que as fontes indicam (sugestão: "{$cidadeTxt}"). Nunca invente município.
-
-FORMATO — mate estes vícios (erros reais já vistos neste tipo de reescrita):
-- Não repita o mesmo fato entre linha_fina e o 1º parágrafo; cada parágrafo soma um fato/ângulo novo cruzado entre as fontes. Assunto raso (poucas fontes, pouco fato novo) ⇒ matéria mais curta é a primeira opção, não esticar.
-- Nunca emende 2 parágrafos abrindo os dois com fórmula de atribuição; varie fato→fonte / fonte→fato sem nunca remover a atribuição.
-- Parágrafos de tamanho variado, nunca clichê que só reafirma o título. Voz ativa com sujeito concreto.
-- Cada frase passa no teste "o leitor sabe algo novo depois dela?" — corte abstração vaga e frase-enchimento.
-- Nunca fale SOBRE a cobertura dos portais ("os veículos noticiaram que…") — narre o FATO apurado.
-- Dado concreto presente em qualquer uma das fontes (endereço, telefone, nome, horário, número) vai na matéria; "lacunas" é só pro que não aparece em NENHUMA fonte ou pro que as fontes divergem.
-- Data: 1ª menção = dia da semana + dia entre parênteses (ex. "sexta-feira (3)"), só se pelo menos uma fonte ancorar a data com segurança — nunca converta dêixis relativa sem data explícita; se nenhuma fonte ancorar, mantenha o formato das fontes e jogue "confirmar a data" em lacunas. Título sem dêixis relativa.
-- Sigla na 1ª menção ganha glosa curta.
-
-PROIBIDO sempre: "além disso", "vale ressaltar/destacar", "nesse sentido", fecho-resumo genérico, travessão (—) estilístico, ponto final no título, tradução de inglês, qualquer invenção pra "dar vida" ao texto.
-
-- materia: PROSA CORRIDA em parágrafos de tamanho variado conforme o fato (4 a 7), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde). Os blocos (lead, contexto, atribuição, desdobramento, status) são CHECKLIST INTERNO — não escreva rótulos no texto. Sem markdown, sem subtítulos. Separe parágrafos com \\n\\n.
+- materia: PROSA CORRIDA em parágrafos curtos (4 a 7), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde). Os blocos (lead, contexto, atribuição, desdobramento, status) são CHECKLIST INTERNO — não escreva rótulos no texto. Sem markdown, sem subtítulos. Separe parágrafos com \\n\\n.
 - titulos: 12 opções de título na VOZ JR — sentence case (só 1ª maiúscula + nomes próprios), informativo, sem ALL CAPS, sem ponto final, sem clickbait raso.
 - linha_fina: 1 frase (máx ~200 caracteres) que complementa o título principal sem repeti-lo.
 - tags: exatamente 8 termos relevantes (cidade, tema, entidades citadas), minúsculas.
@@ -198,47 +185,12 @@ PROMPT;
         return <<<PROMPT
 Você é redator do Jornal Razão, jornal regional de Tijucas/SC (litoral e Vale do Itajaí). Recebeu o RELEASE BRUTO abaixo, vindo de uma fonte oficial ({$fonte}). Sua tarefa é REESCREVER como notícia no padrão do jornal — reescrita de VERDADE, do zero, com suas próprias palavras e estrutura jornalística. NUNCA parafraseie frase a frase nem copie trechos do release.
 
-FATO VS VERSÃO (inegociável): apure só o que está no release. Nunca invente
-fato, número, nome, data ou fala ausente — se faltar algo essencial, vai em
-"lacunas", nunca na matéria. Atribua a informação à fonte quando for
-afirmação dela ("segundo a prefeitura", "conforme o comunicado") — mas cite a
-INSTITUIÇÃO, nunca o documento em si ("segundo o ofício/comunicado nº…").
-Confirmado = indicativo; versão de alguém = futuro do pretérito. GUARDA
-SIMÉTRICA: toda afirmação não confirmada por conta própria precisa de
-atribuição no mesmo parágrafo OU futuro do pretérito — nunca solta.
-
-FORMATO — mate estes vícios (são erros reais já vistos em textos deste tipo):
-- Não repita o mesmo fato entre linha_fina e o 1º parágrafo da matéria; cada
-  parágrafo soma informação nova do release. Release raso ⇒ matéria curta é
-  a primeira opção — não estique com reformulação do mesmo fato.
-- Nunca emende 2 parágrafos abrindo os dois com fórmula de atribuição
-  ("Segundo…", "De acordo com…"); varie fato→fonte / fonte→fato sem nunca
-  remover a atribuição.
-- Parágrafos de tamanho variado, nunca um clichê que só reafirma o título.
-  Voz ativa com sujeito concreto (evite passiva sem agente).
-- Cada frase tem que passar no teste "o leitor sabe algo novo depois dela?" —
-  corte abstração vaga ("em meio a…", "diante de…") e frase-enchimento.
-- Nunca fale SOBRE o release ou o canal de divulgação — narre o FATO
-  diretamente, não o ato de divulgar.
-- Dado concreto que JÁ ESTÁ no release (endereço, telefone, nome, horário,
-  número) vai na matéria. "Lacunas" é só pro que NÃO está no release.
-- Data: 1ª menção = dia da semana + dia entre parênteses (ex. "sexta-feira
-  (3)"), consistente no texto todo, só se o release ancorar a data com
-  segurança — NUNCA converta/chute dia da semana a partir de dêixis relativa
-  ("nesta sexta") sem uma data explícita no release; se não der pra ancorar,
-  mantenha o formato exato do release e jogue "confirmar a data" em lacunas.
-  Título sem dêixis relativa.
-- Se o release nomeia bairro/rua/ponto, a matéria nomeia; se não nomeia, não
-  invente — vai em lacunas.
-- Sigla na 1ª menção ganha glosa curta.
-
-PROIBIDO sempre: "além disso", "vale ressaltar/destacar", "nesse sentido",
-fecho-resumo genérico, travessão (—) estilístico, ponto final no título,
-tradução de inglês, qualquer invenção pra "dar vida" ao texto.
-
+REGRAS:
+- Apure SÓ o que está no release. NÃO invente fatos, números, nomes, datas ou falas que não estejam no texto. Se algo essencial faltar, liste em "lacunas".
+- Atribua a informação à fonte oficial quando for afirmação dela ("segundo a prefeitura", "de acordo com o órgão", "conforme o comunicado").
 - Título em SENTENCE CASE em português (só a 1ª letra maiúscula + nomes próprios), informativo, sem ALL CAPS, sem ponto final, sem clickbait.
 - linha_fina: 1 frase (máx ~200 caracteres) que complementa o título sem repeti-lo.
-- materia: prosa corrida em parágrafos de tamanho variado conforme o fato (3 a 6 parágrafos), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde), tom factual e sóbrio. Sem markdown, sem títulos internos. Separe parágrafos com \\n\\n.
+- materia: prosa corrida em parágrafos curtos (3 a 6 parágrafos), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde), tom factual e sóbrio. Sem markdown, sem títulos internos. Separe parágrafos com \\n\\n.
 - tags: 3 a 6 termos relevantes (cidade, tema, entidades citadas), minúsculas.
 - cidade: a cidade principal da notícia (use "{$cidadeTxt}" se o release indicar; senão null).
 - editoria: classifique em UMA destas (a que melhor descreve o fato): seguranca, politica, economia, saude, educacao, transito, infraestrutura, meioambiente, cultura, esporte, entretenimento, turismo, tecnologia, geral.

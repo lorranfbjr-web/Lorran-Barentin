@@ -435,6 +435,11 @@ return [
         'reescrita_pauta' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
         'rascunho_civico' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
         'kit_social' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
+
+        // GOAL revisao-raspagem (03/07) — O5: tell-check (cético anti-IA) no
+        // caminho do envio. Política de custo é FIXA (nunca segue o driver de
+        // rascunho acima): sempre OpenAI, nunca Claude em lote.
+        'tell_check' => 'openai',
     ],
 
     /*
@@ -448,6 +453,9 @@ return [
         'reescrita_pauta' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
         'rascunho_civico' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
         'kit_social' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
+
+        // O5 — cético do tell-check: sempre o mini, custo ~zero por design.
+        'tell_check' => 'gpt-4o-mini',
     ],
 
     'juiz' => [

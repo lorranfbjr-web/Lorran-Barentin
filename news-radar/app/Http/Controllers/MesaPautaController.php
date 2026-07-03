@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\Jr\FotoOficial;
 use App\Services\Jr\RascunhoCivico;
+use App\Services\Jr\TellCheck;
 use App\Services\Jr\ZapRascunhos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -132,6 +133,24 @@ class MesaPautaController extends Controller
             return response()->json(['ok' => false, 'erro' => 'o gerador não retornou rascunho — tente de novo'], 502);
         }
 
+        // O5 — tell-check SEMPRE (heurística + cético), igual ao caminho AUTO.
+        // NUNCA segura/descarta — só regenera 1x informando o tell e anota flag.
+        $tellCheck = app(TellCheck::class);
+        $tellFlag = null;
+        $score = $tellCheck->avaliar($r['titulo'], $r['lead'], $r['corpo'], (string) ($ato['texto_bruto'] ?? ''));
+        if ($score['grave']) {
+            $motivos = array_map(fn ($t) => $t['tell'], array_filter($score['tells'], fn ($t) => $t['grave']));
+            $regen = $gerador->gerar($p->ato_ref, $motivos);
+            if (! empty($regen)) {
+                $r = $regen;
+                $score = $tellCheck->avaliar($r['titulo'], $r['lead'], $r['corpo'], (string) ($ato['texto_bruto'] ?? ''));
+            }
+            if ($score['grave']) {
+                $graveTells = array_values(array_filter($score['tells'], fn ($t) => $t['grave']));
+                $tellFlag = mb_strimwidth($graveTells[0]['tell'] ?? 'anti-ia', 0, 60, '…');
+            }
+        }
+
         // versão ANOTADA (checklist/fonte/disclaimer) fica na FILA da Mesa —
         // BLOCO 8a: o grupo recebe SÓ o formato limpo, igual ao caminho AUTO.
         $interno = $gerador->formatar($r, $ato);
@@ -161,7 +180,7 @@ class MesaPautaController extends Controller
             if ($foto !== null) {
                 $fotoMsgId = $zap->imagemArquivo($foto['abs'], $r['titulo'], $grupo);
             }
-            $texto = $gerador->formatarLimpo($r, $foto, $fotoMsgId !== null, 'rascunho da Mesa');
+            $texto = $gerador->formatarLimpo($r, $foto, $fotoMsgId !== null, 'rascunho da Mesa', $tellFlag);
             $messageId = $zap->texto($texto, $grupo) ?? $fotoMsgId; // texto falhou? a foto ancora o ✅
         }
 
@@ -172,6 +191,7 @@ class MesaPautaController extends Controller
                 ['ato_ref' => $p->ato_ref, 'tipo' => 'mesa'],
                 [
                     'message_id' => $messageId,
+                    'gate_motivo' => $tellFlag !== null ? "⚠ tell:{$tellFlag}" : null,
                     'payload' => json_encode($r + [
                         'municipio' => (string) ($p->municipio ?? ''),
                         'url_fonte' => $urlFonte,
@@ -192,6 +212,7 @@ class MesaPautaController extends Controller
             'com_foto' => $fotoMsgId !== null,
             'destino_configurado' => $zap->configurado() && $grupo !== '',
             'status' => 'rascunho-gerado',
+            'tell_flag' => $tellFlag,
         ]);
     }
 

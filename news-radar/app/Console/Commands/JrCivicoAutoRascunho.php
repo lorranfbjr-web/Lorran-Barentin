@@ -6,6 +6,7 @@ use App\Services\Jr\CidadesInteresse;
 use App\Services\Jr\FotoOficial;
 use App\Services\Jr\JanelaSilencio;
 use App\Services\Jr\RascunhoCivico;
+use App\Services\Jr\TellCheck;
 use App\Services\Jr\ZapRascunhos;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -103,7 +104,10 @@ class JrCivicoAutoRascunho extends Command
                 continue;
             }
 
-            if ($this->entregar($zap, $grupo, $rc, $r, $c) === null) {
+            // O5 — tell-check SEMPRE (heurística + cético), NUNCA segura/descarta.
+            $tellFlag = $this->tellCheck($rc, $c['ato_ref'], $r);
+
+            if ($this->entregar($zap, $grupo, $rc, $r, $c, tellFlag: $tellFlag) === null) {
                 continue;
             }
         }
@@ -119,7 +123,43 @@ class JrCivicoAutoRascunho extends Command
      *
      * @return ?string messageId da mensagem de TEXTO (alvo do ✅), null = falha
      */
-    private function entregar(ZapRascunhos $zap, string $grupo, RascunhoCivico $rc, array $r, array $c, bool $atualizar = false): ?string
+    /**
+     * O5 — tell-check no caminho do envio: heurística + cético SEMPRE. Tell
+     * grave → regenera 1x informando o tell → re-checa (inclusive grounding)
+     * → se persistir, envia assim mesmo com o defeito VISÍVEL (flag). NUNCA
+     * segura nem descarta — não é gate.
+     *
+     * @param  array  $r  passado por referência: a regeneração troca o conteúdo.
+     * @return ?string rótulo curto do tell pra linha operacional/gate_motivo, ou null se limpo.
+     */
+    private function tellCheck(RascunhoCivico $rc, string $atoRef, array &$r): ?string
+    {
+        $ato = $rc->carregar($atoRef);
+        $fonte = (string) ($ato['texto_bruto'] ?? '');
+        $tc = app(TellCheck::class);
+
+        $score = $tc->avaliar($r['titulo'], $r['lead'], $r['corpo'], $fonte);
+        if (! $score['grave']) {
+            return null;
+        }
+
+        $motivos = array_map(fn ($t) => $t['tell'], array_filter($score['tells'], fn ($t) => $t['grave']));
+        $regen = $rc->gerar($atoRef, $motivos);
+        if (! empty($regen)) {
+            $r = $regen;
+            $score = $tc->avaliar($r['titulo'], $r['lead'], $r['corpo'], $fonte);
+        }
+
+        if (! $score['grave']) {
+            return null;
+        }
+
+        $primeiro = $score['tells'][array_key_first(array_filter($score['tells'], fn ($t) => $t['grave'])) ?? 0]['tell'] ?? 'anti-ia';
+
+        return mb_strimwidth($primeiro, 0, 60, '…');
+    }
+
+    private function entregar(ZapRascunhos $zap, string $grupo, RascunhoCivico $rc, array $r, array $c, bool $atualizar = false, ?string $tellFlag = null): ?string
     {
         $foto = null;
         if ($c['url_fonte'] !== '') {
@@ -131,7 +171,7 @@ class JrCivicoAutoRascunho extends Command
         // fail-closed: sem credencial/grupo o rascunho NÃO circula
         if (! $zap->configurado() || $grupo === '') {
             $this->warn('[SEM CREDENCIAL Z-API/grupo] Rascunho gerado mas NÃO enviado:');
-            $this->line(mb_substr($rc->formatarLimpo($r, $foto, false), 0, 600).'…');
+            $this->line(mb_substr($rc->formatarLimpo($r, $foto, false, tellFlag: $tellFlag), 0, 600).'…');
 
             return null;
         }
@@ -145,8 +185,9 @@ class JrCivicoAutoRascunho extends Command
         }
 
         // texto montado DEPOIS do send-image: crédito de foto nunca fica órfão
-        // e a linha operacional avisa quando a foto só vai no draft.
-        $texto = $rc->formatarLimpo($r, $foto, $fotoMsgId !== null);
+        // e a linha operacional avisa quando a foto só vai no draft. O5: flag
+        // de tell (se houver) é informação de decisão do editor, nunca gate.
+        $texto = $rc->formatarLimpo($r, $foto, $fotoMsgId !== null, tellFlag: $tellFlag);
 
         $messageId = $zap->texto($texto, $grupo);
         if ($messageId === null && $fotoMsgId === null) {
@@ -181,7 +222,9 @@ class JrCivicoAutoRascunho extends Command
                 'ato_ref' => $c['ato_ref'],
                 'tipo' => 'auto',
                 'message_id' => $messageId,
-                'gate_motivo' => $c['gate_motivo'],
+                // O5: flag do tell-check é ANEXADA ao motivo (auditável), nunca
+                // substitui/afrouxa a condição real do gate acima.
+                'gate_motivo' => $c['gate_motivo'].($tellFlag !== null ? " · ⚠ tell:{$tellFlag}" : ''),
                 'payload' => $payload,
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now(),
