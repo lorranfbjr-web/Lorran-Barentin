@@ -78,6 +78,25 @@ return [
     'canais' => [
         'sugestoes' => env('RADAR_CIVICO_SUGESTOES_GROUP', env('JRLINK_RASCUNHOS_GROUP', '')),
         'rascunhos' => env('RADAR_CIVICO_RASCUNHO_GROUP', env('JRLINK_RASCUNHOS_GROUP', '')),
+
+        /*
+         * GOAL SIMPLIFICAR (03/07) — BLOCO 3: GRUPOS SEPARADOS POR FONTE.
+         * O Lorran criou 3 grupos novos; roteamento config-driven:
+         *   DOM + câmaras        → "Raspador Diário Oficial"   (RADAR_GRUPO_DOM)
+         *   MPSC + TCE           → "Raspador Justiça (MP+TC)"  (RADAR_GRUPO_JUSTICA)
+         *   notícia/release pref → "Raspador Cidades"          (RADAR_GRUPO_CIDADES)
+         *   notícias de portais  → grupo "Raspador" atual      (JRLINK_ALERT_GROUP)
+         *   Rascunhos            → SÓ auto-rascunho/kit/✅      (canais.rascunhos)
+         * Env vazio = fallback pro canal sugestoes (comportamento antigo).
+         */
+        'civico' => [
+            'dom' => env('RADAR_GRUPO_DOM', ''),
+            'camara' => env('RADAR_GRUPO_DOM', ''),
+            'mpsc' => env('RADAR_GRUPO_JUSTICA', ''),
+            'tce' => env('RADAR_GRUPO_JUSTICA', ''),
+            'prefeitura' => env('RADAR_GRUPO_CIDADES', ''),
+        ],
+        'noticias' => env('JRLINK_ALERT_GROUP', ''),
     ],
 
     // PARQUEADO (02/07): ninguém do radar lê mais este bloco — mantido só pra

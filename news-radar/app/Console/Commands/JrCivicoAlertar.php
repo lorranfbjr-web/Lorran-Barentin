@@ -83,26 +83,27 @@ class JrCivicoAlertar extends Command
 
         // fail-closed: sem instância de alerta + grupo, não envia (documenta e sai)
         $zap = new \App\Services\Jr\ZapRascunhos();
-        $grupo = (string) config('radar_civico.canais.sugestoes');
-        if ($this->option('dry') || ! $zap->configurado() || $grupo === '') {
-            $motivo = $this->option('dry') ? '[--dry]' : '[SEM CREDENCIAL: configure JRLINK_ALERT_ZAPI_* + RADAR_CIVICO_SUGESTOES_GROUP/JRLINK_RASCUNHOS_GROUP]';
+        $temAlvo = $this->grupoDe('dom') !== '' || $this->grupoDe('mpsc') !== '' || $this->grupoDe('prefeitura') !== '';
+        if ($this->option('dry') || ! $zap->configurado() || ! $temAlvo) {
+            $motivo = $this->option('dry') ? '[--dry]' : '[SEM CREDENCIAL: configure JRLINK_ALERT_ZAPI_* + RADAR_GRUPO_DOM/JUSTICA/CIDADES (ou fallback sugestões)]';
             $this->warn("Não enviado {$motivo}. " . count($n3) . ' N3 larga-tudo + ' . count($novas) . ' N2 digest:');
             foreach ($n3 as $p) {
                 $this->line(str_repeat('═', 48));
+                $this->line('→ grupo ' . ($this->grupoDe($p['source']) ?: '(vazio)'));
                 $this->line($this->renderNivel3($p));
             }
-            if (! empty($novas)) {
+            foreach ($this->porGrupo($novas) as $grupo => $lote) {
                 $this->line(str_repeat('─', 48));
-                $this->line($this->montar($novas, $cfg));
-                $this->line(str_repeat('─', 48));
+                $this->line('→ grupo ' . ($grupo ?: '(vazio)'));
+                $this->line($this->montar($lote, $cfg));
             }
             return self::SUCCESS;
         }
 
-        // N3 primeiro: 1 mensagem imediata POR ITEM, fora do cap do digest.
-        // Falhou o envio → item NÃO registrado, volta no próximo ciclo.
+        // N3 primeiro: 1 mensagem imediata POR ITEM, fora do cap do digest,
+        // roteada pro grupo da FONTE (BLOCO 3). Falhou → volta no próximo ciclo.
         foreach ($n3 as $p) {
-            $mid = $zap->texto($this->renderNivel3($p), $grupo);
+            $mid = $zap->texto($this->renderNivel3($p), $this->grupoDe($p['source']));
             if ($mid === null) {
                 $this->error("Z-API recusou N3 {$p['ato_ref']} — volta no próximo ciclo.");
                 continue;
@@ -116,16 +117,45 @@ class JrCivicoAlertar extends Command
             return self::SUCCESS;
         }
 
-        $msg = $this->montar($novas, $cfg);
-        $messageId = $zap->texto($msg, $grupo);
-        if ($messageId === null) {
-            $this->error('Z-API recusou o envio (ver laravel.log) — nada registrado, tenta no próximo ciclo.');
-            return self::FAILURE;
+        // GOAL SIMPLIFICAR (03/07) — BLOCO 3: UM digest POR GRUPO de destino
+        // (DOM+câmaras · MPSC+TCE · prefeituras). Falha num grupo não registra
+        // aquele lote (re-tenta); os outros seguem.
+        $falhas = 0;
+        foreach ($this->porGrupo($novas) as $grupo => $lote) {
+            $messageId = $zap->texto($this->montar($lote, $cfg), $grupo);
+            if ($messageId === null) {
+                $this->error("Z-API recusou digest pro grupo {$grupo} — " . count($lote) . ' item(ns) voltam no próximo ciclo.');
+                $falhas++;
+                continue;
+            }
+            $this->registrar($lote);
+            $this->info('Digest enviado pro grupo ' . $grupo . ': ' . count($lote) . " pauta(s) (messageId {$messageId}).");
         }
 
-        $this->registrar($novas);
-        $this->info('Alerta enviado: ' . count($novas) . ' pauta(s) quente(s) nova(s).');
-        return self::SUCCESS;
+        return $falhas > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /** BLOCO 3: grupo da fonte (config canais.civico), fallback sugestões. */
+    private function grupoDe(string $source): string
+    {
+        return (string) (config("radar_civico.canais.civico.{$source}")
+            ?: config('radar_civico.canais.sugestoes', ''));
+    }
+
+    /** Agrupa as pautas pelo grupo de destino (descarta alvo vazio, com aviso). */
+    private function porGrupo(array $novas): array
+    {
+        $lotes = [];
+        foreach ($novas as $p) {
+            $grupo = $this->grupoDe($p['source']);
+            if ($grupo === '') {
+                $this->warn("Sem grupo configurado pra fonte {$p['source']} — {$p['ato_ref']} fica pro próximo ciclo.");
+                continue;
+            }
+            $lotes[$grupo][] = $p;
+        }
+
+        return $lotes;
     }
 
     /**

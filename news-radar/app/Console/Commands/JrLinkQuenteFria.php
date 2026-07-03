@@ -110,7 +110,7 @@ class JrLinkQuenteFria extends Command
             // próximo ciclo (mesmo padrão do kit social). Canal não configurado
             // é fail-closed deliberado: aí grava (senão acumula pra sempre).
             $envioFalhou = $messageId === null && (new ZapRascunhos)->configurado()
-                && (string) config('radar_civico.canais.sugestoes') !== '';
+                && (string) (config('radar_civico.canais.noticias') ?: config('radar_civico.canais.sugestoes')) !== '';
         }
 
         $agora = Carbon::now();
@@ -237,7 +237,9 @@ class JrLinkQuenteFria extends Command
     private function entregar(Collection $quentes, int $maxRun): ?string
     {
         $zap = new ZapRascunhos;
-        $canal = (string) config('radar_civico.canais.sugestoes');
+        // BLOCO 3 (simplificar 03/07): notícia de portal vai pro grupo Raspador
+        // (canais.noticias = JRLINK_ALERT_GROUP), fallback sugestões.
+        $canal = (string) (config('radar_civico.canais.noticias') ?: config('radar_civico.canais.sugestoes'));
         if (! $zap->configurado() || $canal === '') {
             $this->warn('[SEM CREDENCIAL Z-API/canal] Digest quente NÃO enviado (fica pro painel).');
 
@@ -311,7 +313,8 @@ class JrLinkQuenteFria extends Command
     private function entregarNivel3(array $n3): array
     {
         $zap = new ZapRascunhos;
-        $canal = (string) config('radar_civico.canais.sugestoes');
+        // BLOCO 3 (simplificar 03/07): mesmo destino do digest (grupo Raspador).
+        $canal = (string) (config('radar_civico.canais.noticias') ?: config('radar_civico.canais.sugestoes'));
         if (! $zap->configurado() || $canal === '') {
             $this->warn('[SEM CREDENCIAL Z-API/canal] N3 não enviado (fica registrado como quente comum).');
 
