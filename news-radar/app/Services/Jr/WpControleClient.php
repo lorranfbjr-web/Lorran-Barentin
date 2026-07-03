@@ -41,6 +41,40 @@ class WpControleClient
         return self::CATEGORIA[$editoria] ?? self::CATEGORIA['geral'];
     }
 
+    /**
+     * BLOCO 6 (simplificar 03/07): nome de tag → id (busca; cria se não
+     * existir; "term_exists" devolve o id existente). Fail-open por tag.
+     *
+     * @return int[]
+     */
+    public function tagIds(array $nomes): array
+    {
+        $ids = [];
+        foreach (array_unique($nomes) as $nome) {
+            try {
+                $r = $this->req()->get($this->base . '/wp/v2/tags', ['search' => $nome, 'per_page' => 10, '_fields' => 'id,name']);
+                $id = null;
+                foreach ((array) $r->json() as $t) {
+                    if (mb_strtolower((string) ($t['name'] ?? '')) === mb_strtolower($nome)) {
+                        $id = (int) $t['id'];
+                        break;
+                    }
+                }
+                if (! $id) {
+                    $c = $this->req()->post($this->base . '/wp/v2/tags', ['name' => $nome]);
+                    $id = (int) ($c->json('id') ?: data_get($c->json(), 'data.term_id', 0));
+                }
+                if ($id) {
+                    $ids[] = $id;
+                }
+            } catch (\Throwable) {
+                // tag nunca bloqueia o draft
+            }
+        }
+
+        return $ids;
+    }
+
     /** Confirma auth (read-only). @return array{ok:bool,id:?int,roles:array} */
     public function whoAmI(): array
     {
@@ -68,6 +102,17 @@ class WpControleClient
             'author'   => self::AUTOR_BYLINE,
             'categories' => [$this->categoriaId($r['editoria'] ?? 'geral')],
         ];
+
+        // GOAL SIMPLIFICAR (03/07) — BLOCO 6: TAGS no draft (antes eram
+        // ignoradas). Cidade sempre vira tag (o controle não tem categoria por
+        // cidade — cidades vivem como tags). Falha de tag NUNCA bloqueia o draft.
+        $tags = array_filter(array_map('trim', array_merge(
+            (array) ($r['tags'] ?? []),
+            [$r['cidade'] ?? ''],
+        )));
+        if ($tags && ($ids = $this->tagIds($tags)) !== []) {
+            $payload['tags'] = $ids;
+        }
 
         $resp = $this->req()->post($this->base . '/wp/v2/posts', $payload);
         if (! $resp->successful()) {

@@ -243,6 +243,19 @@ class ZapAprovacaoController extends Controller
             );
             $wp->setFeaturedMedia($postId, $media['id']);
 
+            // BLOCO 6 (simplificar 03/07): crédito da foto TAMBÉM no corpo
+            // (antes só caption/alt — dependia do tema exibir). Igual ao
+            // pipeline frio (inserirCreditoCorpo). Fail-open.
+            $credito = trim((string) ($payload['foto_credito'] ?? ''));
+            if ($credito !== '') {
+                try {
+                    $wp->atualizarConteudo($postId,
+                        $wp->getRawContent($postId) . "\n<p><em>Foto: " . e($credito) . '</em></p>');
+                } catch (\Throwable) {
+                    // crédito no corpo nunca bloqueia o draft
+                }
+            }
+
             return [$media['id'], ''];
         } catch (\Throwable $e) {
             Log::warning('jr-zap-aprovacao: foto não subiu pro WP', ['ato_ref' => $entrega->ato_ref, 'err' => mb_substr($e->getMessage(), 0, 200)]);
