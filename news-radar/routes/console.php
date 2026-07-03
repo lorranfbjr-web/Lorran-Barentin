@@ -251,9 +251,10 @@ Schedule::command('jrcivico:auto-rascunho')
 // [KIT] no grupo RASCUNHOS (formato limpo 8a). Tick :25/:55 = livre (:10/:40
 // é do assuntos, :15/:45 do segundo-olhar, :20/:50 do quente-fria). Dedup por
 // slug gravado só após envio OK; silêncio do Bloco 0b; fail-closed sem creds.
-Schedule::command('jrpauta:kit-social')
-    ->cron('25,55 * * * *')
-    ->withoutOverlapping(600);
+// DESLIGADO 03/07 a pedido do Lorran: kit da própria matéria = ruído no grupo; bug de link (SITE_BASE domínio errado) a corrigir SE religar.
+// Schedule::command('jrpauta:kit-social')
+//     ->cron('25,55 * * * *')
+//     ->withoutOverlapping(600);
 
 // ── BLOCO 4 (03/07) — TRIAGEM QUENTE/FRIA do fluxo julgado ──
 // Depois do juiz (:05/:35): compõe sinais existentes (temperatura_juiz +
