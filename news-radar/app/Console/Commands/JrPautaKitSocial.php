@@ -133,8 +133,21 @@ class JrPautaKitSocial extends Command
         }
 
         $max = max(1, (int) $this->option('max'));
+        $rows = $base->orderByDesc('jr_publicado.publicado_em')->limit($max + 3)->get();
 
-        return $base->orderByDesc('jr_publicado.publicado_em')->limit($max)->get();
+        // BLOCO 4 (simplificar 03/07): republicação com SLUG NOVO não ganha
+        // 2º kit — dedup também por título normalizado contra os já-kitados.
+        $kitados = DB::table('jr_kit_social')
+            ->join('jr_publicado', 'jr_publicado.slug', '=', 'jr_kit_social.slug')
+            ->pluck('jr_publicado.titulo')
+            ->map(fn ($t) => \App\Support\TituloFeatures::norm(\App\Support\TituloFeatures::stripSuffix((string) $t)))
+            ->flip();
+
+        return $rows->filter(function ($r) use ($kitados) {
+            $tn = \App\Support\TituloFeatures::norm(\App\Support\TituloFeatures::stripSuffix((string) $r->titulo));
+
+            return ! isset($kitados[$tn]);
+        })->take($max)->values();
     }
 
     /**

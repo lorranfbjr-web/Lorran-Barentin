@@ -168,6 +168,12 @@ class JrLinkQuenteFria extends Command
             ->whereNotNull('juiz_julgado_em')
             ->where('juiz_julgado_em', '>=', Carbon::now()->subHours($janelaH))
             ->where(fn ($q) => $q->where('cluster_rep', 1)->orWhereNull('cluster_id'))
+            // BLOCO 4 (simplificar 03/07): já publicado pelo JR ou já enviado
+            // no digest do Raspador NUNCA vira quente de novo — fecha o
+            // vazamento (flag setada e digest reenviando) e o eco entre os
+            // dois digests que agora moram no mesmo grupo.
+            ->whereNull('ja_publicado_em')
+            ->whereNull('notificado_em')
             ->whereNotExists(fn ($q) => $q->select(DB::raw(1))
                 ->from('jr_quente_fria')
                 ->whereColumn('jr_quente_fria.extracao_id', 'jr_link_extracao.id'))
@@ -197,6 +203,14 @@ class JrLinkQuenteFria extends Command
                     $quente = false;
                     $gfMotivo = ' · grupo-filtro: ' . $gf['motivo'];
                 }
+            }
+
+            // BLOCO 4 (simplificar 03/07): rede de segurança SÍNCRONA barata —
+            // pega o que o sync ainda não marcou (corrida de 30min / membro de
+            // cluster recém-chegado). Sem LLM; título+URL vs jr_publicado 30d.
+            if ($quente && ($slug = \App\Services\Jr\PublicadoMatcher::casaBarato((string) $r->titulo, (string) $r->url)) !== null) {
+                $quente = false;
+                $gfMotivo = ' · já publicado no site (' . mb_substr($slug, 0, 60) . ')';
             }
 
             return [

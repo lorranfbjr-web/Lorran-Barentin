@@ -34,6 +34,84 @@ class PublicadoMatcher
      *
      * @return array<int,object> evento_id => alvo casado
      */
+    /**
+     * GOAL SIMPLIFICAR (03/07) — BLOCO 4: checagem BARATA "já publicado?"
+     * (sem LLM), pra TODOS os caminhos de topo/envio rodarem a cada ciclo sem
+     * custo: URL canônica (path contém o slug do post) + título normalizado
+     * exato + fuzzy leve (overlap de tokens >= 72% do menor lado). Corpus 30d
+     * de jr_publicado em cache (30min). Retorna o slug casado ou null.
+     */
+    public static function casaBarato(?string $titulo, ?string $url = null): ?string
+    {
+        $t = trim((string) $titulo);
+        if ($t === '' && ($url === null || $url === '')) {
+            return null;
+        }
+
+        $corpus = Cache::remember('jrpub:corpus-barato', 1800, function () {
+            return \Illuminate\Support\Facades\DB::table('jr_publicado')
+                ->where('publicado_em', '>=', now()->subDays((int) config('jrlink.publicados.janela_match_dias', 30)))
+                ->get(['slug', 'titulo'])
+                ->map(fn ($p) => [
+                    'slug' => (string) $p->slug,
+                    'norm' => self::normBarato((string) $p->titulo),
+                    'toks' => self::toksBarato((string) $p->titulo . ' ' . str_replace('-', ' ', (string) $p->slug)),
+                ])->all();
+        });
+
+        if ($url) {
+            $path = mb_strtolower((string) (parse_url($url, PHP_URL_PATH) ?: ''));
+            foreach ($corpus as $c) {
+                if ($c['slug'] !== '' && str_contains($path, $c['slug'])) {
+                    return $c['slug'];
+                }
+            }
+        }
+        if ($t === '') {
+            return null;
+        }
+
+        $tn = self::normBarato($t);
+        $toks = self::toksBarato($t);
+        foreach ($corpus as $c) {
+            if ($tn !== '' && $tn === $c['norm']) {
+                return $c['slug'];
+            }
+            if (count($toks) >= 4 && count($c['toks']) >= 4) {
+                $inter = count(array_intersect_key($toks, $c['toks']));
+                if ($inter / min(count($toks), count($c['toks'])) >= 0.72) {
+                    return $c['slug'];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Título canônico: sem sufixo do site, sem acento, só [a-z0-9 ]. */
+    private static function normBarato(string $t): string
+    {
+        $t = \App\Support\TituloFeatures::norm(\App\Support\TituloFeatures::stripSuffix(strip_tags(html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
+
+        return trim(preg_replace('/\s+/', ' ', preg_replace('/[^a-z0-9 ]/', ' ', $t)));
+    }
+
+    /** @return array<string,true> tokens >=4 chars sem stopwords comuns. */
+    private static function toksBarato(string $t): array
+    {
+        static $stop = ['depois' => 1, 'apos' => 1, 'durante' => 1, 'contra' => 1, 'sobre' => 1,
+            'para' => 1, 'pela' => 1, 'pelo' => 1, 'entre' => 1, 'santa' => 1, 'catarina' => 1,
+            'ainda' => 1, 'nesta' => 1, 'neste' => 1, 'quinta' => 1, 'sexta' => 1, 'feira' => 1];
+        $out = [];
+        foreach (explode(' ', self::normBarato($t)) as $w) {
+            if (mb_strlen($w) >= 4 && ! isset($stop[$w])) {
+                $out[$w] = true;
+            }
+        }
+
+        return $out;
+    }
+
     public function casar(Collection $eventos, Collection $alvos, JuizLlm $juiz, int $capLlm, string $rotulo): array
     {
         if ($eventos->isEmpty() || $alvos->isEmpty() || $capLlm <= 0) {

@@ -99,6 +99,12 @@ class JrVitrineController extends Controller
             ->get(['id', 'titulo', 'url', 'host', 'origem', 'cluster_id', 'assunto_id', 'assunto_label',
                 'score_editorial', 'cidade_llm', 'tema_ga4', 'tipo_gancho', 'juiz_motivo', 'data_pub', 'created_at']);
 
+        // BLOCO 4 (simplificar 03/07): rede de segurança SÍNCRONA no topo da
+        // vitrine — a flag ja_publicado_em depende do sync de 30min; aqui o
+        // matcher barato (título+URL, sem LLM, corpus em cache) segura o que
+        // o sync ainda não marcou. Matéria nossa não disputa o topo.
+        $reps = $reps->filter(fn ($r) => \App\Services\Jr\PublicadoMatcher::casaBarato((string) $r->titulo, (string) $r->url) === null)->values();
+
         // Portais (fontes distintas) por cluster — 1 query, sem N+1.
         $clusterIds = $reps->pluck('cluster_id')->filter()->unique()->values();
         $membros = $clusterIds->isEmpty() ? collect() : DB::table('jr_link_extracao')

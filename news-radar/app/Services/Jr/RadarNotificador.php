@@ -90,7 +90,18 @@ class RadarNotificador
         // sync de 30min): confronta cada enviável contra jr_publicado AGORA — não
         // confia que o sync já marcou. Match → sai do digest (e é marcado no DB
         // por notificarNovos).
-        $matchPub = $this->confirmarPublicados($enviaveis->values());
+        // BLOCO 4 (simplificar 03/07): 1ª passada BARATA (título+URL, sem LLM)
+        // ANTES do LLM — segura o vazamento mesmo quando o LLM falha (o
+        // completarJson é fail-open: exceção vira "sem match").
+        $matchPub = [];
+        foreach ($enviaveis as $r) {
+            if (($slug = PublicadoMatcher::casaBarato((string) $r->titulo, (string) $r->url)) !== null) {
+                $matchPub[$r->id] = (object) ['chave' => $slug, 'titulo' => $r->titulo,
+                    'quando' => null, 'extra' => $slug];
+            }
+        }
+        $restantes = $enviaveis->filter(fn ($r) => ! isset($matchPub[$r->id]))->values();
+        $matchPub += $this->confirmarPublicados($restantes);
         [$publicados, $enviaveis] = $enviaveis->partition(fn ($r) => isset($matchPub[$r->id]));
 
         return [

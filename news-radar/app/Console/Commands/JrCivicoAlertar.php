@@ -274,6 +274,13 @@ class JrCivicoAlertar extends Command
                     continue;
                 }
 
+                // BLOCO 4 (simplificar 03/07): release de prefeitura que o site
+                // JÁ COBRIU não vira alerta (matcher barato título×jr_publicado).
+                if ($source === 'prefeitura'
+                    && \App\Services\Jr\PublicadoMatcher::casaBarato((string) ($a->objeto_limpo ?? '')) !== null) {
+                    continue;
+                }
+
                 $out[] = [
                     'ato_ref' => $source . ':' . $a->id,
                     'source' => $source,

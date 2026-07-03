@@ -143,12 +143,21 @@ class JrPublicadosSync extends Command
         $out = [];
         $after = null;
         for ($pagina = 0; $pagina < 5; $pagina++) {
-            $r = Http::timeout(30)->post($endpoint, [
-                'query' => $gql,
-                // dateQuery é por DIA — recua 1 dia e refina por hora no PHP.
-                'variables' => ['after' => $after, 'y' => (int) $corte->copy()->subDay()->format('Y'),
-                    'm' => (int) $corte->copy()->subDay()->format('n'), 'd' => (int) $corte->copy()->subDay()->format('j')],
-            ]);
+            // BLOCO 4 (simplificar 03/07): retry 2× com backoff + timeout de
+            // conexão explícito; ConnectionException não derruba mais o run
+            // inteiro (era a causa nº 1 do vazamento: cURL 28 às 07:31 matou o
+            // sync do dia e nada foi marcado como publicado).
+            try {
+                $r = Http::connectTimeout(10)->timeout(30)->retry(2, 500)->post($endpoint, [
+                    'query' => $gql,
+                    // dateQuery é por DIA — recua 1 dia e refina por hora no PHP.
+                    'variables' => ['after' => $after, 'y' => (int) $corte->copy()->subDay()->format('Y'),
+                        'm' => (int) $corte->copy()->subDay()->format('n'), 'd' => (int) $corte->copy()->subDay()->format('j')],
+                ]);
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                Log::warning('[PublicadosSync] WPGraphQL fora do ar (após retry): ' . $e->getMessage());
+                break;
+            }
             if (! $r->successful() || ! is_array($r->json('data.posts.nodes'))) {
                 Log::warning('[PublicadosSync] WPGraphQL falhou: HTTP ' . $r->status() . ' ' . mb_substr($r->body(), 0, 200));
                 break;
