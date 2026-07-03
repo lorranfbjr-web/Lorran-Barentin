@@ -1,0 +1,86 @@
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>📋 Relatório — Goal Ecossistema 02/07</title>
+<style>
+:root{--navy:#0D2481;--red:#E63946;--green:#2D6A4F;--amber:#D4A373;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);line-height:1.55}
+header{background:var(--navy);color:#fff;padding:20px 18px}
+h1{margin:0;font-size:19px;font-weight:800}header .sub{font-size:12px;opacity:.85;margin-top:4px}
+.wrap{max-width:760px;margin:0 auto;padding:14px 14px 60px}
+.card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:15px;margin:12px 0}
+.card h2{margin:0 0 8px;font-size:15.5px;color:var(--navy)}
+p,li{font-size:13.5px}p{margin:7px 0}ul{margin:7px 0;padding-left:19px}li{margin:4px 0}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:6px 7px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-size:10.5px;text-transform:uppercase}
+code{background:#eef1f8;border-radius:4px;padding:1px 5px;font-size:11.5px}
+.ev{background:#f8f9fc;border-left:3px solid var(--green);border-radius:0 8px 8px 0;padding:8px 11px;font-size:12px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;margin:7px 0}
+.g{color:var(--green);font-weight:800}
+</style></head><body>
+<header><h1>📋 Goal Ecossistema — Relatório Final 02/07/2026</h1>
+<div class="sub">claude-fable-5 ultracode · branch claude/sc-news-aggregator-2M470 · 10 commits · segredos mascarados</div></header>
+<div class="wrap">
+
+<div class="card"><h2>🚦 Semáforo</h2>
+<table>
+<tr><th>bloco</th><th></th><th>uma linha</th></tr>
+<tr><td>1 Datas</td><td class="g">🟢</td><td>alerta por <code>data_pub</code> ≤7d; sanitização no ingest; 0 datas furadas sem flag</td></tr>
+<tr><td>2 WhatsApp</td><td class="g">🟢</td><td>radar FORA do Telegram; alerta+rascunho no grupo RASCUNHOS (instância de alerta)</td></tr>
+<tr><td>3 Prefeituras</td><td class="g">🟢</td><td>138 notícias · 14 cidades · datas certas · rascunho real entregue</td></tr>
+<tr><td>4 Hub</td><td class="g">🟢</td><td>/radar-civico único: 6 fontes + Notícias + Mesa; abas velhas redirecionam</td></tr>
+<tr><td>5 Firecrawl</td><td class="g">🟢</td><td>Canelinha 11 + Nova Trento 3 · <b>129 créditos</b> (teto 300) · 21 prontas-desativadas</td></tr>
+<tr><td>6 Pontas</td><td class="g">🟢</td><td>watchdog +datas+canal+prefeitura; dedup 0 colisão; public/ limpo (movido, não apagado)</td></tr>
+<tr><td>7 Insights</td><td class="g">🟢</td><td><a href="/insights-radar.html">insights-radar.html</a> + md no goals/</td></tr>
+<tr><td>8 Crítico</td><td class="g">🟢</td><td>6 céticos adversariais: travas OK · segredos OK · lacunas tratadas</td></tr>
+</table>
+<p><b>Zero violação de trava dura.</b> Telegram/disparador comprovadamente intactos (token só lido; zero arquivo n8n no diff; commit só mudou comentários).</p></div>
+
+<div class="card"><h2>1 · Datas (a causa do "recebi coisa de anos atrás")</h2>
+<p>Alerta janelava por <code>scored_at</code> → backfill de 2025 (e uma data corrompida 2028 de Porto Belo) alertou como quente. Agora: <code>Recencia</code> é a verdade única — ingest anula data futura/implausível (flag <code>data_suspeita</code>) e o alerta só pega <code>data_pub</code> dos últimos 7 dias, nunca futura/suspeita.</p>
+<div class="ev">datas furadas sem flag: dom=0 camara=0 mpsc=0 tce=0 prefeitura=0
+51 itens de 2025 com score≥80 no banco → NENHUM entra no alerta
+seleção real: tudo entre 2026-06-26 e 2026-07-02 ✅</div>
+<p>106 proposições 2013–14 de São Bento = backfill legítimo (<code>ano==ano(data_pub)</code>): data mantida + flag (não alertam; Arquivo).</p></div>
+
+<div class="card"><h2>2 · WhatsApp (Telegram devolvido ao Gerador)</h2>
+<p>Alerta (<code>jrcivico:alertar</code>) e rascunho da Mesa agora saem pela instância de ALERTA (JRLINK_ALERT_ZAPI_*) pro grupo RASCUNHOS. Formato mobile: <i>NOTA · FONTE · CIDADE — o quê — por quê — link</i>. Fatiamento &gt;4000 chars. 2 canais config-driven.</p>
+<div class="ev">estreia REAL no grupo: messageId=3EB0CFA34031CFF8AB42BA
+grep: único api.telegram.org do repo = classe parqueada sem caller</div>
+<p><b>Quando criar o 2º grupo:</b> setar <code>RADAR_CIVICO_SUGESTOES_GROUP</code> no .env — pronto.</p></div>
+
+<div class="card"><h2>3 · Notícias de prefeituras (anunciantes)</h2>
+<p>Sonda real nas 19 tier1 → conector com 4 estratégias (RSS · API JSON · regex · Atende.net base64). <b>138 notícias de 14 prefeituras</b>, todas com data sã, 100% pontuadas (75 🟢 serviço). Release sempre sinalizado como versão oficial; rascunho manda ouvir o outro lado.</p>
+<div class="ev">rascunho REAL (Tijucas · Molhes da Barra · score 88) no grupo:
+messageId=3EB00D04F8BB336B37A035</div>
+<p>Fora com motivo: Jaraguá+Floripa (firewall dropa o VPS), São José (Cloudflare), Brusque/Blumenau (parser dedicado a fazer) — todas prontas na config, <code>ativo=false</code>.</p></div>
+
+<div class="card"><h2>4 · Hub único</h2>
+<p><a href="/radar-civico"><b>/radar-civico</b></a> = 🛰️ Radar Cívico (🧾 DOM 409 · 📜 Câmaras 406 · ⚖️ MPSC 411 · 💰 TCE 146 · 📣 Prefeituras 91) + painel 📰 Notícias (vitrine embutida — juiz/clusters/Acelerando intactos: 3.915 itens/48h) + painel 📌 Mesa. <code>/radar</code> e <code>/dom-radar</code> → 308 pro hub; <code>/oportunidades.html</code> → stub de redirect. Testado no viewport mobile 390×844.</p></div>
+
+<div class="card"><h2>5 · Firecrawl (câmaras gated)</h2>
+<p>Estratégia provada: search acha URLs profundas <code>/tramitacoes/</code> indexadas → scrape stealth abre o que a listagem gated nega → parse com data sanitizada. <b>14 proposições 2026</b> no banco, 2 noticiáveis no hub.</p>
+<div class="ev">créditos: 974 → 845 = 129 consumidos (teto rígido 300) · kill-switch 402
+sem schedule DE PROPÓSITO: cada rodada ≈60–150 créditos → decisão de plano</div></div>
+
+<div class="card"><h2>6–8 · Pontas, Insights e Crítico</h2>
+<ul>
+<li>Watchdog (passivo): +vigia de datas furadas, +canal WhatsApp de alerta, +frescor prefeitura → <a href="/health.html">health.html</a></li>
+<li>Dedup: 0 hash duplicado nas 5 tabelas; fornecedor cross-fonte operante</li>
+<li>Higiene: relatórios soltos/_tmp_/proof/bak-claude movidos pra backup (nada apagado; scan de segredo antes: limpo)</li>
+<li>TCE: <code>municipio</code> NULL ganhou fallback pela unidade gestora (+9; 345 restantes = órgãos estaduais)</li>
+<li>Bug real morto: resposta-objeto do GPT no gerador de rascunho virava só checklist (extrairLista) — corrigido, prompt do juiz intocado</li>
+<li>Crítico adversarial (6 céticos): segredos 0 no diff e no public/; travas 0 violação</li>
+</ul></div>
+
+<div class="card"><h2>⏳ Decisões do Lorran</h2>
+<table>
+<tr><th>#</th><th>pendência</th><th>ação</th></tr>
+<tr><td>1</td><td>Rotacionar chave Firecrawl (colada em chat)</td><td>gerar nova no painel, trocar no .env</td></tr>
+<tr><td>2</td><td>Escalar Firecrawl (21 câmaras prontas)</td><td>plano Hobby ~R$83/mês OU runner no PC</td></tr>
+<tr><td>3</td><td>Grupo SUGESTÕES DE PAUTA</td><td>criar + setar <code>RADAR_CIVICO_SUGESTOES_GROUP</code></td></tr>
+<tr><td>4</td><td>Número dedicado de captura</td><td>a 276 segue no número pessoal</td></tr>
+<tr><td>5</td><td>IPs bloqueados (Jaraguá/Floripa/ALESC)</td><td>proxy residencial ou pedido de liberação</td></tr>
+</table></div>
+
+<p style="text-align:center;color:var(--muted);font-size:11px">Relatório completo: goals/RELATORIO-ecossistema-FINAL-20260702.md · Notion não tocado (arquiteto sincroniza)</p>
+</div></body></html>
