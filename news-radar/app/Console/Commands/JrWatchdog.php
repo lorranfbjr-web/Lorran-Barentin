@@ -49,6 +49,10 @@ class JrWatchdog extends Command
         $checks['datas'] = $this->datasSuspeitas();
         $checks['alertazap'] = $this->alertaWhatsapp();
         $checks['flywheel'] = $this->flywheel();
+        // GOAL SIMPLIFICAR (03/07) — BLOCO 8: páginas separadas vivas (200 +
+        // tamanho) e grupos por fonte com último envio.
+        $checks['paginas'] = $this->paginas();
+        $checks['grupos'] = $this->gruposPorFonte();
 
         $html = $this->renderHtml($checks, $agora);
         File::put(public_path('health.html'), $html);
@@ -459,6 +463,70 @@ class JrWatchdog extends Command
     }
 
     /**
+     * GOAL SIMPLIFICAR (03/07) — BLOCO 8: as 6 páginas separadas respondem?
+     * 200 + tamanho (aceite: < 300KB por página; acima vira warn). PASSIVO.
+     */
+    private function paginas(): array
+    {
+        $urls = ['/radar-civico', '/dom', '/camaras', '/justica', '/prefeituras', '/radar'];
+        $rows = [];
+        $ruins = 0;
+        $pesadas = 0;
+        foreach ($urls as $u) {
+            try {
+                $r = \Illuminate\Support\Facades\Http::timeout(15)->get('http://127.0.0.1:8000'.$u);
+                $kb = (int) round(strlen((string) $r->body()) / 1024);
+                $ok = $r->status() === 200;
+                $leve = $kb < 300;
+                $ruins += $ok ? 0 : 1;
+                $pesadas += ($ok && ! $leve) ? 1 : 0;
+                $rows[] = ['pagina' => $u, 'http' => $r->status(), 'kb' => $kb, 'nivel' => $ok ? ($leve ? 'ok' : 'warn') : 'bad'];
+            } catch (\Throwable $e) {
+                $ruins++;
+                $rows[] = ['pagina' => $u, 'http' => 0, 'kb' => 0, 'nivel' => 'bad'];
+            }
+        }
+        $nivel = $ruins > 0 ? 'bad' : ($pesadas > 0 ? 'warn' : 'ok');
+        $resumo = sprintf('%d/%d páginas 200 · %d acima de 300KB', count($urls) - $ruins, count($urls), $pesadas);
+
+        return ['nivel' => $nivel, 'resumo' => $resumo, 'rows' => $rows];
+    }
+
+    /**
+     * GOAL SIMPLIFICAR (03/07) — BLOCO 8: grupos POR FONTE (bloco 3) — env
+     * configurado + último envio registrado por rota. PASSIVO.
+     */
+    private function gruposPorFonte(): array
+    {
+        try {
+            $rotas = [
+                'Diário Oficial (dom+câmaras)' => ['canal' => config('radar_civico.canais.civico.dom'), 'fontes' => ['dom', 'camara']],
+                'Justiça (mpsc+tce)' => ['canal' => config('radar_civico.canais.civico.mpsc'), 'fontes' => ['mpsc', 'tce']],
+                'Cidades (prefeituras)' => ['canal' => config('radar_civico.canais.civico.prefeitura'), 'fontes' => ['prefeitura']],
+            ];
+            $rows = [];
+            $semCanal = 0;
+            foreach ($rotas as $nome => $r) {
+                $canal = (string) $r['canal'];
+                $ultimo = DB::table('jr_civico_alertas')->whereIn('source', $r['fontes'])->max('alerted_at');
+                $semCanal += $canal === '' ? 1 : 0;
+                $rows[] = ['rota' => $nome, 'canal' => $canal !== '' ? 'configurado' : 'FALTANDO',
+                    'ultimo_envio' => $ultimo ? Carbon::parse($ultimo)->format('d/m H:i') : 'nunca'];
+            }
+            // notícias de portais (quente-fria + notificador) → grupo Raspador
+            $ultQf = DB::table('jr_quente_fria')->whereNotNull('message_id')->max('created_at');
+            $rows[] = ['rota' => 'Notícias (portais)', 'canal' => (string) config('radar_civico.canais.noticias') !== '' ? 'configurado' : 'FALTANDO',
+                'ultimo_envio' => $ultQf ? Carbon::parse($ultQf)->format('d/m H:i') : 'nunca'];
+            $semCanal += (string) config('radar_civico.canais.noticias') === '' ? 1 : 0;
+
+            return ['nivel' => $semCanal > 0 ? 'warn' : 'ok',
+                'resumo' => sprintf('%d/4 rotas com grupo configurado', 4 - $semCanal), 'rows' => $rows];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
+        }
+    }
+
+    /**
      * BLOCO 7 (03/07) — FLYWHEEL: checks PASSIVOS do ciclo rascunho→✅→draft.
      * auto-rascunho/dia (vs cap), webhook de aprovação vivo (token + último
      * payload arquivado + drafts criados), triagem quente/fria e kit social.
@@ -586,6 +654,21 @@ class JrWatchdog extends Command
         $c = $checks['flywheel'];
         $secoes .= $this->bloco($dot($c['nivel']).' Flywheel (auto-rascunho · ✅ · quente/fria · kit)', $c['resumo'], '');
 
+        // GOAL SIMPLIFICAR (03/07) — páginas separadas + grupos por fonte
+        $c = $checks['paginas'];
+        $linhas = '';
+        foreach ($c['rows'] as $r) {
+            $linhas .= '<tr><td>'.$dot($r['nivel']).' <code>'.htmlspecialchars($r['pagina']).'</code></td><td style="text-align:right">'.$r['http'].'</td><td style="text-align:right">'.$r['kb'].' KB</td></tr>';
+        }
+        $secoes .= $this->bloco($dot($c['nivel']).' Páginas separadas (simplificar 03/07)', $c['resumo'], '<table><tr><th>página</th><th>HTTP</th><th>tamanho</th></tr>'.$linhas.'</table>');
+
+        $c = $checks['grupos'];
+        $linhas = '';
+        foreach ($c['rows'] as $r) {
+            $linhas .= '<tr><td>'.htmlspecialchars($r['rota']).'</td><td>'.htmlspecialchars($r['canal']).'</td><td>'.htmlspecialchars($r['ultimo_envio']).'</td></tr>';
+        }
+        $secoes .= $this->bloco($dot($c['nivel']).' Grupos por fonte (simplificar 03/07)', $c['resumo'], '<table><tr><th>rota</th><th>grupo</th><th>último envio</th></tr>'.$linhas.'</table>');
+
         // pipeline + juiz (só resumo)
         $secoes .= $this->bloco($dot($checks['pipeline']['nivel']).' Pipeline 24h', $checks['pipeline']['resumo'], '');
         $secoes .= $this->bloco($dot($checks['juiz']['nivel']).' Juiz', $checks['juiz']['resumo'], '');
@@ -611,7 +694,7 @@ class JrWatchdog extends Command
     private function renderMd(array $checks, Carbon $agora): string
     {
         $m = "# WATCHDOG — estado (v0, read-only)\n\nGerado: ".$agora->format('Y-m-d H:i')." UTC\n\n";
-        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli', 'datas' => 'Datas (sanidade)', 'alertazap' => 'Canal WhatsApp de alerta', 'flywheel' => 'Flywheel (rascunho→✅→draft)'] as $k => $nome) {
+        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli', 'datas' => 'Datas (sanidade)', 'alertazap' => 'Canal WhatsApp de alerta', 'flywheel' => 'Flywheel (rascunho→✅→draft)', 'paginas' => 'Páginas separadas (simplificar)', 'grupos' => 'Grupos por fonte (simplificar)'] as $k => $nome) {
             $m .= "## {$nome}\n- **[".strtoupper($checks[$k]['nivel']).']** '.$checks[$k]['resumo']."\n\n";
         }
         $m .= "_Não notifica e não muta nada. Dashboard: public/health.html_\n";

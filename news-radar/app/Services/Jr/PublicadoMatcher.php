@@ -75,11 +75,21 @@ class PublicadoMatcher
         $toks = self::toksBarato($t);
         foreach ($corpus as $c) {
             if ($tn !== '' && $tn === $c['norm']) {
+                Log::info('[casaBarato] título exato casou: ' . mb_substr($t, 0, 80) . ' → ' . $c['slug']);
+
                 return $c['slug'];
             }
+            // CRÍTICO P1 (03/07): fuzzy CONSERVADOR — >=4 tokens em comum E
+            // razão >=0.6 pelo lado MAIOR (o lado menor casava manchete curta
+            // de polícia/trânsito com acidente DIFERENTE: {motociclista, morre,
+            // colisao, carro} = 4/4). Mesmo fato reescrito compartilha a maioria
+            // dos tokens dos DOIS lados. E todo match é logado: supressão
+            // silenciosa é o pior modo de falha numa mesa de triagem.
             if (count($toks) >= 4 && count($c['toks']) >= 4) {
                 $inter = count(array_intersect_key($toks, $c['toks']));
-                if ($inter / min(count($toks), count($c['toks'])) >= 0.72) {
+                if ($inter >= 4 && $inter / max(count($toks), count($c['toks'])) >= 0.6) {
+                    Log::info('[casaBarato] fuzzy casou (' . $inter . ' tokens): ' . mb_substr($t, 0, 80) . ' → ' . $c['slug']);
+
                     return $c['slug'];
                 }
             }

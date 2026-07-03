@@ -46,23 +46,28 @@ class GrupoFiltro
         if (RankingExibicao::vago($objetoLimpo)) {
             return ['ok' => false, 'motivo' => 'objeto vago'];
         }
-        foreach (self::PADROES_ROTINA as $rx) {
-            if (preg_match($rx, (string) $objetoLimpo)) {
-                return ['ok' => false, 'motivo' => 'objeto rotineiro'];
-            }
-        }
 
         $tier = CidadesInteresse::tier($municipio);
         if ($tier === 0) {
             return ['ok' => false, 'motivo' => 'fora do interesse (tier0)'];
         }
 
+        // CRÍTICO P1 (03/07): NÚCLEO decide só pelo piso — rotina NÃO se aplica
+        // (6º termo aditivo do SAMAE de Tijucas é fiscalização real; quem manda
+        // é o score). Fora do núcleo a rotina barra (show por inexigibilidade
+        // de Itapema/Jaraguá é ruído mesmo a 85).
         if (self::nucleo($municipio)) {
             $min = (int) ($cfg['nucleo_min'] ?? 70);
 
             return $score >= $min
                 ? ['ok' => true, 'motivo' => 'núcleo']
                 : ['ok' => false, 'motivo' => "núcleo score {$score} < {$min}"];
+        }
+
+        foreach (self::PADROES_ROTINA as $rx) {
+            if (preg_match($rx, (string) $objetoLimpo)) {
+                return ['ok' => false, 'motivo' => 'objeto rotineiro'];
+            }
         }
 
         if ($tipo === 'fiscalizacao') {

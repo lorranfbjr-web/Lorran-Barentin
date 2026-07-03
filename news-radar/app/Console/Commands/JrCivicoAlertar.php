@@ -89,12 +89,12 @@ class JrCivicoAlertar extends Command
             $this->warn("Não enviado {$motivo}. " . count($n3) . ' N3 larga-tudo + ' . count($novas) . ' N2 digest:');
             foreach ($n3 as $p) {
                 $this->line(str_repeat('═', 48));
-                $this->line('→ grupo ' . ($this->grupoDe($p['source']) ?: '(vazio)'));
+                $this->line('→ grupo ' . ($this->grupoDe($p['source']) !== '' ? mb_substr($this->grupoDe($p['source']), 0, 6) . '…' : '(vazio)'));
                 $this->line($this->renderNivel3($p));
             }
             foreach ($this->porGrupo($novas) as $grupo => $lote) {
                 $this->line(str_repeat('─', 48));
-                $this->line('→ grupo ' . ($grupo ?: '(vazio)'));
+                $this->line('→ grupo ' . ($grupo !== '' ? mb_substr($grupo, 0, 6) . '…' : '(vazio)'));
                 $this->line($this->montar($lote, $cfg));
             }
             return self::SUCCESS;
@@ -103,7 +103,14 @@ class JrCivicoAlertar extends Command
         // N3 primeiro: 1 mensagem imediata POR ITEM, fora do cap do digest,
         // roteada pro grupo da FONTE (BLOCO 3). Falhou → volta no próximo ciclo.
         foreach ($n3 as $p) {
-            $mid = $zap->texto($this->renderNivel3($p), $this->grupoDe($p['source']));
+            // CRÍTICO P1 (03/07): grupo vazio NUNCA cai no default do
+            // ZapRascunhos ('' ?: default = grupo Rascunhos) — mesma guarda
+            // do porGrupo() do digest.
+            if (($g = $this->grupoDe($p['source'])) === '') {
+                $this->warn("Sem grupo configurado pra fonte {$p['source']} — N3 {$p['ato_ref']} fica pro próximo ciclo.");
+                continue;
+            }
+            $mid = $zap->texto($this->renderNivel3($p), $g);
             if ($mid === null) {
                 $this->error("Z-API recusou N3 {$p['ato_ref']} — volta no próximo ciclo.");
                 continue;
@@ -124,12 +131,12 @@ class JrCivicoAlertar extends Command
         foreach ($this->porGrupo($novas) as $grupo => $lote) {
             $messageId = $zap->texto($this->montar($lote, $cfg), $grupo);
             if ($messageId === null) {
-                $this->error("Z-API recusou digest pro grupo {$grupo} — " . count($lote) . ' item(ns) voltam no próximo ciclo.');
+                $this->error('Z-API recusou digest pro grupo ' . mb_substr($grupo, 0, 6) . '… — ' . count($lote) . ' item(ns) voltam no próximo ciclo.');
                 $falhas++;
                 continue;
             }
             $this->registrar($lote);
-            $this->info('Digest enviado pro grupo ' . $grupo . ': ' . count($lote) . " pauta(s) (messageId {$messageId}).");
+            $this->info('Digest enviado pro grupo ' . mb_substr($grupo, 0, 6) . '…: ' . count($lote) . " pauta(s) (messageId {$messageId}).");
         }
 
         return $falhas > 0 ? self::FAILURE : self::SUCCESS;

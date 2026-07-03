@@ -145,6 +145,9 @@ header.top{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,va
 </head>
 <body>
 <header class="top">
+  {{-- CRÍTICO P1 (simplificar 03/07): a vitrine era beco sem saída no celular --}}
+  <div style="margin-bottom:6px"><a href="/radar-civico" style="color:#fff;opacity:.85;font-size:12px;text-decoration:none">‹ Radar Cívico</a>
+    <a href="/mesa" style="color:#fff;opacity:.85;font-size:12px;text-decoration:none;float:right">📌 Mesa ›</a></div>
   <div class="brand"><b>Radar JR</b><span class="live">AO VIVO</span><span class="upd">atualizado {{ $stats['atualizado'] }}</span></div>
   <div class="stats">
     <div class="stat"><div class="n">{{ number_format($stats['processados'],0,',','.') }}</div><div class="l">processados ({{ $stats['janela_h'] }}h)</div></div>

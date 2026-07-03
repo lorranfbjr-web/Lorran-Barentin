@@ -104,10 +104,29 @@ class RadarNotificador
         $matchPub += $this->confirmarPublicados($restantes);
         [$publicados, $enviaveis] = $enviaveis->partition(fn ($r) => isset($matchPub[$r->id]));
 
+        // CRÍTICO P0/P1 (simplificar 03/07): anti-garbage TAMBÉM no caminho
+        // VIVO do grupo de notícias — o quente-fria (onde o GrupoFiltro nasceu)
+        // roda DEPOIS deste digest e não via mais nada. tier0/pisos por tier
+        // iguais; reprovado é marcado (não re-candidata) e segue no /radar+Mesa.
+        [$enviaveis, $filtrados] = $enviaveis->partition(function ($r) {
+            $cidade = trim((string) ($r->cidade_llm ?? ''));
+            $composto = (int) $r->score_editorial + CidadesInteresse::bonus(CidadesInteresse::tier($cidade));
+            $gf = GrupoFiltro::noticia($cidade, $composto);
+            if (! $gf['ok']) {
+                Log::info('[RadarNotificador] grupo-filtro barrou (segue no site/Mesa): '
+                    . mb_substr((string) $r->titulo, 0, 80) . ' — ' . $gf['motivo']);
+
+                return false;
+            }
+
+            return true;
+        });
+
         return [
             'enviaveis' => $enviaveis->values(),
             'bloqueados_idade' => $velhos->values(),
             'bloqueados_publicado' => $publicados->values(),
+            'bloqueados_filtro' => $filtrados->values(),
             'match_pub' => $matchPub,
         ];
     }
@@ -179,6 +198,14 @@ class RadarNotificador
             $this->marcarNotificados($plano['bloqueados_idade']);
             Log::info(sprintf('[RadarNotificador] %d quente(s) bloqueado(s) por idade > %dh (catch-up, não notifica)',
                 $plano['bloqueados_idade']->count(), (int) ($this->cfg['max_idade_horas'] ?? 12)));
+        }
+
+        // CRÍTICO P0 (simplificar 03/07): reprovado no GrupoFiltro = marcado
+        // sem enviar (tier0/piso). Continua no /radar e na Mesa.
+        if ($plano['bloqueados_filtro']->isNotEmpty()) {
+            $this->marcarNotificados($plano['bloqueados_filtro']);
+            Log::info(sprintf('[RadarNotificador] %d quente(s) barrado(s) pelo grupo-filtro (só site/Mesa)',
+                $plano['bloqueados_filtro']->count()));
         }
 
         if ($novos->isEmpty()) {

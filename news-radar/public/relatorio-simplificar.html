@@ -1,0 +1,213 @@
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Relatório — Simplificar 03/07/2026</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:0 auto;padding:20px;color:#16181d;line-height:1.5;background:#f5f6fa}
+h1{font-size:22px;color:#0D2481}h2{font-size:17px;color:#0D2481;margin-top:26px;border-bottom:2px solid #e6e8ee;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}th,td{border:1px solid #e6e8ee;padding:6px 9px;text-align:left}th{background:#eef1f8}
+code{background:#eef1f8;padding:1px 5px;border-radius:4px;font-size:12.5px}pre{background:#fff;border:1px solid #e6e8ee;border-radius:8px;padding:12px;font-size:12.5px;overflow:auto}
+blockquote{border-left:3px solid #0D2481;margin:8px 0;padding:6px 12px;background:#fff;color:#444;font-size:13.5px}
+li{margin:4px 0;font-size:14px}p{font-size:14px;margin:4px 0}</style></head><body>
+<p><h1>📋 RELATÓRIO — GOAL SIMPLIFICAR · 03/07/2026 (tarde)</h1></p>
+<br>
+<p>&gt; Feedback do dono (03/07 14h): *&quot;o hub unificado ficou uma bagunça; a aba notícias não abre no</p>
+<p>&gt; celular; os grupos estão cheios de cidade irrelevante.&quot;* Goal de REFINO — zero feature nova</p>
+<p>&gt; fora da régua. Baseline: <code>b03cbb2</code>. Sessão dentro das 3h; texto em lote 100% OpenAI.</p>
+<br>
+<p><h2>🚦 Semáforo</h2></p>
+<br>
+<table><tr><th>Bloco</th><th>Estado</th><th>Evidência</th></tr>
+<tr><td>1 · Separar páginas</td><td>🟢</td><td>6 páginas 200, todas &lt;300KB, zero iframe; screenshots 390px</td></tr>
+<tr><td>2 · Anti-garbage</td><td>🟢</td><td>ANTES 110 → DEPOIS 38 (<b>corte 65,5%</b>), núcleo preservado</td></tr>
+<tr><td>3 · Grupos por fonte</td><td>🟢</td><td>3 grupos roteados + estreia com messageId em cada</td></tr>
+<tr><td>4 · Já-publicado</td><td>🟢</td><td>causa real (cURL 28 sem retry + flag ignorada) + 3 provas</td></tr>
+<tr><td>5 · Bug agregador</td><td>🟢</td><td>reproduzido + causa + fix triplo + digest limpo (messageId)</td></tr>
+<tr><td>6 · Publicar 1-clique</td><td>🟡</td><td>draft WP 19____ completo; Mesa síncrona BLOQUEADA (env stale)</td></tr>
+<tr><td>7 · Rascunho via GPT</td><td>🟢</td><td>driver no ar (gpt-5.5) + A/B 3 pares colado + default GPT</td></tr>
+<tr><td>8 · Fecho</td><td>🟢</td><td>watchdog 13 checks (2 novos) + 3 céticos + este relatório</td></tr>
+</table>
+<br>
+<hr>
+<br>
+<p><h2>BLOCO 1 — páginas separadas (hub desfeito)</h2></p>
+<br>
+<p>O hub era <b>2,1MB</b> com 2 iframes (a &quot;aba que não abre no celular&quot;). Agora:</p>
+<br>
+<table><tr><th>Página</th><th>Tamanho</th><th>Antes</th></tr>
+<tr><td><code>/radar-civico</code> (índice: 5 cartões + contador + &quot;último há X min&quot; + /mesa)</td><td><b>3KB</b></td><td>2.138KB</td></tr>
+<tr><td><code>/dom</code></td><td>242KB</td><td>—</td></tr>
+<tr><td><code>/camaras</code></td><td>256KB</td><td>—</td></tr>
+<tr><td><code>/justica</code> (MPSC+TCE, filtro por fonte)</td><td>273KB</td><td>—</td></tr>
+<tr><td><code>/prefeituras</code></td><td>171KB</td><td>—</td></tr>
+<tr><td><code>/radar</code> (vitrine standalone DE VOLTA)</td><td>187KB</td><td>iframe</td></tr>
+</table>
+<br>
+<p>Zero iframe servido; redirects 308 (<code>?fonte=</code>→página, <code>?painel=noticias</code>→/radar, <code>?painel=mesa</code>→/mesa,</p>
+<p><code>/dom-radar</code>→/dom, oportunidades.html→/dom); deep-link antigo <code>#ato-…</code> reencaminha; alertas novos já</p>
+<p>apontam pra página da fonte. Como coube em &lt;300KB: corte final por página (fresco sobrevive primeiro)</p>
+<p>+ campos LLM aparados no JSON (íntegra continua no botão lazy). Screenshots 390px:</p>
+<p><code>(backup interno)</code>.</p>
+<br>
+<p><h2>BLOCO 2 — anti-garbage (o pedido central do dono)</h2></p>
+<br>
+<p><b>Auditoria ANTES</b> (110 últimos envios reais das 4 mesas — <code>auditoria-antes.json</code>):</p>
+<li>22 itens (20%) de <b>cidade fora do interesse</b> (Araranguá, São Bento do Sul, Laguna, &quot;Saúde da AMREC&quot;…)</li>
+<li>47 itens (43%) com score &lt; 80 · 5 repetições · 1 objeto vago</li>
+<br>
+<p><b>Regras duras POR GRUPO</b> (<code>GrupoFiltro</code>, config <code>radar_civico.grupo_filtro</code>, 6 linhas env-ajustáveis):</p>
+<br>
+<p>``<code></p>
+<p>tier0 / objeto vago / objeto rotineiro (show por inexigibilidade, licença de</p>
+<p>software, termo aditivo)                          → NUNCA em grupo</p>
+<p>núcleo (RADAR_CIVICO_CIDADES, 6 cidades)          → score ≥ 70</p>
+<p>fiscalização                                      → tier1 ≥ 80 · tier2 ≥ 85</p>
+<p>serviço fora do núcleo                            → só site (auto-rascunho já entrega os melhores)</p>
+<p>notícia (quente-fria)                             → núcleo ≥ 70 · tier1 ≥ 80 · tier2 ≥ 85</p>
+<p>repetição (cidade+objeto)                         → dedup no alertar</p>
+<p></code>`<code></p>
+<br>
+<p><b>DEPOIS (simulado na MESMA janela): 110 → 38 = corte de 65,5%</b> (meta ≥60% ✓), mantendo TODOS os</p>
+<p>itens que o editor da região quereria (conferência região Tijucas no </code>auditoria-depois.json<code>: MP/estiagem 82,</p>
+<p>licenças ambientais 88/85, Justiça Federal/Estrada 74, revitalização 75 — todos DENTRO; só rotina 60-68 fora).</p>
+<p>Barrado ≠ descartado: continua no site/Mesa com score intacto.</p>
+<br>
+<p><h2>BLOCO 3 — grupos separados por fonte</h2></p>
+<br>
+<p>Os 3 grupos novos JÁ enxergavam a instância de alerta às 18h. Roteamento config-driven</p>
+<p>(</code>radar_civico.canais.civico<code> + </code>canais.noticias<code>):</p>
+<br>
+<table><tr><th>Rota</th><th>Grupo</th><th>Estreia (messageId)</th></tr>
+<tr><td>DOM + câmaras</td><td>Raspador Diário Oficial</td><td></code>3EB0D2…<code></td></tr>
+<tr><td>MPSC + TCE</td><td>Raspador Justiça (MP + TC)</td><td></code>3EB02F…<code></td></tr>
+<tr><td>Releases de prefeitura</td><td>Raspador Cidades</td><td></code>3EB066…<code></td></tr>
+<tr><td>Notícias de portais (quente-fria + notificador)</td><td>Raspador (atual)</td><td>digest bloco 5</td></tr>
+<tr><td>Auto-rascunho / kit / fluxo ✅</td><td>Rascunhos (SÓ isso)</td><td>—</td></tr>
+</table>
+<br>
+<p>Digest cívico agora é <b>1 por grupo</b>; N3 roteado pela fonte; </code>--seed<code> rodado antes (backlog 0);</p>
+<p>falha num grupo não registra o lote (re-tenta). <b>Decisão listada</b>: quente-fria foi pro grupo</p>
+<p>Raspador junto do digest do notificador (mapeamento do goal &quot;notícias → Raspador atual&quot;) — e o eco</p>
+<p>entre os dois digests foi fechado no bloco 4 (</code>whereNull(notificado_em)<code>).</p>
+<br>
+<p><h2>BLOCO 4 — já-publicado nunca no topo nem em grupo</h2></p>
+<br>
+<p><b>Causa real do vazamento (dupla):</b></p>
+<li></code>publicados-sync<code> morria INTEIRO com </code>cURL error 28<code> (connect timeout, sem retry) — run de 07:31</li>
+<p>   falhou e nada foi flagado o dia todo (log colado no commit).</p>
+<li></code>quente-fria<code> <b>não filtrava a flag</b>: itens 2909064/2882577 estavam </code>ja_publicado_em<code> setado e</li>
+<p>   foram enviados mesmo assim.</p>
+<br>
+<p><b>Fixes:</b> retry+catch no sync (falha vira warning, mantém parcial) · </code>whereNull(ja_publicado_em)<code></p>
+<p>+ </code>whereNull(notificado_em)<code> no quente-fria · <b></code>PublicadoMatcher::casaBarato<code></b> (novo, SEM LLM:</p>
+<p>URL canônica + título normalizado + fuzzy ≥72%, corpus 30d em cache 30min) como rede síncrona na</p>
+<p>vitrine, notificador (antes do LLM — segura o fail-open), alertar (release já coberto) e kit</p>
+<p>(república com slug novo ≠ 2º kit).</p>
+<br>
+<p><b>Prova (3 matérias publicadas hoje):</b> &quot;pastor/igreja condenada&quot; · &quot;adolescente internado Chapecó&quot; ·</p>
+<p>&quot;nortista quarto R$800&quot; — (i) nenhuma no topo da vitrine (grep no HTML); (ii) dry-run quente-fria:</p>
+<p>32 classificadas → <b>0 quentes</b>; dry-run alertar: 0.</p>
+<br>
+<p><h2>BLOCO 5 — bug do &quot;agregador de links&quot;</h2></p>
+<br>
+<p><b>Reproduzido com dados reais</b>: cluster 2117434 — a linha &quot;🔥 6 portais cobrindo&quot; misturava o link</p>
+<p>de *&quot;Pesquisa Atlas: Lula testado&quot;* no meio da pauta *&quot;Michelle deixa PL Mulher&quot;*; e o ClusterMergeLLM</p>
+<p>fundia o briefing *&quot;QUARTA, 1/7: Michelle…&quot;* (página multi-notícia) <b>a cada ciclo</b> (log 17:05/17:35/18:05).</p>
+<br>
+<p><b>Causa:</b> over-merge de cluster (LLM + remap em cadeia) × template que imprimia TODOS os membros.</p>
+<p><b>Fix triplo:</b> guarda de coerência 0.4 no </code>coberturasPorEvento<code> (link perdido &gt; link errado) ·</p>
+<p>veto de briefing no merge LLM · fim do remap em cadeia (1 fusão por cluster por ciclo).</p>
+<p><b>Prova:</b> mesmo cluster re-renderizado limpo e enviado — messageId </code>FCD66F…<code>.</p>
+<br>
+<p><h2>BLOCO 6 — publicar ponta-a-ponta</h2></p>
+<br>
+<p>E2E real (sem publicar): ✅ simulado no webhook → <b>draft WP 19____</b>: status=draft ✓ título ✓</p>
+<p>linha-fina ✓ corpo em parágrafos ✓ lacunas em comentário ✓ <b>tag de cidade</b> (novo) ✓.</p>
+<p>Aditivos de hoje: tags no WP (</code>tagIds<code>, cidade sempre vira tag — controle NÃO tem categoria por</p>
+<p>cidade, conferido via API) + crédito da foto no corpo do draft cívico.</p>
+<br>
+<p><b>Checklist do que o Lorran ainda toca no admin (1-clique real):</b></p>
+<li><b>Categoria</b> — cívico nasce &quot;geral&quot; (mapear palavra-chave→editoria é pendência sugerida).</li>
+<li>Revisar lacunas do comentário HTML e apagar.</li>
+<li>Botão Publicar.</li>
+<br>
+<p><b>Pendências técnicas listadas</b> (não implementadas hoje): revisor pós-post e juiz visual não cobrem</p>
+<p>drafts do ✅-cívico (selecionam só de </code>jr_pauta_publicacoes<code>); corpo é texto plano (sem links/intertítulos).</p>
+<br>
+<p><b>🔴 BLOQUEADO (Trava #0):</b> Mesa→rascunho <b>síncrono</b> falha porque o </code>newsradar-web<code> foi iniciado</p>
+<p>antes da chave OpenAI real (env congelado no processo; erro </code>sk-****<code> em </code>jr_juiz_log<code> 18:46).</p>
+<p><b>Lorran, 1 linha:</b> </code>sudo systemctl restart newsradar-web<code> (o fluxo ✅→draft e todos os crons NÃO</p>
+<p>dependem disso — rodam em processo fresco).</p>
+<br>
+<p><h2>BLOCO 7 — rascunho via GPT</h2></p>
+<br>
+<li>Driver </code>JRLINK_RASCUNHO_DRIVER=openai|claude<code> no ar (seam </code>jrlink.drivers<code>, 4 operações de geração);</li>
+<p>  modelo por operação </code>JRLINK_RASCUNHO_MODELO<code> (default <b>gpt-5.5</b> — o melhor da chave, sondado em</p>
+<p>  </code>/v1/models<code>; juiz continua no mini, <b>prompt/score intocados</b>).</p>
+<li><b>A/B real</b> (3 itens: mpsc:2531 MP/estiagem, prefeitura:69 CEJA, dom:34696 Câmara SJB), MESMO</li>
+<p>  prompt, claude-opus-4-8 vs gpt-5.5 — pares completos em </code>(backup interno)<code>.</p>
+<p>  Leitura: paridade de qualidade; GPT mais rigoroso na atribuição (&quot;Segundo o ato publicado no</p>
+<p>  DOM/SC&quot;), Claude título um tico mais concreto. Nada enviado a grupo.</p>
+<li><b>Default documentado: GPT</b> (regra do goal: igual/melhor → GPT; bate com a avaliação do dono).</li>
+<li>Bônus: </code>jr_juiz_log.model<code> e </code>jr_pauta_reescrita.modelo<code> paravam de MENTIR (gravavam mini/opus fixo).</li>
+<br>
+<p><h2>BLOCO 8 — fecho</h2></p>
+<br>
+<li><b>Watchdog</b>: 2 checks novos — *Páginas separadas* (6/6 200, 0 acima de 300KB) e *Grupos por fonte*</li>
+<p>  (4/4 rotas configuradas + último envio) — em health.html + WATCHDOG-estado.md.</p>
+<li><b>Custo</b>: texto em lote 100% OpenAI (A/B usou claude-cli em 3 chamadas pontuais, mandato explícito</li>
+<p>  do goal); juiz gpt-5.4-mini intocado.</p>
+<br>
+<p><h2>🔍 Crítico final (3 céticos) — achados</h2></p>
+<br>
+<p>Céticos: travas/segredos · &quot;abre rápido no celular?&quot; · &quot;Lorran recebe menos e melhor?&quot;.</p>
+<p>Travas do goal: <b>todas respeitadas com evidência</b> (nenhum serviço reiniciado; WP 100% draft;</p>
+<p>instância única de alerta; zero segredo no diff; nada apagado; zero migrations).</p>
+<br>
+<p><b>CORRIGIDOS na hora (P0 + P1):</b></p>
+<li><b>P0</b> — </code>whereNull(notificado_em)<code> do bloco 4 deixou o quente-fria sem estoque (o notificador</li>
+<p>   às :05/:35 marca TODO quente ≥60 antes) → o GrupoFiltro de notícia nunca rodava e **o caminho</p>
+<p>   VIVO (RadarNotificador) seguia sem filtro** — tier0 (Treze Tílias, Matos Costa, São Bento) chegou</p>
+<p>   ao grupo horas DEPOIS do deploy. <b>Fix</b>: GrupoFiltro::noticia agora roda dentro do</p>
+<p>   </code>RadarNotificador::planejar<code> (reprovado = marcado, segue no site/Mesa, motivo logado); quente-fria</p>
+<p>   assume o papel de triagem do painel.</p>
+<li><b>P1</b> — </code>termo aditivo<code> barrava fiscalização REAL do núcleo (6º aditivo do SAMAE de Tijucas,</li>
+<p>   score 75, gancho &quot;merece apuração&quot;). <b>Fix</b>: rotina só se aplica FORA do núcleo (no núcleo o</p>
+<p>   piso 70 decide).</p>
+<li><b>P1</b> — fuzzy do casaBarato casou 2 falsos positivos em 72h (acidentes/prisões distintos com</li>
+<p>   tokens genéricos) e gravava </code>ja_publicado_em<code> permanente sem LLM. <b>Fix</b>: fuzzy conservador</p>
+<p>   (≥4 tokens E ≥60% pelo lado MAIOR) + <b>todo match logado</b> (</code>[casaBarato]<code> no laravel.log) —</p>
+<p>   reescrita profunda fica com o LLM, como sempre foi.</p>
+<li><b>P1</b> — vitrine /radar era beco sem saída no celular. <b>Fix</b>: &quot;‹ Radar Cívico&quot; + &quot;📌 Mesa&quot; no header.</li>
+<li><b>P1</b> — N3 cívico sem guarda de grupo vazio (fallback silencioso do ZapRascunhos cairia no grupo</li>
+<p>   Rascunhos). <b>Fix</b>: mesma guarda do digest. + <b>P2</b> IDs de grupo mascarados no console/journal.</p>
+<br>
+<p><b>LISTADOS (P2, não bloqueiam):</b></p>
+<li>Dedup de repetição do alertar vale dentro do ciclo (cross-ciclo exigiria guardar objeto em</li>
+<p>  jr_civico_alertas — aditivo futuro).</p>
+<li>Páginas são client-rendered a partir de JSON embutido (corpo vazio sem JS); /justica a 91% do teto</li>
+<p>  de 300KB — margem apertada se os campos crescerem.</p>
+<li>Deep-link antigo </code>#ato-<code> pro índice depende de JS (fragmento nunca chega ao servidor — sem solução</li>
+<p>  server-side); jumpHash silencioso se o item saiu do corte de 180.</p>
+<li></code>/radar<code> responde em ~1,3s (5-6× as irmãs) — profiling de query fica pra depois.</li>
+<li>N3 do quente-fria com canal vazio consome vaga do teto diário sem enviar (raro; só sob misconfig).</li>
+<li></code>?cidades=interesse<code> no índice degrada pro índice sem filtro (nenhum link do repo gera isso).</li>
+<br>
+<p><h2>🅿️ PARQUEADO — RADAR TOTAL (retomada futura, 1 linha cada)</h2></p>
+<br>
+<li><b>B1 CIGA/DOM full-text</b>: ingestão da íntegra dos PDFs do DOM via CIGA — retomar pela fila de scoring.</li>
+<li><b>B2 TJSC releases</b>: raspar sala de imprensa do TJSC (ALESC bloqueia IP do VPS — TJSC não testado).</li>
+<li><b>B3 MPSC releases</b>: notícias oficiais do MPSC como fonte 🟢 própria.</li>
+<li><b>B4 Agenda pública</b>: agendas de prefeitos/câmaras como sinal de pauta futura.</li>
+<li><b>B6 GA4 shadow</b>: score de audiência sombreando o score editorial (clique×retenção já analisado).</li>
+<li><b>B7 Painel de custo</b>: consolidar custo_usd por operação num painel (jr_juiz_log já tem os dados).</li>
+<li><b>B8 Story tracking</b>: acompanhar desdobramento de pauta (matéria→follow-up) por cluster.</li>
+<li><b>B9 DOC-SYNC</b>: sincronizar docs/ com o estado real dos comandos (drift acumulando).</li>
+<li><b>B10 Alertas nível-2 por e-mail</b>: digest diário por e-mail além do WhatsApp.</li>
+<br>
+<p><h2>Pendências do Lorran</h2></p>
+<br>
+<li></code>sudo systemctl restart newsradar-web<code> (desbloqueia Mesa→rascunho síncrono; 10 segundos).</li>
+<li>Conferir os 3 grupos novos no WhatsApp (estreias entregues) e avisar se quiser thresholds diferentes</li>
+<p>   (</code>RADAR_GRUPO_*` no .env, sem deploy).</p>
+<li>draft WP 19____ no admin do controle — exemplo do 1-clique (só categoria + Publicar).</li>
+<br>
+<hr><p style="color:#6b7280;font-size:11px">Jornal Razão — relatório público mascarado · uso editorial interno</p></body></html>
