@@ -127,6 +127,32 @@ return [
         'frescor_dias' => (int) env('RADAR_QF_FRESCOR_DIAS', 3), // mais velho que isso nunca é quente
     ],
 
+    /*
+     * BLOCO 5 (radar-total 03/07): ALERTAS EM 3 NÍVEIS — camada de ROTEAMENTO
+     * sobre sinais que já existem (nenhum detector novo, nenhum score alterado):
+     *   🔥🔥🔥 N3 LARGA-TUDO — mensagem IMEDIATA própria, FORA do cap de digest
+     *     (fura max_msg_run/max_por_ciclo; a janela de silêncio continua valendo —
+     *     de madrugada acumula e sai no 1º digest pós-6h, como todo alerta).
+     *     Gatilhos: (a) viral v0 do juiz (temperatura_juiz=quente, régua do
+     *     prompt v5) em cidade TIER 1 → jrlink:quente-fria; (b) fiscalização
+     *     com score_pauta >= n3_score em fonte de fiscalização → jrcivico:alertar.
+     *   🔥 N2 QUENTE — fluxo atual intocado (gate >=80/60 do alertar; digest
+     *     do quente-fria).
+     *   ❄️ N1 RESTO — só painel/Mesa (fria do quente-fria; não-gatilho do alertar).
+     * Guard-rail: teto DIÁRIO de mensagens N3 por fluxo (n3_max_dia) — acima
+     * disso o item desce pro digest N2 (nunca some). Doc: docs/alertas-3-niveis.md
+     */
+    'niveis' => [
+        'n3_score' => (int) env('RADAR_N3_SCORE', 90),
+        // fontes que contam como "fiscalização" pro gatilho (b) — release de
+        // prefeitura NUNCA vira larga-tudo (é a versão oficial, não fiscalização)
+        'n3_fontes' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('RADAR_N3_FONTES', 'dom,tce,mpsc,camara'))
+        ))),
+        'n3_max_dia' => (int) env('RADAR_N3_MAX_DIA', 3),
+    ],
+
     'auto_rascunho' => [
         'score_min' => (int) env('RADAR_CIVICO_AUTORASCUNHO_MIN', 80),
         'max_dia' => (int) env('RADAR_CIVICO_AUTORASCUNHO_DIA', 5),

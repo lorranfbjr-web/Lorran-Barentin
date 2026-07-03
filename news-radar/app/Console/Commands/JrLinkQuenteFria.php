@@ -63,10 +63,20 @@ class JrLinkQuenteFria extends Command
 
         $quentes = $linhas->where('classe', 'quente')->sortByDesc('score_composto')->values();
         $frias = $linhas->where('classe', 'fria');
-        $this->info(sprintf('%d classificadas: %d quentes · %d frias (corte composto %d).',
-            $linhas->count(), $quentes->count(), $frias->count(), $corte));
+
+        // BLOCO 5 (radar-total 03/07): N3 LARGA-TUDO = viral v0 do juiz
+        // (temperatura_juiz=quente, que já é pré-condição de "quente" aqui) em
+        // cidade TIER 1 → mensagem imediata própria, fora do digest, com teto
+        // diário (config niveis.n3_max_dia). Excedente desce pro digest N2.
+        [$n3, $quentes] = $this->separarNivel3($quentes);
+
+        $this->info(sprintf('%d classificadas: %d N3 larga-tudo · %d quentes · %d frias (corte composto %d).',
+            $linhas->count(), count($n3), $quentes->count(), $frias->count(), $corte));
 
         if ($dry) {
+            foreach ($n3 as $q) {
+                $this->line("[dry] 🔥🔥🔥 {$q['score_composto']} {$q['cidade']} — ".mb_substr($q['titulo'], 0, 70)." · {$q['motivo']}");
+            }
             foreach ($quentes->take(10) as $q) {
                 $this->line("[dry] 🔥 {$q['score_composto']} {$q['cidade']} — ".mb_substr($q['titulo'], 0, 70)." · {$q['motivo']}");
             }
@@ -79,6 +89,17 @@ class JrLinkQuenteFria extends Command
             $this->info('Silêncio: quente/fria espera o dia acordar (nada gravado).');
 
             return self::SUCCESS;
+        }
+
+        // N3 primeiro: mensagem imediata própria por item (fora do digest).
+        $n3Enviados = [];  // extracao_id => messageId
+        $n3Falharam = []; // extracao_id => true (re-tenta no próximo ciclo)
+        if (! $seed && ! empty($n3)) {
+            [$n3Enviados, $n3Falharam] = $this->entregarNivel3($n3);
+        }
+        $n3Ids = [];
+        foreach ($n3 as $q) {
+            $n3Ids[$q['id']] = true;
         }
 
         $messageId = null;
@@ -94,15 +115,21 @@ class JrLinkQuenteFria extends Command
 
         $agora = Carbon::now();
         foreach ($linhas as $l) {
-            if ($envioFalhou && $l['classe'] === 'quente') {
+            $isN3 = isset($n3Ids[$l['id']]);
+            if ($isN3 && isset($n3Falharam[$l['id']])) {
+                continue; // re-tenta no próximo ciclo
+            }
+            if (! $isN3 && $envioFalhou && $l['classe'] === 'quente') {
                 continue; // re-tenta no próximo ciclo
             }
             DB::table('jr_quente_fria')->insertOrIgnore([
                 'extracao_id' => $l['id'],
                 'classe' => $l['classe'],
                 'score_composto' => $l['score_composto'],
-                'motivo' => mb_substr($l['motivo'], 0, 250),
-                'message_id' => $l['classe'] === 'quente' ? $messageId : null,
+                'motivo' => mb_substr(($isN3 && ! $seed ? 'n3 · ' : '').$l['motivo'], 0, 250),
+                'message_id' => $isN3
+                    ? ($n3Enviados[$l['id']] ?? null)
+                    : ($l['classe'] === 'quente' ? $messageId : null),
                 'created_at' => $agora,
                 'updated_at' => $agora,
             ]);
@@ -167,6 +194,7 @@ class JrLinkQuenteFria extends Command
                 'url' => (string) $r->url,
                 'host' => (string) ($r->host ?? ''),
                 'cidade' => $cidade !== '' ? $cidade : '—',
+                'tier' => $tier,
                 'classe' => $quente ? 'quente' : 'fria',
                 'score_composto' => $score,
                 'motivo' => sprintf('juiz=%s · editorial=%d · tier%d%+d · idade=%dd(-%d)',
@@ -230,5 +258,78 @@ class JrLinkQuenteFria extends Command
         }
 
         return $zap->texto($msg, $canal);
+    }
+
+    /**
+     * BLOCO 5 — separa o N3 LARGA-TUDO dos quentes: viral v0 do juiz
+     * (temperatura_juiz=quente já é pré-condição de "quente") em cidade TIER 1,
+     * limitado pelo teto DIÁRIO niveis.n3_max_dia (excedente desce pro digest
+     * N2 — nunca some). Nada muda no juiz nem em score no banco.
+     *
+     * @param  Collection<int, array>  $quentes  ordenados por score desc
+     * @return array{0: array, 1: Collection}
+     */
+    private function separarNivel3(Collection $quentes): array
+    {
+        $teto = max(0, (int) config('radar_civico.niveis.n3_max_dia', 3));
+        $hojeN3 = (int) DB::table('jr_quente_fria')
+            ->where('motivo', 'like', 'n3 ·%')
+            ->where('created_at', '>=', Carbon::now()->startOfDay())
+            ->count();
+        $vagas = max(0, $teto - $hojeN3);
+
+        $n3 = [];
+        $resto = [];
+        foreach ($quentes as $q) {
+            if ($q['tier'] === 1 && count($n3) < $vagas) {
+                $n3[] = $q;
+            } else {
+                $resto[] = $q;
+            }
+        }
+
+        return [$n3, collect($resto)];
+    }
+
+    /**
+     * Entrega cada N3 como mensagem própria no canal sugestões, formato limpo
+     * (corpo = fato + link; metadado em 1 linha operacional após o separador).
+     *
+     * @return array{0: array<int, string>, 1: array<int, true>} [enviados, falharam]
+     */
+    private function entregarNivel3(array $n3): array
+    {
+        $zap = new ZapRascunhos;
+        $canal = (string) config('radar_civico.canais.sugestoes');
+        if (! $zap->configurado() || $canal === '') {
+            $this->warn('[SEM CREDENCIAL Z-API/canal] N3 não enviado (fica registrado como quente comum).');
+
+            return [[], []]; // fail-closed deliberado: grava sem message_id
+        }
+
+        $enviados = [];
+        $falharam = [];
+        foreach ($n3 as $q) {
+            $msg = implode("\n", [
+                "🔥🔥🔥 *LARGA-TUDO — {$q['cidade']}*",
+                '',
+                '*'.mb_substr($q['titulo'], 0, 200).'*',
+                '',
+                '🔗 '.$q['url'],
+                '───',
+                "🛰️ nível 3 · viral do juiz em cidade tier1 · composto {$q['score_composto']} · lead pra apurar, não acusação",
+            ]);
+            $mid = $zap->texto($msg, $canal);
+            if ($mid === null) {
+                $falharam[$q['id']] = true;
+                $this->error("Z-API recusou N3 extração {$q['id']} — volta no próximo ciclo.");
+
+                continue;
+            }
+            $enviados[$q['id']] = $mid;
+            $this->info("🔥🔥🔥 N3 enviado: {$q['cidade']} — ".mb_substr($q['titulo'], 0, 60)." (messageId {$mid})");
+        }
+
+        return [$enviados, $falharam];
     }
 }

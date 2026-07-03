@@ -65,6 +65,12 @@ class JrCivicoAlertar extends Command
             return self::SUCCESS;
         }
 
+        // BLOCO 5 (radar-total 03/07): roteamento em 3 níveis — N3 LARGA-TUDO
+        // (fiscalização score>=n3_score) sai em mensagem IMEDIATA própria, fora
+        // do cap do digest; N2 segue no digest de sempre; N1 nunca chega aqui
+        // (não-gatilho = só painel). Nada muda no detector/score.
+        [$n3, $novas] = $this->separarNivel3($novas);
+
         // BLOCO 0b (03/07): janela de silêncio (hora LOCAL). Não envia e NÃO
         // registra — o dedup só marca no envio, então as pautas ACUMULAM e o
         // 1º ciclo depois do silêncio manda o digest único. --dry passa reto
@@ -75,20 +81,42 @@ class JrCivicoAlertar extends Command
             return self::SUCCESS;
         }
 
-        $msg = $this->montar($novas, $cfg);
-
         // fail-closed: sem instância de alerta + grupo, não envia (documenta e sai)
         $zap = new \App\Services\Jr\ZapRascunhos();
         $grupo = (string) config('radar_civico.canais.sugestoes');
         if ($this->option('dry') || ! $zap->configurado() || $grupo === '') {
             $motivo = $this->option('dry') ? '[--dry]' : '[SEM CREDENCIAL: configure JRLINK_ALERT_ZAPI_* + RADAR_CIVICO_SUGESTOES_GROUP/JRLINK_RASCUNHOS_GROUP]';
-            $this->warn("Não enviado {$motivo}. Mensagem que SERIA enviada (" . count($novas) . ' nova(s)):');
-            $this->line(str_repeat('─', 48));
-            $this->line($msg);
-            $this->line(str_repeat('─', 48));
+            $this->warn("Não enviado {$motivo}. " . count($n3) . ' N3 larga-tudo + ' . count($novas) . ' N2 digest:');
+            foreach ($n3 as $p) {
+                $this->line(str_repeat('═', 48));
+                $this->line($this->renderNivel3($p));
+            }
+            if (! empty($novas)) {
+                $this->line(str_repeat('─', 48));
+                $this->line($this->montar($novas, $cfg));
+                $this->line(str_repeat('─', 48));
+            }
             return self::SUCCESS;
         }
 
+        // N3 primeiro: 1 mensagem imediata POR ITEM, fora do cap do digest.
+        // Falhou o envio → item NÃO registrado, volta no próximo ciclo.
+        foreach ($n3 as $p) {
+            $mid = $zap->texto($this->renderNivel3($p), $grupo);
+            if ($mid === null) {
+                $this->error("Z-API recusou N3 {$p['ato_ref']} — volta no próximo ciclo.");
+                continue;
+            }
+            $this->registrar([$p]);
+            $this->info("🔥🔥🔥 N3 enviado: {$p['ato_ref']} (score {$p['score']}, messageId {$mid}).");
+        }
+
+        if (empty($novas)) {
+            $this->info('Sem N2 pra digest neste ciclo.');
+            return self::SUCCESS;
+        }
+
+        $msg = $this->montar($novas, $cfg);
         $messageId = $zap->texto($msg, $grupo);
         if ($messageId === null) {
             $this->error('Z-API recusou o envio (ver laravel.log) — nada registrado, tenta no próximo ciclo.');
@@ -98,6 +126,72 @@ class JrCivicoAlertar extends Command
         $this->registrar($novas);
         $this->info('Alerta enviado: ' . count($novas) . ' pauta(s) quente(s) nova(s).');
         return self::SUCCESS;
+    }
+
+    /**
+     * BLOCO 5 — separa o N3 LARGA-TUDO do resto: fonte de fiscalização
+     * (config niveis.n3_fontes) com score >= n3_score, limitado pelo teto
+     * DIÁRIO n3_max_dia (o que passar do teto desce pro digest N2 — nunca
+     * some). Release de prefeitura nunca entra (é versão oficial).
+     *
+     * @return array{0: array, 1: array} [n3, resto]
+     */
+    private function separarNivel3(array $novas): array
+    {
+        $cfg = config('radar_civico.niveis');
+        $fontes = array_map('strtolower', (array) ($cfg['n3_fontes'] ?? []));
+        $scoreMin = (int) ($cfg['n3_score'] ?? 90);
+        $teto = max(0, (int) ($cfg['n3_max_dia'] ?? 3));
+
+        $hojeN3 = (int) DB::table('jr_civico_alertas')
+            ->where('motivo', 'n3-fiscalizacao')
+            ->where('alerted_at', '>=', Carbon::now()->startOfDay())
+            ->count();
+        $vagas = max(0, $teto - $hojeN3);
+
+        $n3 = [];
+        $resto = [];
+        foreach ($novas as $p) { // $novas já vem ordenado por score desc
+            $eN3 = in_array($p['source'], $fontes, true)
+                && $p['score'] >= $scoreMin
+                && count($n3) < $vagas;
+            if ($eN3) {
+                $p['motivo'] = 'n3-fiscalizacao';
+                $n3[] = $p;
+            } else {
+                $resto[] = $p;
+            }
+        }
+
+        return [$n3, $resto];
+    }
+
+    /**
+     * Mensagem N3 no formato limpo (regra do rascunho pronto): corpo só com o
+     * fato + link; metadado em 1 linha operacional após o separador.
+     */
+    private function renderNivel3(array $p): string
+    {
+        $linhas = ["🔥🔥🔥 *LARGA-TUDO — {$p['municipio']}*", ''];
+        $oque = trim($p['objeto']);
+        if ($oque !== '') {
+            $linhas[] = mb_substr($oque, 0, 300);
+            $linhas[] = '';
+        }
+        $porque = trim($p['gancho']);
+        if ($porque !== '' && mb_strtolower($porque) !== mb_strtolower($oque)) {
+            $linhas[] = '_' . mb_substr($porque, 0, 200) . '_';
+            $linhas[] = '';
+        }
+        if ($p['url_fonte'] !== '') {
+            $linhas[] = '🔗 ' . $p['url_fonte'];
+        }
+        $ic = self::ICONE[$p['source']] ?? '•';
+        $linhas[] = '───';
+        $linhas[] = "🛰️ nível 3 · {$ic} " . strtoupper($p['source'])
+            . " · score {$p['score']} · lead pra apurar, não acusação";
+
+        return trim(implode("\n", $linhas));
     }
 
     /**
