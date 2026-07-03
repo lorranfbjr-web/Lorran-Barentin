@@ -35,3 +35,6 @@ Thumbs.db
 /public/_tmp_jrlink
 /public/propostas
 /public/jr-rankings.json
+
+# DB acidental de runtime (0 bytes, criado por comando errado — o real é database.sqlite)
+/database/*.db
