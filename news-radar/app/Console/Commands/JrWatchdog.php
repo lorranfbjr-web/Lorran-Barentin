@@ -45,6 +45,8 @@ class JrWatchdog extends Command
         $checks['juiz'] = $this->juiz();
         $checks['civico'] = $this->civico();
         $checks['claude'] = $this->claudeCli();
+        $checks['datas'] = $this->datasSuspeitas();
+        $checks['alertazap'] = $this->alertaWhatsapp();
 
         $html = $this->renderHtml($checks, $agora);
         File::put(public_path('health.html'), $html);
@@ -281,6 +283,8 @@ class JrWatchdog extends Command
             'camara' => ['jr_camara_proposicoes', 48],
             'mpsc' => ['jr_mpsc_extratos', 30],
             'tce' => ['jr_tce_decisoes', 30],
+            // BLOCO 3/6 (02/07): notícia institucional de prefeitura (4 ciclos/dia)
+            'prefeitura' => ['jr_prefeitura_noticias', 30],
         ];
         $agora = Carbon::now();
         // sáb/dom/madrugada de segunda: nada publica => +48h de tolerância
@@ -375,6 +379,83 @@ class JrWatchdog extends Command
         }
     }
 
+    /**
+     * BLOCO 6 (02/07) — vigia de DATAS: se voltar a aparecer data futura/antiga
+     * NÃO flagada (regressão de parser) ou uma leva grande de data_suspeita nas
+     * últimas 24h (fonte publicando lixo), pinta warn/bad. READ-ONLY.
+     */
+    private function datasSuspeitas(): array
+    {
+        $tabelas = [
+            'dom' => 'jr_dom_atos', 'camara' => 'jr_camara_proposicoes',
+            'mpsc' => 'jr_mpsc_extratos', 'tce' => 'jr_tce_decisoes',
+            'prefeitura' => 'jr_prefeitura_noticias',
+        ];
+        $rows = [];
+        $furadas = 0;
+        $suspeitas24h = 0;
+        try {
+            foreach ($tabelas as $nome => $t) {
+                $semFlag = (int) DB::table($t)
+                    ->where(fn ($q) => $q->where('data_pub', '>', Carbon::now()->addDays(2)->toDateString())
+                        ->orWhere('data_pub', '<', '2015-01-01'))
+                    ->where(fn ($q) => $q->whereNull('data_suspeita')->orWhere('data_suspeita', '!=', 1))
+                    ->count();
+                $novasSuspeitas = (int) DB::table($t)->where('data_suspeita', 1)
+                    ->where('created_at', '>=', Carbon::now()->subDay())->count();
+                $furadas += $semFlag;
+                $suspeitas24h += $novasSuspeitas;
+                $rows[] = ['fonte' => $nome, 'furadas_sem_flag' => $semFlag, 'suspeitas_24h' => $novasSuspeitas,
+                    'nivel' => $semFlag > 0 ? 'bad' : ($novasSuspeitas > 20 ? 'warn' : 'ok')];
+            }
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
+        }
+
+        return [
+            'nivel' => $furadas > 0 ? 'bad' : ($suspeitas24h > 20 ? 'warn' : 'ok'),
+            'resumo' => $furadas > 0
+                ? "{$furadas} data(s) furada(s) SEM flag — regressão do BLOCO 1!"
+                : "0 datas furadas sem flag · {$suspeitas24h} suspeitas novas 24h",
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * BLOCO 6 (02/07) — canal WhatsApp de ALERTA (instância JRLINK_ALERT_ZAPI_*,
+     * grupo interno): configurado? Último alerta registrado? Falhas de envio no
+     * log 24h? PASSIVO — só pinta o quadro, nunca envia nada.
+     */
+    private function alertaWhatsapp(): array
+    {
+        try {
+            $zapOk = (new \App\Services\Jr\ZapRascunhos())->configurado();
+            $grupo = (string) config('radar_civico.canais.sugestoes');
+            $ultimo = DB::table('jr_civico_alertas')->max('alerted_at');
+            $idadeH = $ultimo ? round(Carbon::parse($ultimo)->diffInMinutes(Carbon::now()) / 60, 1) : null;
+
+            $falhas24h = 0;
+            $log = storage_path('logs/laravel.log');
+            if (is_file($log)) {
+                $r = Process::timeout(15)->run(
+                    "grep -c \"\$(date +%Y-%m-%d).*ZapRascunhos.*\\(falhou\\|erro\\)\" " . escapeshellarg($log) . ' 2>/dev/null || true'
+                );
+                $falhas24h = (int) trim($r->output());
+            }
+
+            $nivel = (! $zapOk || $grupo === '') ? 'bad' : ($falhas24h > 0 ? 'warn' : 'ok');
+            $resumo = sprintf('instância+grupo: %s · último alerta registrado: %s · falhas Z-API hoje no log: %d',
+                ($zapOk && $grupo !== '') ? 'configurados' : 'FALTANDO (fail-closed, nada sai)',
+                $idadeH === null ? 'nunca' : "há {$idadeH}h",
+                $falhas24h);
+
+            return ['nivel' => $nivel, 'resumo' => $resumo,
+                'rows' => [['configurado' => $zapOk, 'ultimo_alerta_h' => $idadeH, 'falhas_24h' => $falhas24h]]];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
+        }
+    }
+
     private function cor(string $nivel): string
     {
         return ['ok' => '#3fb950', 'warn' => '#e3b341', 'bad' => '#f85149'][$nivel] ?? '#9aa3b2';
@@ -426,6 +507,18 @@ class JrWatchdog extends Command
         $c = $checks['claude'];
         $secoes .= $this->bloco($dot($c['nivel']).' Sessão claude-cli (scoring cívico)', $c['resumo'], '');
 
+        // datas suspeitas (BLOCO 6)
+        $c = $checks['datas'];
+        $linhas = '';
+        foreach ($c['rows'] as $r) {
+            $linhas .= '<tr><td>'.$dot($r['nivel']).' '.htmlspecialchars($r['fonte']).'</td><td style="text-align:right">'.$r['furadas_sem_flag'].'</td><td style="text-align:right">'.$r['suspeitas_24h'].'</td></tr>';
+        }
+        $secoes .= $this->bloco($dot($c['nivel']).' Datas (sanidade BLOCO 1)', $c['resumo'], '<table><tr><th>fonte</th><th>furadas sem flag</th><th>suspeitas 24h</th></tr>'.$linhas.'</table>');
+
+        // canal WhatsApp de alerta (BLOCO 6)
+        $c = $checks['alertazap'];
+        $secoes .= $this->bloco($dot($c['nivel']).' Canal WhatsApp de alerta (Z-API)', $c['resumo'], '');
+
         // pipeline + juiz (só resumo)
         $secoes .= $this->bloco($dot($checks['pipeline']['nivel']).' Pipeline 24h', $checks['pipeline']['resumo'], '');
         $secoes .= $this->bloco($dot($checks['juiz']['nivel']).' Juiz', $checks['juiz']['resumo'], '');
@@ -451,7 +544,7 @@ class JrWatchdog extends Command
     private function renderMd(array $checks, Carbon $agora): string
     {
         $m = "# WATCHDOG — estado (v0, read-only)\n\nGerado: ".$agora->format('Y-m-d H:i')." UTC\n\n";
-        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli'] as $k => $nome) {
+        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli', 'datas' => 'Datas (sanidade)', 'alertazap' => 'Canal WhatsApp de alerta'] as $k => $nome) {
             $m .= "## {$nome}\n- **[".strtoupper($checks[$k]['nivel'])."]** ".$checks[$k]['resumo']."\n\n";
         }
         $m .= "_Não notifica e não muta nada. Dashboard: public/health.html_\n";
