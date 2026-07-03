@@ -34,6 +34,7 @@ class RadarCivicoController extends Controller
             $this->camara(),
             $this->mpsc(),
             $this->tce(),
+            $this->prefeitura(),
         );
 
         // dedup cross-fonte (best-effort): mesma fonte+url já é única; aqui
@@ -49,6 +50,12 @@ class RadarCivicoController extends Controller
 
         // pré-seleção via URL: /radar-civico?cidades=interesse (favoritável)
         $intIni = request()->query('cidades') === 'interesse' ? '1' : '';
+        // BLOCO 4 (02/07): aba única — ?fonte=dom|camara|mpsc|tce|prefeitura
+        // pré-seleciona a fonte; ?painel=noticias|mesa abre o painel embutido.
+        $fonteIni = (string) request()->query('fonte', '');
+        $fonteIni = array_key_exists($fonteIni, self::TABELAS) ? $fonteIni : '';
+        $painelIni = in_array(request()->query('painel'), ['noticias', 'mesa'], true)
+            ? (string) request()->query('painel') : '';
 
         // já-na-fila: marca as estrelas que já estão na Mesa de Pauta (se a tabela
         // existir — a Mesa é aditiva e pode ainda não ter sido migrada).
@@ -58,7 +65,7 @@ class RadarCivicoController extends Controller
         }
         $selJson = json_encode($selecionados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return response($this->html($json, $stats, $selJson, $intIni))
+        return response($this->html($json, $stats, $selJson, $intIni, $fonteIni, $painelIni))
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
@@ -68,6 +75,7 @@ class RadarCivicoController extends Controller
         'camara' => 'jr_camara_proposicoes',
         'mpsc' => 'jr_mpsc_extratos',
         'tce' => 'jr_tce_decisoes',
+        'prefeitura' => 'jr_prefeitura_noticias',
     ];
 
     /**
@@ -182,6 +190,24 @@ class RadarCivicoController extends Controller
         ])->all();
     }
 
+    /** BLOCO 3/4 (02/07): notícia institucional de prefeitura — release oficial (🟢). */
+    private function prefeitura(): array
+    {
+        $rows = RankingExibicao::coletar('jr_prefeitura_noticias',
+            fn ($q) => $q->whereNotNull('score_pauta')->where('score_pauta', '>=', 40),
+            self::LIMITE);
+
+        return $rows->map(fn ($a) => $this->base('prefeitura', $a) + [
+            'orgao' => $a->orgao,
+            'meta' => array_values(array_filter([
+                'release oficial',
+                $a->titulo ? mb_substr($a->titulo, 0, 90) : null,
+            ])),
+            'extra' => '⚠️ Nota da prefeitura = versão oficial de uma parte — checar de forma independente.',
+            'url_pdf' => null,
+        ])->all();
+    }
+
     /** Campos comuns a todas as fontes. */
     private function base(string $source, $a): array
     {
@@ -235,7 +261,7 @@ class RadarCivicoController extends Controller
 
     private function stats(array $itens): array
     {
-        $por = ['dom' => 0, 'camara' => 0, 'mpsc' => 0, 'tce' => 0];
+        $por = ['dom' => 0, 'camara' => 0, 'mpsc' => 0, 'tce' => 0, 'prefeitura' => 0];
         $fisc = 0;
         $serv = 0;
         $cinca = 0;
@@ -251,7 +277,7 @@ class RadarCivicoController extends Controller
         return ['total' => count($itens), 'por' => $por, 'fisc' => $fisc, 'serv' => $serv, 'cinca' => $cinca, 'interesse' => $interesse];
     }
 
-    private function html(string $json, array $s, string $selJson, string $intIni = ''): string
+    private function html(string $json, array $s, string $selJson, string $intIni = '', string $fonteIni = '', string $painelIni = ''): string
     {
         $gerado = Carbon::now()->format('d/m/Y H:i');
         $p = $s['por'];
@@ -262,10 +288,10 @@ class RadarCivicoController extends Controller
 <title>Radar Cívico de SC</title>
 <style>
 :root{--navy:#0D2481;--red:#E63946;--green:#2D6A4F;--amber:#D4A373;--ink:#16181d;--muted:#6b7280;--line:#e6e8ee;--bg:#f5f6fa;--card:#fff;
-  --c-dom:#0D2481;--c-camara:#7c3aed;--c-mpsc:#b45309;--c-tce:#0f766e}
+  --c-dom:#0D2481;--c-camara:#7c3aed;--c-mpsc:#b45309;--c-tce:#0f766e;--c-prefeitura:#166534}
 *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45}
 header{background:var(--navy);color:#fff;padding:16px 16px 12px;position:relative}
-header h1{margin:0;font-size:19px;font-weight:800}header .sub{font-size:12px;opacity:.85;margin-top:3px}
+header h1{margin:0;font-size:19px;font-weight:800;padding-right:118px}header .sub{font-size:12px;opacity:.85;margin-top:3px}
 header .mesa-link{position:absolute;top:14px;right:14px;color:#fff;font-size:12px;font-weight:800;text-decoration:none;background:rgba(255,255,255,.15);padding:6px 11px;border-radius:999px}
 .disc{background:#fff7ed;border-bottom:1px solid #fed7aa;color:#9a3412;font-size:11.5px;padding:7px 16px}
 .wrap{max-width:940px;margin:0 auto;padding:12px}
@@ -301,7 +327,13 @@ main{display:flex;flex-direction:column;gap:9px}
 .hd{flex:1;min-width:0}
 .l1{line-height:1.25;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .src-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:999px;color:#fff}
-.src-dom{background:var(--c-dom)}.src-camara{background:var(--c-camara)}.src-mpsc{background:var(--c-mpsc)}.src-tce{background:var(--c-tce)}
+.src-dom{background:var(--c-dom)}.src-camara{background:var(--c-camara)}.src-mpsc{background:var(--c-mpsc)}.src-tce{background:var(--c-tce)}.src-prefeitura{background:var(--c-prefeitura)}
+.panes{display:flex;gap:6px;flex-wrap:wrap;padding:9px 16px;background:var(--navy)}
+.pb{font:inherit;font-size:12.5px;font-weight:800;padding:7px 12px;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:transparent;color:#fff;cursor:pointer;text-decoration:none}
+.pb.on{background:#fff;color:var(--navy);border-color:#fff}
+.pane-frame{display:none;width:100%;border:none;min-height:calc(100vh - 130px)}
+.pane-frame.on{display:block}
+body.painel-aberto .disc,body.painel-aberto .wrap,body.painel-aberto footer{display:none}
 .muni{font-weight:800;font-size:15px}.reg{font-weight:600;color:var(--muted);font-size:12px}
 .lens-dot{font-size:13px}
 .l2{font-size:13.5px;margin:4px 0;color:#222}
@@ -334,9 +366,16 @@ summary::-webkit-details-marker{display:none}summary::before{content:"▸ "}deta
 .empty{text-align:center;color:var(--muted);padding:36px 16px}
 footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11px}
 </style></head><body>
-<header><a class="mesa-link" href="/mesa">📌 Mesa de Pauta ›</a><h1>🛰️ Radar Cívico de SC</h1>
-<div class="sub">DOM · Câmaras · MPSC · TCE — fato público + lead pra apurar, num radar só</div></header>
-<div class="disc">⚖️ Cada item é um <b>FATO</b> público e um <b>LEAD pra apurar</b> — não uma acusação.</div>
+<header><a class="mesa-link" href="/mesa">📌 Mesa de Pauta ›</a><h1>🛰️ Radar Cívico de SC — HUB</h1>
+<div class="sub">Notícias · DOM · Câmaras · MPSC · TCE · Prefeituras — a aba única do JR</div></header>
+<nav class="panes">
+  <button type="button" class="pb on" data-pane="">🛰️ Radar Cívico</button>
+  <button type="button" class="pb" data-pane="noticias">📰 Notícias</button>
+  <button type="button" class="pb" data-pane="mesa">📌 Mesa</button>
+</nav>
+<iframe class="pane-frame" id="pane-noticias" data-src="/radar?embed=1" title="Radar de Notícias"></iframe>
+<iframe class="pane-frame" id="pane-mesa" data-src="/mesa" title="Mesa de Pauta"></iframe>
+<div class="disc">⚖️ Cada item é um <b>FATO</b> público e um <b>LEAD pra apurar</b> — não uma acusação. Nota de prefeitura = versão oficial.</div>
 <div class="wrap">
 <div class="srcs">
   <button type="button" class="sb on" data-src="">Todas <b>{$s['total']}</b></button>
@@ -344,6 +383,7 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
   <button type="button" class="sb" data-src="camara">📜 Câmaras <b>{$p['camara']}</b></button>
   <button type="button" class="sb" data-src="mpsc">⚖️ MPSC <b>{$p['mpsc']}</b></button>
   <button type="button" class="sb" data-src="tce">💰 TCE <b>{$p['tce']}</b></button>
+  <button type="button" class="sb" data-src="prefeitura">📣 Prefeituras <b>{$p['prefeitura']}</b></button>
 </div>
 <div class="lens">
   <button type="button" class="lb on" data-tipo="">Tudo</button>
@@ -373,8 +413,8 @@ footer{padding:18px 16px 40px;text-align:center;color:var(--muted);font-size:11p
 <script>
 const DADOS={$json};
 const SEL=new Set({$selJson});
-const SRCN={dom:"DOM",camara:"Câmara",mpsc:"MPSC",tce:"TCE",tjsc:"TJSC"};
-const SRCI={dom:"🧾",camara:"📜",mpsc:"⚖️",tce:"💰",tjsc:"👨‍⚖️"};
+const SRCN={dom:"DOM",camara:"Câmara",mpsc:"MPSC",tce:"TCE",tjsc:"TJSC",prefeitura:"Prefeitura"};
+const SRCI={dom:"🧾",camara:"📜",mpsc:"⚖️",tce:"💰",tjsc:"👨‍⚖️",prefeitura:"📣"};
 const z2=n=>String(n).padStart(2,"0");
 const ymd=d=>d.getFullYear()+"-"+z2(d.getMonth()+1)+"-"+z2(d.getDate());
 const _h=new Date();const Y_HOJE=ymd(_h);
@@ -384,7 +424,19 @@ const dayLabel=dp=>{if(!dp)return"sem data";if(dp===Y_HOJE)return"Hoje";if(dp===
 const fmtD=d=>{if(!d)return"";const p=String(d).split("-");return p.length===3?p[2]+"/"+p[1]:d;};
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cls=s=>s>=80?"hi":s>=60?"mid":s>=40?"":"lo";
-let srcSel="",tipoSel="",soCinca=false,daySel="",intSel="{$intIni}";
+let srcSel="{$fonteIni}",tipoSel="",soCinca=false,daySel="",intSel="{$intIni}";
+// BLOCO 4 — painéis embutidos (Notícias = vitrine com juiz/clusters intactos; Mesa = fila).
+// iframes carregam lazy (src só no 1º clique) pra não pesar o hub no celular.
+let paneSel="{$painelIni}";
+function showPane(p){
+  paneSel=p;
+  document.querySelectorAll(".pb").forEach(x=>x.classList.toggle("on",x.dataset.pane===p));
+  document.querySelectorAll(".pane-frame").forEach(f=>f.classList.remove("on"));
+  document.body.classList.toggle("painel-aberto",!!p);
+  if(p){const f=document.getElementById("pane-"+p);if(f){if(!f.src)f.src=f.dataset.src;f.classList.add("on");}}
+}
+document.querySelectorAll(".pb").forEach(b=>b.addEventListener("click",()=>showPane(b.dataset.pane)));
+if(paneSel)showPane(paneSel);
 function card(d){
   const apurar=(d.apurar||[]).map(b=>'<li>'+esc(b)+'</li>').join("");
   const meta=(d.meta||[]).map(m=>'<span class="pill">'+esc(m)+'</span>').join("");
@@ -463,6 +515,8 @@ document.querySelectorAll(".db").forEach(b=>b.addEventListener("click",()=>{
 document.querySelectorAll("#ints .ib").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll("#ints .ib").forEach(x=>x.classList.remove("on"));b.classList.add("on");intSel=b.dataset.int;render();}));
 document.querySelector('#ints .ib[data-int="'+intSel+'"]').classList.add("on");
+// pré-seleção de fonte via URL (?fonte=…): liga o botão certo
+if(srcSel){document.querySelectorAll(".sb").forEach(x=>x.classList.toggle("on",x.dataset.src===srcSel));}
 ["q","ord"].forEach(id=>document.getElementById(id).addEventListener("input",render));
 // link pro card vindo do alerta do Telegram (#ato-<source>-<id>): rola, abre e pisca
 function jumpHash(){

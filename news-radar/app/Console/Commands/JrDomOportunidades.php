@@ -200,13 +200,22 @@ class JrDomOportunidades extends Command
         $municipios = DB::table('jr_dom_atos')->whereNotNull('municipio')->distinct()->count('municipio');
         $geradoEm = now()->format('d/m/Y H:i');
 
-        $html = $this->montarHtml($dados, [
-            'flagged' => count($dados),
-            'scored' => $totalScored,
-            'total' => $totalAtos,
-            'municipios' => $municipios,
-            'gerado' => $geradoEm,
-        ]);
+        // BLOCO 4 (Goal 02/07): a página cheia foi APOSENTADA — o hub
+        // /radar-civico?fonte=dom mostra os mesmos dados (RankingExibicao) ao
+        // vivo. /oportunidades.html vira um stub de redirect (links antigos e
+        // favoritos do Lorran continuam funcionando). O SCORING deste comando
+        // segue intacto — só a apresentação mudou de lugar. montarHtml() fica
+        // parqueado (referência), não é mais chamado.
+        $html = <<<STUB
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<meta http-equiv="refresh" content="0;url=/radar-civico?fonte=dom">
+<title>Radar de Oportunidades → Hub</title></head>
+<body style="font-family:sans-serif;padding:24px;text-align:center">
+<p>O Radar de Oportunidades agora vive no <a href="/radar-civico?fonte=dom"><b>Hub /radar-civico</b></a> (fonte 🧾 DOM).</p>
+<p style="color:#6b7280;font-size:12px">{$totalScored} scorados de {$totalAtos} atos · {$municipios} municípios · gerado {$geradoEm}</p>
+<script>location.replace("/radar-civico?fonte=dom");</script></body></html>
+STUB;
 
         $caminho = public_path('oportunidades.html');
         file_put_contents($caminho, $html);
