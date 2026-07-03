@@ -82,12 +82,36 @@ class ZapRascunhos
         return $out;
     }
 
-    /** POST send-image (image = URL; Z-API baixa). caption identifica o portal. */
-    public function imagem(string $imageUrl, string $caption = ''): ?string
+    /**
+     * POST send-image (image = URL; Z-API baixa). caption identifica o portal.
+     * BLOCO 8 (03/07): aceita grupo alternativo, igual texto().
+     */
+    public function imagem(string $imageUrl, string $caption = '', ?string $grupo = null): ?string
     {
         return $this->post('send-image', [
-            'phone' => $this->cfg['grupo'],
+            'phone' => $grupo ?: ($this->cfg['grupo'] ?? ''),
             'image' => $imageUrl,
+            'caption' => $caption,
+        ]);
+    }
+
+    /**
+     * BLOCO 8a (03/07): send-image de ARQUIVO LOCAL (storage/, fora do público)
+     * como data-URI base64 — a foto oficial do rascunho não passa por URL
+     * pública nenhuma. null = falhou (arquivo inexistente ou Z-API recusou).
+     */
+    public function imagemArquivo(string $absPath, string $caption = '', ?string $grupo = null): ?string
+    {
+        if (! is_file($absPath)) {
+            Log::warning('[ZapRascunhos] imagemArquivo: arquivo não existe — envio ignorado.');
+
+            return null;
+        }
+        $mime = function_exists('mime_content_type') ? (mime_content_type($absPath) ?: 'image/jpeg') : 'image/jpeg';
+
+        return $this->post('send-image', [
+            'phone' => $grupo ?: ($this->cfg['grupo'] ?? ''),
+            'image' => 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($absPath)),
             'caption' => $caption,
         ]);
     }
@@ -108,9 +132,9 @@ class ZapRascunhos
             if ($r->successful() && ($id = $r->json('messageId'))) {
                 return (string) $id;
             }
-            Log::warning('[ZapRascunhos] ' . $endpoint . ' falhou: HTTP ' . $r->status() . ' ' . mb_substr($r->body(), 0, 200));
+            Log::warning('[ZapRascunhos] '.$endpoint.' falhou: HTTP '.$r->status().' '.mb_substr($r->body(), 0, 200));
         } catch (\Throwable $e) {
-            Log::warning('[ZapRascunhos] ' . $endpoint . ' erro: ' . $e->getMessage());
+            Log::warning('[ZapRascunhos] '.$endpoint.' erro: '.$e->getMessage());
         }
 
         return null;

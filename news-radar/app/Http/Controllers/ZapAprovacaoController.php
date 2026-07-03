@@ -62,7 +62,8 @@ class ZapAprovacaoController extends Controller
         $quem = (string) ($p['participantPhone'] ?? '');
         $aprovadores = (array) ($cfg['aprovadores'] ?? []);
         if ($quem === '' || ! in_array($quem, $aprovadores, true)) {
-            Log::info('jr-zap-aprovacao: sinal de não-aprovador ignorado', ['quem' => mb_substr($quem, 0, 4) . '****']);
+            Log::info('jr-zap-aprovacao: sinal de não-aprovador ignorado', ['quem' => mb_substr($quem, 0, 4).'****']);
+
             return response()->json(['ok' => true, 'skip' => 'aprovador']);
         }
 
@@ -71,7 +72,7 @@ class ZapAprovacaoController extends Controller
             return response()->json(['ok' => true, 'skip' => 'ref-desconhecida']);
         }
 
-        $zap = new ZapRascunhos();
+        $zap = new ZapRascunhos;
 
         if ($sinal === 'nao') {
             if ($entrega->descartado_em === null) {
@@ -83,6 +84,7 @@ class ZapAprovacaoController extends Controller
                 // aprende: descarte vira feedback pro ajuste fino do gate
                 Log::info('jr-zap-aprovacao: descartado', ['ato_ref' => $entrega->ato_ref, 'gate' => $entrega->gate_motivo]);
             }
+
             return response()->json(['ok' => true, 'acao' => 'descartado']);
         }
 
@@ -98,6 +100,7 @@ class ZapAprovacaoController extends Controller
             if ($zap->configurado() && $grupo !== '') {
                 $zap->texto("⚠️ Não consegui criar o draft de {$entrega->ato_ref} no WP — ver log.", $grupo);
             }
+
             return response()->json(['ok' => false, 'erro' => 'wp'], 200); // 200 pro Z-API não reentregar
         }
 
@@ -109,11 +112,17 @@ class ZapAprovacaoController extends Controller
             'updated_at' => Carbon::now(),
         ]);
 
+        // BLOCO 8c: foto oficial vira featured image do draft (caption =
+        // crédito). Falha de upload NUNCA bloqueia o draft — só avisa.
+        [$mediaId, $avisoFoto] = $this->anexarFoto($entrega, $draft['id']);
+
         if ($zap->configurado() && $grupo !== '') {
-            $zap->texto("📝 Draft no WP (rascunho, NÃO publicado): {$draft['edit_url']}\n_{$entrega->ato_ref} aprovado por ✅_", $grupo);
+            $zap->texto("📝 Draft no WP (rascunho, NÃO publicado): {$draft['edit_url']}"
+                .($avisoFoto !== '' ? "\n{$avisoFoto}" : '')
+                ."\n_{$entrega->ato_ref} aprovado por ✅_", $grupo);
         }
 
-        return response()->json(['ok' => true, 'acao' => 'draft-criado', 'wp_post_id' => $draft['id']]);
+        return response()->json(['ok' => true, 'acao' => 'draft-criado', 'wp_post_id' => $draft['id'], 'wp_media_id' => $mediaId]);
     }
 
     /**
@@ -166,7 +175,7 @@ class ZapAprovacaoController extends Controller
             $r = [
                 'titulo' => (string) $payload['titulo'],
                 'linha_fina' => (string) ($payload['lead'] ?? ''),
-                'materia' => trim(($payload['lead'] ?? '') . "\n\n" . ($payload['corpo'] ?? '')),
+                'materia' => trim(($payload['lead'] ?? '')."\n\n".($payload['corpo'] ?? '')),
                 'lacunas' => (array) ($payload['checklist'] ?? []),
                 'cidade' => (string) ($payload['municipio'] ?? ''),
                 'editoria' => 'geral',
@@ -187,7 +196,42 @@ class ZapAprovacaoController extends Controller
             ];
         }
 
-        return app(WpControleClient::class)->criarRascunho($r, 'zap-aprovacao:' . $entrega->message_id);
+        return app(WpControleClient::class)->criarRascunho($r, 'zap-aprovacao:'.$entrega->message_id);
+    }
+
+    /**
+     * BLOCO 8c — sobe a foto oficial (guardada pelo auto-rascunho em
+     * storage/app/foto-oficial, caminho no payload) pro WP media e seta como
+     * featured image do draft. Fail-open: qualquer falha devolve aviso de 1
+     * linha e o draft segue sem foto.
+     *
+     * @return array{0: ?int, 1: string} [media_id, aviso pro grupo ('' = ok)]
+     */
+    private function anexarFoto(object $entrega, int $postId): array
+    {
+        $payload = $entrega->payload ? (array) json_decode($entrega->payload, true) : [];
+        $rel = (string) ($payload['foto_path'] ?? '');
+        if ($rel === '') {
+            return [null, ''];  // entrega sem foto oficial — nada a subir
+        }
+        $abs = storage_path('app/'.ltrim($rel, '/'));
+
+        try {
+            $wp = app(WpControleClient::class);
+            $media = $wp->uploadMidia(
+                $abs,
+                basename($abs),
+                (string) ($payload['foto_credito'] ?? ''),
+                (string) ($payload['titulo'] ?? '')
+            );
+            $wp->setFeaturedMedia($postId, $media['id']);
+
+            return [$media['id'], ''];
+        } catch (\Throwable $e) {
+            Log::warning('jr-zap-aprovacao: foto não subiu pro WP', ['ato_ref' => $entrega->ato_ref, 'err' => mb_substr($e->getMessage(), 0, 200)]);
+
+            return [null, '⚠️ foto oficial não subiu — draft criado SEM imagem destacada.'];
+        }
     }
 
     /** Auditoria: payload cru (JSON) com carimbo — espelha o padrão da captura. */
@@ -198,8 +242,8 @@ class ZapAprovacaoController extends Controller
             if (! is_dir($dir)) {
                 @mkdir($dir, 0775, true);
             }
-            $nome = now()->format('Ymd-His') . '-' . substr(bin2hex(random_bytes(3)), 0, 4) . '.json';
-            @file_put_contents($dir . '/' . $nome, json_encode(['received_at' => now()->toIso8601String(), 'all' => $p], JSON_UNESCAPED_UNICODE));
+            $nome = now()->format('Ymd-His').'-'.substr(bin2hex(random_bytes(3)), 0, 4).'.json';
+            @file_put_contents($dir.'/'.$nome, json_encode(['received_at' => now()->toIso8601String(), 'all' => $p], JSON_UNESCAPED_UNICODE));
         } catch (\Throwable) {
             // auditoria nunca derruba o hook
         }
