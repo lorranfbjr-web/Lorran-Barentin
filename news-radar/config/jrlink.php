@@ -424,6 +424,30 @@ return [
         'cluster_merge' => env('JRLINK_DRIVER_DEDUP', 'openai'),
         'publicado_match' => env('JRLINK_DRIVER_MATCH', 'openai'),
         'assunto_group' => env('JRLINK_DRIVER_ASSUNTO', 'openai'),
+
+        /*
+        | GOAL SIMPLIFICAR (03/07) — BLOCO 7: driver de GERAÇÃO de rascunho/kit
+        | configurável (JRLINK_RASCUNHO_DRIVER=openai|claude). Lorran avaliou os
+        | textos do GPT como iguais/superiores → default openai (A/B de 03/07 no
+        | RELATORIO-simplificar). O JUIZ NÃO passa por aqui (prompt/score intactos).
+        */
+        'reescrita_unificada' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
+        'reescrita_pauta' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
+        'rascunho_civico' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
+        'kit_social' => env('JRLINK_RASCUNHO_DRIVER', 'openai') === 'claude' ? 'claude-cli' : 'openai',
+    ],
+
+    /*
+    | BLOCO 7 (simplificar 03/07): modelo OpenAI POR OPERAÇÃO — a geração de
+    | rascunho usa o melhor GPT da chave (sondado em /v1/models: gpt-5.5,
+    | 2026-04-23); baixo volume (poucos textos/dia), qualidade percebida pelo
+    | dono manda. Juiz/mecânicas seguem em jrlink.juiz.modelo_openai (mini).
+    */
+    'modelos_openai' => [
+        'reescrita_unificada' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
+        'reescrita_pauta' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
+        'rascunho_civico' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
+        'kit_social' => env('JRLINK_RASCUNHO_MODELO', 'gpt-5.5'),
     ],
 
     'juiz' => [

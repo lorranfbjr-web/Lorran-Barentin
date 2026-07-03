@@ -93,7 +93,7 @@ class JuizLlm
     private function chamar(string $prompt, string $operacao, ?string $modeloClaude = null): array
     {
         return $this->usarOpenaiPara($operacao)
-            ? $this->chamarOpenai($prompt)
+            ? $this->chamarOpenai($prompt, $operacao)
             : $this->chamarClaudeCli($prompt, $modeloClaude);
     }
 
@@ -157,11 +157,17 @@ class JuizLlm
     /** Modelo "principal" (juiz) — pro display antes de qualquer chamada. */
     public function modelo(): string
     {
+        // BLOCO 7 (simplificar 03/07): o que REALMENTE rodou por último vence —
+        // antes, com driver global openai, o log gravava sempre modelo_openai
+        // (mini) mesmo quando o override por operação usou outro modelo.
+        if ($this->ultimoModelo !== null) {
+            return $this->ultimoModelo;
+        }
         if ($this->driver === 'openai') {
             return (string) $this->cfg['modelo_openai'];
         }
 
-        return $this->ultimoModelo ?? $this->modeloFuncao('juiz');
+        return $this->modeloFuncao('juiz');
     }
 
     /**
@@ -435,9 +441,13 @@ PROMPT;
     ];
 
     /** @return array{0:string,1:?int,2:?int,3:?float} [texto, in_tokens, out_tokens, custo_usd] */
-    private function chamarOpenai(string $prompt): array
+    private function chamarOpenai(string $prompt, string $operacao = ''): array
     {
-        $modelo = (string) $this->cfg['modelo_openai'];
+        // BLOCO 7 (simplificar 03/07): modelo por operação — geração de
+        // rascunho/kit usa o melhor GPT (jrlink.modelos_openai); default
+        // continua o modelo do juiz (mini). Antes o override era ignorado.
+        $modelo = (string) ($operacao !== '' ? config('jrlink.modelos_openai.' . $operacao) : null)
+            ?: (string) $this->cfg['modelo_openai'];
         $this->ultimoModelo = $modelo;
         $params = [
             'model' => $modelo,

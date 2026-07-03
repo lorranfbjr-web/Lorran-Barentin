@@ -53,7 +53,9 @@ class PautaReescritor
      */
     public function reescrever(string $texto, ?string $cidade, string $fonte): array
     {
-        $modelo = 'claude-opus-4-8';
+        // BLOCO 7 (simplificar 03/07): driver/modelo decididos no JuizLlm
+        // (jrlink.drivers + jrlink.modelos_openai); este é só o fallback claude.
+        $modelo = (string) config('radar_civico.rascunho.modelo', 'claude-opus-4-8');
         $prompt = $this->promptReescrita($texto, $cidade, $fonte);
         $arr = $this->juiz->completarJson($prompt, 'reescrita_pauta', 1, $modelo);
 
@@ -75,7 +77,7 @@ class PautaReescritor
             'cidade'     => isset($r['cidade']) && $r['cidade'] !== '' ? trim((string) $r['cidade']) : $cidade,
             'editoria'   => strtolower(trim((string) ($r['editoria'] ?? 'geral'))),
             'lacunas'    => $lac,
-            'modelo'     => $modelo,
+            'modelo'     => $this->juiz->modelo(), // o que REALMENTE rodou (antes mentia no driver openai)
         ];
     }
 
@@ -93,7 +95,8 @@ class PautaReescritor
      */
     public function reescreverUnificado(array $portais, ?string $cidade): array
     {
-        $modelo = 'claude-opus-4-8';
+        // BLOCO 7 (simplificar 03/07): idem reescrever() — fallback claude via config.
+        $modelo = (string) config('radar_civico.rascunho.modelo', 'claude-opus-4-8');
         $prompt = $this->promptUnificado($portais, $cidade);
         $arr = $this->juiz->completarJson($prompt, 'reescrita_unificada', count($portais), $modelo);
 
@@ -118,7 +121,7 @@ class PautaReescritor
             'cidade'           => isset($r['cidade']) && $r['cidade'] !== '' ? trim((string) $r['cidade']) : $cidade,
             'editoria'         => strtolower(trim((string) ($r['editoria'] ?? 'geral'))),
             'lacunas'          => $lac,
-            'modelo'           => $modelo,
+            'modelo'           => $this->juiz->modelo(), // o que REALMENTE rodou
         ];
     }
 
