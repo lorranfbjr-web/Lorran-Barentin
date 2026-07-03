@@ -46,7 +46,12 @@ return [
             'busy_timeout' => (int) env('DB_BUSY_TIMEOUT', 60000),
             'journal_mode' => env('DB_JOURNAL_MODE', 'WAL'),
             'synchronous' => env('DB_SYNCHRONOUS', 'NORMAL'),
-            'transaction_mode' => 'DEFERRED',
+            // IMMEDIATE: transação de escrita pega o write-lock já no BEGIN, então o
+            // busy_timeout VALE (espera). Com DEFERRED, o upgrade read→write no meio
+            // da transação devolve SQLITE_BUSY na hora (ignora o timeout) — era a
+            // causa do "database is locked" residual ~1×/h na tabela jobs
+            // (worker × schedule:run), mesmo com WAL ligado (visto até 03/07/2026).
+            'transaction_mode' => env('DB_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
         'mysql' => [

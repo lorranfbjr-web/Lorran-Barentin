@@ -65,7 +65,17 @@ class JrCivicoAlertar extends Command
             return self::SUCCESS;
         }
 
-        $msg = $this->montar($novas, $cfg['max_por_ciclo']);
+        // BLOCO 0b (03/07): janela de silêncio (hora LOCAL). Não envia e NÃO
+        // registra — o dedup só marca no envio, então as pautas ACUMULAM e o
+        // 1º ciclo depois do silêncio manda o digest único. --dry passa reto
+        // (é teste, não acorda ninguém).
+        if (! $this->option('dry') && $this->emSilencio($cfg)) {
+            $this->info('Silêncio (' . $cfg['silencio'] . ' local): ' . count($novas)
+                . ' pauta(s) acumulada(s) pro digest único pós-silêncio. Nada enviado, nada registrado.');
+            return self::SUCCESS;
+        }
+
+        $msg = $this->montar($novas, $cfg);
 
         // fail-closed: sem instância de alerta + grupo, não envia (documenta e sai)
         $zap = new \App\Services\Jr\ZapRascunhos();
@@ -152,43 +162,110 @@ class JrCivicoAlertar extends Command
     }
 
     /**
-     * Monta o digest em TEXTO WhatsApp (2d do goal 02/07, mobile/escaneável):
-     * NOTA · FONTE(ícone) · CIDADE(REGIÃO) — O QUE É — POR QUE VIRA PAUTA —
-     * link "ver na fonte". Sem HTML, sem token/telefone. ZapRascunhos fatia
-     * >4000 chars.
+     * BLOCO 0b (03/07): dentro da janela de silêncio (hora LOCAL, formato
+     * "HH-HH"; "22-06" cruza a meia-noite) o alerta não envia nem registra.
+     * Faixa inválida/vazia = sem silêncio (fail-open: alerta é o produto).
      */
-    private function montar(array $novas, int $max): string
+    private function emSilencio(array $cfg): bool
+    {
+        $faixa = trim((string) ($cfg['silencio'] ?? ''));
+        if ($faixa === '' || ! preg_match('/^(\d{1,2})-(\d{1,2})$/', $faixa, $m)) {
+            return false;
+        }
+        $ini = min(23, (int) $m[1]);
+        $fim = min(23, (int) $m[2]);
+        if ($ini === $fim) {
+            return false; // faixa nula (ex.: "8-8") = silêncio desligado
+        }
+        $h = (int) Carbon::now((string) ($cfg['tz_local'] ?? 'America/Sao_Paulo'))->format('G');
+
+        return $ini < $fim ? ($h >= $ini && $h < $fim) : ($h >= $ini || $h < $fim);
+    }
+
+    /**
+     * Monta o digest em TEXTO WhatsApp (2d do goal 02/07, mobile/escaneável).
+     * BLOCO 0b (03/07): itens do run AGRUPADOS POR CIDADE; teto de detalhadas
+     * (`max_por_ciclo`) e cap de mensagens por run (`max_msg_run` — nº de
+     * fatias de 4000 chars do ZapRascunhos). O que não coube em detalhe vira
+     * linha compacta de digest; se nem as compactas couberem, "… e mais N".
+     * Nenhum item some sem ao menos ser contado.
+     */
+    private function montar(array $novas, array $cfg): string
     {
         $base = rtrim((string) config('radar_civico.base_url'), '/');
         $n = count($novas);
-        $mostra = array_slice($novas, 0, max(1, $max));
+        $max = max(1, (int) ($cfg['max_por_ciclo'] ?? 12));
+        $capChars = 4000 * max(1, (int) ($cfg['max_msg_run'] ?? 3));
+
+        // $novas já vem ordenado por score desc; detalha o topo, resume o resto
+        for ($det = min($max, $n); $det >= 1; $det--) {
+            $msg = $this->render($novas, $det, $base, $capChars);
+            if (mb_strlen($msg) <= $capChars) {
+                return $msg;
+            }
+        }
+
+        return mb_substr($this->render($novas, 1, $base, $capChars), 0, $capChars);
+    }
+
+    private function render(array $novas, int $det, string $base, int $capChars): string
+    {
+        $n = count($novas);
+        $detalhadas = array_slice($novas, 0, $det);
+        $resto = array_slice($novas, $det);
+
+        // agrupa as detalhadas por cidade (ordem: melhor score da cidade primeiro)
+        $porCidade = [];
+        foreach ($detalhadas as $p) {
+            $porCidade[$p['municipio']][] = $p;
+        }
 
         $linhas = ["🛰️ *Radar Cívico* — {$n} pauta(s) quente(s) nova(s)", '_Lead pra apurar, não acusação._', ''];
-        foreach ($mostra as $p) {
-            $ic = self::ICONE[$p['source']] ?? '•';
-            $tier = \App\Services\Jr\CidadesInteresse::tier($p['municipio']);
+        foreach ($porCidade as $cidade => $itens) {
+            $tier = \App\Services\Jr\CidadesInteresse::tier($cidade);
             $regiao = $tier === 1 ? ' ⭐' : ($tier === 2 ? ' (região)' : '');
-            $oque = mb_substr(trim($p['objeto']), 0, 140);
-            $porque = mb_substr(trim($p['gancho']), 0, 160);
-            $link = $p['url_fonte'] !== ''
-                ? $p['url_fonte']
-                : ($base !== '' ? $base . '/radar-civico#ato-' . str_replace(':', '-', $p['ato_ref']) : '');
+            $linhas[] = "📍 *{$cidade}*{$regiao}";
+            foreach ($itens as $p) {
+                $ic = self::ICONE[$p['source']] ?? '•';
+                $oque = mb_substr(trim($p['objeto']), 0, 140);
+                $porque = mb_substr(trim($p['gancho']), 0, 160);
+                $link = $p['url_fonte'] !== ''
+                    ? $p['url_fonte']
+                    : ($base !== '' ? $base . '/radar-civico#ato-' . str_replace(':', '-', $p['ato_ref']) : '');
 
-            $linha = "*{$p['score']}* · {$ic} " . strtoupper($p['source']) . " · *{$p['municipio']}*{$regiao}";
-            if ($oque !== '') {
-                $linha .= "\n{$oque}";
+                $linha = "*{$p['score']}* · {$ic} " . strtoupper($p['source']);
+                if ($oque !== '') {
+                    $linha .= "\n{$oque}";
+                }
+                if ($porque !== '' && mb_strtolower($porque) !== mb_strtolower($oque)) {
+                    $linha .= "\n_{$porque}_";
+                }
+                if ($link !== '') {
+                    $linha .= "\n🔗 ver na fonte: {$link}";
+                }
+                $linhas[] = $linha;
+                $linhas[] = '';
             }
-            if ($porque !== '' && mb_strtolower($porque) !== mb_strtolower($oque)) {
-                $linha .= "\n_{$porque}_";
-            }
-            if ($link !== '') {
-                $linha .= "\n🔗 ver na fonte: {$link}";
-            }
-            $linhas[] = $linha;
-            $linhas[] = '';
         }
-        if ($n > count($mostra)) {
-            $linhas[] = '… e mais ' . ($n - count($mostra)) . ' no radar.';
+
+        // excedente do cap: digest compacto (1 linha por item), aparado se preciso
+        if (! empty($resto)) {
+            $linhas[] = '▫️ *E mais no radar:*';
+            $corpo = mb_strlen(implode("\n", $linhas));
+            $sobraram = 0;
+            foreach ($resto as $p) {
+                $ic = self::ICONE[$p['source']] ?? '•';
+                $compacta = "• *{$p['score']}* {$ic} {$p['municipio']} — " . mb_substr(trim($p['objeto']), 0, 60);
+                if ($corpo + mb_strlen($compacta) + 80 > $capChars) { // 80 = folga do rodapé
+                    $sobraram++;
+                    continue;
+                }
+                $linhas[] = $compacta;
+                $corpo += mb_strlen($compacta) + 1;
+            }
+            if ($sobraram > 0) {
+                $linhas[] = '… e mais ' . $sobraram . ' no radar' . ($base !== '' ? ': ' . $base . '/radar-civico' : '.');
+            }
         }
 
         return trim(implode("\n", $linhas));

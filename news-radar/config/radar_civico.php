@@ -33,6 +33,18 @@ return [
         'alert_dias' => (int) env('RADAR_CIVICO_ALERT_DIAS', 7),
         // teto de linhas por mensagem (resto vira "… e mais X")
         'max_por_ciclo' => (int) env('RADAR_CIVICO_MAX_CICLO', 12),
+
+        // BLOCO 0b (03/07): governança do canal — o grupo não é acordado de
+        // madrugada e um run nunca vira metralhadora de mensagens.
+        // (i) janela de silêncio em hora LOCAL (formato "HH-HH"; 22-06 cruza a
+        //     meia-noite). Dentro dela o alerta NÃO envia e NÃO registra dedup —
+        //     as pautas acumulam e o 1º ciclo pós-silêncio manda o digest único.
+        'silencio' => (string) env('RADAR_CIVICO_SILENCIO', '22-06'),
+        'tz_local' => (string) env('RADAR_CIVICO_TZ', 'America/Sao_Paulo'),
+        // (ii) cap de MENSAGENS Z-API por run (ZapRascunhos fatia em 4000 chars;
+        //      nº de fatias = nº de mensagens). Excedente vira linha compacta de
+        //      digest — nenhum item é derrubado, só encolhe.
+        'max_msg_run' => (int) env('RADAR_CIVICO_MAX_MSG_RUN', 3),
     ],
 
     /*
