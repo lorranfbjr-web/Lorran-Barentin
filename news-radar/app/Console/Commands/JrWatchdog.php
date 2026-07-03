@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Jr\ZapRascunhos;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 use Illuminate\Console\Scheduling\Schedule;
@@ -47,6 +48,7 @@ class JrWatchdog extends Command
         $checks['claude'] = $this->claudeCli();
         $checks['datas'] = $this->datasSuspeitas();
         $checks['alertazap'] = $this->alertaWhatsapp();
+        $checks['flywheel'] = $this->flywheel();
 
         $html = $this->renderHtml($checks, $agora);
         File::put(public_path('health.html'), $html);
@@ -237,10 +239,10 @@ class JrWatchdog extends Command
         try {
             $dir = storage_path('app/jr-pauta-capture');
             $rawIdadeMin = null;
-            $r = Process::timeout(20)->run("ls -t " . escapeshellarg($dir) . " 2>/dev/null | head -1");
+            $r = Process::timeout(20)->run('ls -t '.escapeshellarg($dir).' 2>/dev/null | head -1');
             $ultimo = trim($r->output());
-            if ($ultimo !== '' && is_file($dir . '/' . $ultimo)) {
-                $rawIdadeMin = (int) round((time() - filemtime($dir . '/' . $ultimo)) / 60);
+            if ($ultimo !== '' && is_file($dir.'/'.$ultimo)) {
+                $rawIdadeMin = (int) round((time() - filemtime($dir.'/'.$ultimo)) / 60);
             }
 
             $ultCaptura = DB::table('jr_pauta_capturas')->max('created_at');
@@ -266,7 +268,7 @@ class JrWatchdog extends Command
 
             return ['nivel' => $nivel, 'resumo' => $resumo, 'rows' => $rows];
         } catch (\Throwable $e) {
-            return ['nivel' => 'warn', 'resumo' => 'falhou: ' . $e->getMessage(), 'rows' => []];
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
         }
     }
 
@@ -340,7 +342,7 @@ class JrWatchdog extends Command
                 'rows' => $rows,
             ];
         } catch (\Throwable $e) {
-            return ['nivel' => 'warn', 'resumo' => 'falhou: ' . $e->getMessage(), 'rows' => []];
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
         }
     }
 
@@ -371,11 +373,11 @@ class JrWatchdog extends Command
                 'nivel' => $vivo ? 'ok' : 'bad',
                 'resumo' => $vivo
                     ? "sessão viva ({$ms} ms)"
-                    : 'SESSÃO MORTA/EXPIRADA — scoring cívico parado (exit ' . $r->exitCode() . ': ' . mb_substr(trim($r->errorOutput() ?: $r->output()), 0, 160) . ')',
+                    : 'SESSÃO MORTA/EXPIRADA — scoring cívico parado (exit '.$r->exitCode().': '.mb_substr(trim($r->errorOutput() ?: $r->output()), 0, 160).')',
                 'rows' => [],
             ];
         } catch (\Throwable $e) {
-            return ['nivel' => 'bad', 'resumo' => 'ping falhou: ' . $e->getMessage(), 'rows' => []];
+            return ['nivel' => 'bad', 'resumo' => 'ping falhou: '.$e->getMessage(), 'rows' => []];
         }
     }
 
@@ -429,7 +431,7 @@ class JrWatchdog extends Command
     private function alertaWhatsapp(): array
     {
         try {
-            $zapOk = (new \App\Services\Jr\ZapRascunhos())->configurado();
+            $zapOk = (new ZapRascunhos)->configurado();
             $grupo = (string) config('radar_civico.canais.sugestoes');
             $ultimo = DB::table('jr_civico_alertas')->max('alerted_at');
             $idadeH = $ultimo ? round(Carbon::parse($ultimo)->diffInMinutes(Carbon::now()) / 60, 1) : null;
@@ -438,7 +440,7 @@ class JrWatchdog extends Command
             $log = storage_path('logs/laravel.log');
             if (is_file($log)) {
                 $r = Process::timeout(15)->run(
-                    "grep -c \"\$(date +%Y-%m-%d).*ZapRascunhos.*\\(falhou\\|erro\\)\" " . escapeshellarg($log) . ' 2>/dev/null || true'
+                    'grep -c "$(date +%Y-%m-%d).*ZapRascunhos.*\\(falhou\\|erro\\)" '.escapeshellarg($log).' 2>/dev/null || true'
                 );
                 $falhas24h = (int) trim($r->output());
             }
@@ -451,6 +453,67 @@ class JrWatchdog extends Command
 
             return ['nivel' => $nivel, 'resumo' => $resumo,
                 'rows' => [['configurado' => $zapOk, 'ultimo_alerta_h' => $idadeH, 'falhas_24h' => $falhas24h]]];
+        } catch (\Throwable $e) {
+            return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
+        }
+    }
+
+    /**
+     * BLOCO 7 (03/07) — FLYWHEEL: checks PASSIVOS do ciclo rascunho→✅→draft.
+     * auto-rascunho/dia (vs cap), webhook de aprovação vivo (token + último
+     * payload arquivado + drafts criados), triagem quente/fria e kit social.
+     * Só pinta o quadro — nunca envia, nunca muta.
+     */
+    private function flywheel(): array
+    {
+        try {
+            $tz = (string) config('radar_civico.alertas.tz_local', 'America/Sao_Paulo');
+            $inicioDiaUtc = Carbon::now($tz)->startOfDay()->setTimezone('UTC');
+
+            // auto-rascunho hoje vs cap
+            $cap = (int) config('radar_civico.auto_rascunho.max_dia', 5);
+            $autoHoje = DB::table('jr_rascunho_entregas')->where('tipo', 'auto')
+                ->where('created_at', '>=', $inicioDiaUtc)->count();
+
+            // webhook de aprovação: token setado + último payload arquivado
+            $tokenOk = trim((string) config('radar_civico.aprovacao.hook_token')) !== '';
+            $aprovadores = count((array) config('radar_civico.aprovacao.aprovadores'));
+            $dir = storage_path('app/jr-zap-aprovacao');
+            $ultimoHook = null;
+            foreach (is_dir($dir) ? (scandir($dir, SCANDIR_SORT_DESCENDING) ?: []) : [] as $f) {
+                if (str_ends_with($f, '.json')) {
+                    $ultimoHook = Carbon::createFromTimestamp(filemtime($dir.'/'.$f));
+                    break;
+                }
+            }
+            $draftsHoje = DB::table('jr_rascunho_entregas')->whereNotNull('wp_post_id')
+                ->where('aprovado_em', '>=', $inicioDiaUtc)->count();
+
+            // quente/fria: última triagem + distribuição do dia
+            $qfUltimo = DB::table('jr_quente_fria')->max('created_at');
+            $qfIdadeH = $qfUltimo ? round(Carbon::parse($qfUltimo)->diffInMinutes(Carbon::now()) / 60, 1) : null;
+            $qfHoje = DB::table('jr_quente_fria')->where('created_at', '>=', $inicioDiaUtc)
+                ->selectRaw("sum(classe='quente') q, sum(classe='fria') f")->first();
+
+            // kit social: último kit
+            $kitUltimo = DB::table('jr_kit_social')->max('created_at');
+            $kitIdadeH = $kitUltimo ? round(Carbon::parse($kitUltimo)->diffInMinutes(Carbon::now()) / 60, 1) : null;
+
+            // nível: webhook sem token = bad (✅ morto); quente/fria parada >2h = warn
+            $nivel = ! $tokenOk ? 'bad' : (($qfIdadeH === null || $qfIdadeH > 2) ? 'warn' : 'ok');
+
+            $resumo = sprintf(
+                'auto-rascunho hoje: %d/%d · webhook ✅: %s (%d aprovador(es), último payload %s) · drafts hoje: %d · quente/fria: %s🔥/%s❄ hoje (última triagem %s) · kit: %s',
+                $autoHoje, $cap,
+                $tokenOk ? 'armado' : 'SEM TOKEN (morto)', $aprovadores,
+                $ultimoHook ? 'há '.round($ultimoHook->diffInMinutes(Carbon::now()) / 60, 1).'h' : 'nunca',
+                $draftsHoje,
+                (string) ($qfHoje->q ?? 0), (string) ($qfHoje->f ?? 0),
+                $qfIdadeH === null ? 'nunca' : "há {$qfIdadeH}h",
+                $kitIdadeH === null ? 'nunca' : "há {$kitIdadeH}h"
+            );
+
+            return ['nivel' => $nivel, 'resumo' => $resumo, 'rows' => []];
         } catch (\Throwable $e) {
             return ['nivel' => 'warn', 'resumo' => 'falhou: '.$e->getMessage(), 'rows' => []];
         }
@@ -519,6 +582,10 @@ class JrWatchdog extends Command
         $c = $checks['alertazap'];
         $secoes .= $this->bloco($dot($c['nivel']).' Canal WhatsApp de alerta (Z-API)', $c['resumo'], '');
 
+        // flywheel (BLOCO 7, 03/07)
+        $c = $checks['flywheel'];
+        $secoes .= $this->bloco($dot($c['nivel']).' Flywheel (auto-rascunho · ✅ · quente/fria · kit)', $c['resumo'], '');
+
         // pipeline + juiz (só resumo)
         $secoes .= $this->bloco($dot($checks['pipeline']['nivel']).' Pipeline 24h', $checks['pipeline']['resumo'], '');
         $secoes .= $this->bloco($dot($checks['juiz']['nivel']).' Juiz', $checks['juiz']['resumo'], '');
@@ -544,8 +611,8 @@ class JrWatchdog extends Command
     private function renderMd(array $checks, Carbon $agora): string
     {
         $m = "# WATCHDOG — estado (v0, read-only)\n\nGerado: ".$agora->format('Y-m-d H:i')." UTC\n\n";
-        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli', 'datas' => 'Datas (sanidade)', 'alertazap' => 'Canal WhatsApp de alerta'] as $k => $nome) {
-            $m .= "## {$nome}\n- **[".strtoupper($checks[$k]['nivel'])."]** ".$checks[$k]['resumo']."\n\n";
+        foreach (['cron' => 'Lint de cron', 'canais' => 'Frescor dos canais', 'whatsapp' => 'Captura WhatsApp', 'servicos' => 'Serviços', 'pipeline' => 'Pipeline 24h', 'juiz' => 'Juiz', 'civico' => 'Radar Cívico', 'claude' => 'Sessão claude-cli', 'datas' => 'Datas (sanidade)', 'alertazap' => 'Canal WhatsApp de alerta', 'flywheel' => 'Flywheel (rascunho→✅→draft)'] as $k => $nome) {
+            $m .= "## {$nome}\n- **[".strtoupper($checks[$k]['nivel']).']** '.$checks[$k]['resumo']."\n\n";
         }
         $m .= "_Não notifica e não muta nada. Dashboard: public/health.html_\n";
 

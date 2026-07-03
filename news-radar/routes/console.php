@@ -253,7 +253,7 @@ Schedule::command('jrcivico:auto-rascunho')
 // jr_quente_fria; 1ª rodada (03/07) entregou digest único do backlog 24h —
 // os ciclos seguintes só triam o recém-julgado (sem flood por construção).
 Schedule::command('jrlink:quente-fria')
-    ->cron('12,42 * * * *')
+    ->cron('15,45 * * * *')
     ->withoutOverlapping(600);
 
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no WHATSAPP ──
