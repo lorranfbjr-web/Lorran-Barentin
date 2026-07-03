@@ -35,9 +35,27 @@ return [
         'max_por_ciclo' => (int) env('RADAR_CIVICO_MAX_CICLO', 12),
     ],
 
+    /*
+     * BLOCO 2 (02/07): o radar cívico SAIU do Telegram — o bot do Telegram
+     * (@jornalrazaopubli_bot) voltou a ser 100% do Gerador v3 → aprovação FB.
+     * Alertas e rascunhos do radar agora vão pro WHATSAPP via instância de
+     * ALERTA (JRLINK_ALERT_ZAPI_*, a "3…" — NUNCA a 276 de captura nem a 884
+     * do disparador). Dois canais, config-driven:
+     *   sugestoes → ALERTA de pauta quente do radar (grupo SUGESTÕES DE PAUTA)
+     *   rascunhos → rascunho pronto da Mesa      (grupo RASCUNHOS)
+     * Enquanto o 2º grupo não existe, sugestoes cai no RASCUNHOS (fallback).
+     * Quando o Lorran criar o grupo de sugestões: setar RADAR_CIVICO_SUGESTOES_GROUP.
+     */
+    'canais' => [
+        'sugestoes' => env('RADAR_CIVICO_SUGESTOES_GROUP', env('JRLINK_RASCUNHOS_GROUP', '')),
+        'rascunhos' => env('RADAR_CIVICO_RASCUNHO_GROUP', env('JRLINK_RASCUNHOS_GROUP', '')),
+    ],
+
+    // PARQUEADO (02/07): ninguém do radar lê mais este bloco — mantido só pra
+    // referência histórica do TelegramCivico.php (também parqueado).
     'telegram' => [
-        'token' => env('TELEGRAM_BOT_TOKEN', ''),            // bot do Gerador JR (reuso)
-        'chat_id' => env('RADAR_CIVICO_ALERT_CHAT_ID', ''),  // ALVO dos alertas — decisão do Lorran
+        'token' => env('TELEGRAM_BOT_TOKEN', ''),            // bot do Gerador JR (NÃO usar no radar)
+        'chat_id' => env('RADAR_CIVICO_ALERT_CHAT_ID', ''),  // idem
     ],
 
     // base pública pro "link pro card" (#ato-<source>-<id> no Radar Cívico)

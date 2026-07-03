@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\Jr\RascunhoCivico;
-use App\Services\Jr\TelegramCivico;
+use App\Services\Jr\ZapRascunhos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -107,14 +107,14 @@ class MesaPautaController extends Controller
     }
 
     /**
-     * Fase 5 — gera um rascunho JR do ato (LLM) e ENTREGA via TELEGRAM no chat
-     * dos alertas do Radar Cívico (TelegramCivico — mesmo bot/chat do
-     * jrcivico:alertar). Trocado de Z-API pra Telegram no A7 (02/07/2026): o
-     * número do Lorran É a instância 276 de captura e a 884 é do disparador —
-     * mandar por qualquer uma era proibido. Fail-closed: sem token/chat, só
-     * gera e mostra na Mesa. Manual.
+     * Fase 5 — gera um rascunho JR do ato (LLM) e ENTREGA no WHATSAPP, grupo
+     * RASCUNHOS (config radar_civico.canais.rascunhos), via instância de
+     * ALERTA (JRLINK_ALERT_ZAPI_*, ZapRascunhos). BLOCO 2 (02/07): o Telegram
+     * voltou a ser 100% do Gerador→FB — nada do radar passa mais por ele.
+     * NUNCA a instância 276 (captura) nem a 884 (disparador). Fail-closed:
+     * sem instância/grupo, só gera e mostra na Mesa. Manual, NÃO publica.
      */
-    public function rascunho(int $id, RascunhoCivico $gerador, TelegramCivico $telegram)
+    public function rascunho(int $id, RascunhoCivico $gerador, ZapRascunhos $zap)
     {
         $p = DB::table('jr_pauta_fila')->where('id', $id)->first();
         if (! $p) {
@@ -141,14 +141,15 @@ class MesaPautaController extends Controller
             'updated_at' => $now,
         ]);
 
-        // entrega no Telegram do JR (fail-closed se não configurado)
-        $messageId = $telegram->texto($texto);
+        // entrega no WhatsApp, grupo RASCUNHOS (fail-closed se não configurado)
+        $grupo = (string) config('radar_civico.canais.rascunhos');
+        $messageId = $grupo !== '' ? $zap->texto($texto, $grupo) : null;
 
         return response()->json([
             'ok' => true,
             'rascunho' => $texto,
             'enviado' => $messageId !== null,
-            'destino_configurado' => $telegram->configurado(),
+            'destino_configurado' => $zap->configurado() && $grupo !== '',
             'status' => 'rascunho-gerado',
         ]);
     }

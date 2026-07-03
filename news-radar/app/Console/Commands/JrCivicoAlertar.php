@@ -5,30 +5,35 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 
 /**
- * MESA DE PAUTA — Fase 4. Alerta no Telegram as pautas QUENTES e NOVAS do Radar
- * Cívico, agrupadas por ciclo (anti-flood). ADITIVO e ISOLADO: lê as tabelas do
- * radar + a tabela de dedup jr_civico_alertas, NÃO toca juiz/dispatcher/captura,
- * NÃO publica nada. Só MANDA UMA mensagem (digest) por ciclo.
+ * MESA DE PAUTA — Fase 4. Alerta no WHATSAPP (grupo interno, canal SUGESTÕES —
+ * config radar_civico.canais.sugestoes, instância de alerta JRLINK_ALERT_ZAPI_*)
+ * as pautas QUENTES e NOVAS do Radar Cívico, agrupadas por ciclo (anti-flood).
+ * ADITIVO e ISOLADO: lê as tabelas do radar + a tabela de dedup
+ * jr_civico_alertas, NÃO toca juiz/dispatcher/captura, NÃO publica nada.
+ * Só MANDA UMA mensagem (digest) por ciclo. Alerta é LEAD pra apurar, não
+ * acusação (instauração ≠ condenação).
+ *
+ * BLOCO 2 (02/07): SAIU do Telegram — o bot do Telegram é 100% do Gerador→FB.
+ * NUNCA enviar pela instância 276 (captura) nem 884 (disparador de publicação).
  *
  * Gatilho de "quente" (QUALQUER um): score >= score_min · cidade prioritária com
  * score >= score_cidade · fonte-chave (MPSC/TCE) com score >= score_fonte_chave.
- * "Novo" = ato_ref ainda não registrado em jr_civico_alertas. Recência: só atos
- * pontuados nas últimas `janela_horas` (limita o backlog do 1º ciclo).
+ * "Novo" = ato_ref ainda não registrado em jr_civico_alertas. Recência (BLOCO 1):
+ * data_pub nos últimos `alert_dias`, nunca futura nem suspeita.
  *
- * SEGURANÇA DE CREDENCIAL: sem TELEGRAM_BOT_TOKEN + RADAR_CIVICO_ALERT_CHAT_ID o
+ * SEGURANÇA DE CREDENCIAL: sem instância de alerta + grupo configurados o
  * comando NÃO envia — loga o que mandaria e sai (fail-closed). Nunca inventa alvo.
  *   --dry   : calcula e imprime o digest, nunca envia nem registra (teste)
  *   --seed  : marca todas as quentes atuais como já-alertadas SEM enviar (baseline
- *             pra quando for ligar de verdade, evita o flood do 1º disparo real)
+ *             OBRIGATÓRIO ao ligar/religar fonte — backfill novo nunca flooda)
  */
 class JrCivicoAlertar extends Command
 {
     protected $signature = 'jrcivico:alertar {--dry : só imprime, não envia nem registra} {--seed : marca as quentes atuais como alertadas sem enviar}';
 
-    protected $description = 'Alerta no Telegram (bot do Gerador) as pautas quentes e novas do Radar Cívico, em digest por ciclo. Não publica nada; fail-closed sem credencial.';
+    protected $description = 'Alerta no WhatsApp (grupo interno, instância de alerta) as pautas quentes e novas do Radar Cívico, em digest por ciclo. Não publica nada; fail-closed sem credencial.';
 
     private const FONTES = [
         'dom' => 'jr_dom_atos',
@@ -61,11 +66,11 @@ class JrCivicoAlertar extends Command
 
         $msg = $this->montar($novas, $cfg['max_por_ciclo']);
 
-        // fail-closed: sem credencial, não envia (documenta e sai)
-        $token = (string) config('radar_civico.telegram.token');
-        $chat = (string) config('radar_civico.telegram.chat_id');
-        if ($this->option('dry') || $token === '' || $chat === '') {
-            $motivo = $this->option('dry') ? '[--dry]' : '[SEM CREDENCIAL: configure TELEGRAM_BOT_TOKEN + RADAR_CIVICO_ALERT_CHAT_ID]';
+        // fail-closed: sem instância de alerta + grupo, não envia (documenta e sai)
+        $zap = new \App\Services\Jr\ZapRascunhos();
+        $grupo = (string) config('radar_civico.canais.sugestoes');
+        if ($this->option('dry') || ! $zap->configurado() || $grupo === '') {
+            $motivo = $this->option('dry') ? '[--dry]' : '[SEM CREDENCIAL: configure JRLINK_ALERT_ZAPI_* + RADAR_CIVICO_SUGESTOES_GROUP/JRLINK_RASCUNHOS_GROUP]';
             $this->warn("Não enviado {$motivo}. Mensagem que SERIA enviada (" . count($novas) . ' nova(s)):');
             $this->line(str_repeat('─', 48));
             $this->line($msg);
@@ -73,20 +78,9 @@ class JrCivicoAlertar extends Command
             return self::SUCCESS;
         }
 
-        try {
-            $resp = Http::asJson()->timeout(15)->post("https://api.telegram.org/bot{$token}/sendMessage", [
-                'chat_id' => $chat,
-                'text' => $msg,
-                'parse_mode' => 'HTML',
-                'disable_web_page_preview' => true,
-            ]);
-        } catch (\Throwable $e) {
-            $this->error('Falha ao chamar a API do Telegram: ' . $e->getMessage());
-            return self::FAILURE;
-        }
-
-        if (! $resp->successful() || ! ($resp->json('ok') ?? false)) {
-            $this->error('Telegram recusou: HTTP ' . $resp->status() . ' · ' . $resp->body());
+        $messageId = $zap->texto($msg, $grupo);
+        if ($messageId === null) {
+            $this->error('Z-API recusou o envio (ver laravel.log) — nada registrado, tenta no próximo ciclo.');
             return self::FAILURE;
         }
 
@@ -121,7 +115,7 @@ class JrCivicoAlertar extends Command
                 ->where('data_pub', '>=', $corte)
                 ->where('data_pub', '<=', $hoje)
                 ->where(fn ($q) => $q->whereNull('data_suspeita')->orWhere('data_suspeita', '!=', 1))
-                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho', 'data_pub']);
+                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho', 'data_pub', 'objeto_limpo', 'url_fonte']);
 
             foreach ($rows as $a) {
                 $score = (int) $a->score_pauta;
@@ -144,6 +138,8 @@ class JrCivicoAlertar extends Command
                     'municipio' => $muni ?: '—',
                     'score' => $score,
                     'gancho' => (string) ($a->gancho_curto ?: $a->gancho ?: ''),
+                    'objeto' => (string) ($a->objeto_limpo ?? ''),
+                    'url_fonte' => (string) ($a->url_fonte ?? ''),
                     'motivo' => $motivo,
                     'data_pub' => (string) $a->data_pub,
                 ];
@@ -154,23 +150,38 @@ class JrCivicoAlertar extends Command
         return $out;
     }
 
-    /** Monta o digest HTML (uma mensagem). */
+    /**
+     * Monta o digest em TEXTO WhatsApp (2d do goal 02/07, mobile/escaneável):
+     * NOTA · FONTE(ícone) · CIDADE(REGIÃO) — O QUE É — POR QUE VIRA PAUTA —
+     * link "ver na fonte". Sem HTML, sem token/telefone. ZapRascunhos fatia
+     * >4000 chars.
+     */
     private function montar(array $novas, int $max): string
     {
         $base = rtrim((string) config('radar_civico.base_url'), '/');
         $n = count($novas);
         $mostra = array_slice($novas, 0, max(1, $max));
 
-        $linhas = ["🛰️ <b>Radar Cívico</b> — {$n} pauta(s) quente(s) nova(s)", ''];
+        $linhas = ["🛰️ *Radar Cívico* — {$n} pauta(s) quente(s) nova(s)", '_Lead pra apurar, não acusação._', ''];
         foreach ($mostra as $p) {
             $ic = self::ICONE[$p['source']] ?? '•';
-            $cidade = $this->esc($p['municipio']);
-            $gancho = $this->esc(mb_substr($p['gancho'], 0, 160));
-            $link = $base !== '' ? $base . '/radar-civico#ato-' . str_replace(':', '-', $p['ato_ref']) : '';
-            $cab = "{$ic} <b>{$cidade}</b> · <code>{$p['score']}</code>";
-            $linha = $gancho !== '' ? "{$cab}\n{$gancho}" : $cab;
+            $tier = \App\Services\Jr\CidadesInteresse::tier($p['municipio']);
+            $regiao = $tier === 1 ? ' ⭐' : ($tier === 2 ? ' (região)' : '');
+            $oque = mb_substr(trim($p['objeto']), 0, 140);
+            $porque = mb_substr(trim($p['gancho']), 0, 160);
+            $link = $p['url_fonte'] !== ''
+                ? $p['url_fonte']
+                : ($base !== '' ? $base . '/radar-civico#ato-' . str_replace(':', '-', $p['ato_ref']) : '');
+
+            $linha = "*{$p['score']}* · {$ic} " . strtoupper($p['source']) . " · *{$p['municipio']}*{$regiao}";
+            if ($oque !== '') {
+                $linha .= "\n{$oque}";
+            }
+            if ($porque !== '' && mb_strtolower($porque) !== mb_strtolower($oque)) {
+                $linha .= "\n_{$porque}_";
+            }
             if ($link !== '') {
-                $linha .= "\n<a href=\"{$link}\">abrir no radar ›</a>";
+                $linha .= "\n🔗 ver na fonte: {$link}";
             }
             $linhas[] = $linha;
             $linhas[] = '';

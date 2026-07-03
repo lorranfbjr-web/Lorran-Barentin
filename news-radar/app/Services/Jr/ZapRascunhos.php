@@ -32,10 +32,54 @@ class ZapRascunhos
         return true;
     }
 
-    /** POST send-text. Retorna messageId ou null. */
-    public function texto(string $mensagem): ?string
+    /**
+     * POST send-text. Retorna messageId (da 1ª fatia) ou null.
+     *
+     * BLOCO 2 (02/07): aceita grupo alternativo (canal SUGESTÕES × RASCUNHOS,
+     * config radar_civico.canais.*) e fatia mensagens >4000 chars em parágrafo
+     * (mobile, escaneável). Sem $grupo, mantém o grupo padrão (compatível com
+     * jrpauta:entregar).
+     */
+    public function texto(string $mensagem, ?string $grupo = null): ?string
     {
-        return $this->post('send-text', ['phone' => $this->cfg['grupo'], 'message' => $mensagem]);
+        $alvo = $grupo ?: ($this->cfg['grupo'] ?? '');
+        if ($alvo === '') {
+            Log::warning('[ZapRascunhos] sem grupo de destino — envio ignorado.');
+
+            return null;
+        }
+
+        $primeiro = null;
+        foreach ($this->fatiar($mensagem, 4000) as $fatia) {
+            $id = $this->post('send-text', ['phone' => $alvo, 'message' => $fatia]);
+            $primeiro ??= $id;
+            if ($id === null) {
+                break; // falhou — não insiste nas fatias seguintes
+            }
+        }
+
+        return $primeiro;
+    }
+
+    /** Fatia em blocos <= $max, preferindo quebrar em parágrafo. @return string[] */
+    private function fatiar(string $texto, int $max): array
+    {
+        if (mb_strlen($texto) <= $max) {
+            return [$texto];
+        }
+        $out = [];
+        $resto = $texto;
+        while (mb_strlen($resto) > $max) {
+            $janela = mb_substr($resto, 0, $max);
+            $corte = mb_strrpos($janela, "\n\n") ?: mb_strrpos($janela, "\n") ?: $max;
+            $out[] = rtrim(mb_substr($resto, 0, $corte));
+            $resto = ltrim(mb_substr($resto, $corte));
+        }
+        if ($resto !== '') {
+            $out[] = $resto;
+        }
+
+        return $out;
     }
 
     /** POST send-image (image = URL; Z-API baixa). caption identifica o portal. */
