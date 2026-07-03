@@ -95,10 +95,21 @@ class JrCivicoAlertar extends Command
         return self::SUCCESS;
     }
 
-    /** União das 4 fontes: pautas quentes E recentes (pontuadas na janela). */
+    /**
+     * União das 4 fontes: pautas quentes E recentes DE VERDADE.
+     *
+     * BLOCO 1 (Goal 02/07): a janela é por DATA DE PUBLICAÇÃO (`data_pub`),
+     * não mais por `scored_at` — um backfill que pontua item de 2025 hoje NÃO
+     * alerta mais. Regras: data_pub nos últimos `alert_dias` (default 7d),
+     * nada de futuro, nada com data_suspeita=1, nada sem data_pub (esses só
+     * aparecem na página, seção Arquivo). Mesma verdade de recência da
+     * exibição (Recencia/config).
+     */
     private function quentes(array $cfg): array
     {
-        $limite = Carbon::now()->subHours(max(1, (int) $cfg['janela_horas']));
+        $dias = max(1, (int) ($cfg['alert_dias'] ?? 7));
+        $corte = Carbon::now()->subDays($dias)->toDateString();
+        $hoje = Carbon::now()->toDateString();
         $cidades = array_map('mb_strtolower', $cfg['cidades_prioritarias']);
         $fontesChave = array_map('strtolower', $cfg['fontes_chave']);
 
@@ -106,8 +117,11 @@ class JrCivicoAlertar extends Command
         foreach (self::FONTES as $source => $tabela) {
             $rows = DB::table($tabela)
                 ->whereNotNull('score_pauta')
-                ->where('scored_at', '>=', $limite)
-                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho']);
+                ->whereNotNull('data_pub')
+                ->where('data_pub', '>=', $corte)
+                ->where('data_pub', '<=', $hoje)
+                ->where(fn ($q) => $q->whereNull('data_suspeita')->orWhere('data_suspeita', '!=', 1))
+                ->get(['id', 'municipio', 'score_pauta', 'gancho_curto', 'gancho', 'data_pub']);
 
             foreach ($rows as $a) {
                 $score = (int) $a->score_pauta;
@@ -131,6 +145,7 @@ class JrCivicoAlertar extends Command
                     'score' => $score,
                     'gancho' => (string) ($a->gancho_curto ?: $a->gancho ?: ''),
                     'motivo' => $motivo,
+                    'data_pub' => (string) $a->data_pub,
                 ];
             }
         }

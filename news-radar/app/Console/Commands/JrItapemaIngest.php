@@ -89,7 +89,8 @@ class JrItapemaIngest extends Command
                     'ementa' => $ementa,
                     'autores' => $it['autor'],
                     'em_tramitacao' => ! preg_match('/arquivad|sancionad|promulgad/iu', (string) $it['situacao']),
-                    'data_pub' => $dataPub,
+                    // BLOCO 1: data furada (futura/implausível) vira NULL + flag
+                    ...\App\Services\Jr\Recencia::sanitizar($dataPub),
                     'titulo' => $it['titulo'],
                     'url_fonte' => config('camara.itapema.base') . '/elegis2/detalhe-proposicao/cod_proposicao/' . $it['cod'],
                     'url_pdf' => $urlPdf,

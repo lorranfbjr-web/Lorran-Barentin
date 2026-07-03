@@ -26,8 +26,11 @@ return [
         ))),
         'score_fonte_chave' => (int) env('RADAR_CIVICO_SCORE_FONTE', 60),    // limiar nas fontes-chave
 
-        // só considera ato pontuado nas últimas N horas (limita o backlog do 1º ciclo)
-        'janela_horas' => (int) env('RADAR_CIVICO_JANELA_H', 24),
+        // BLOCO 1 (02/07): janela por DATA DE PUBLICAÇÃO — só alerta o que foi
+        // publicado nos últimos N dias (e nunca data futura/suspeita). Substitui
+        // a janela antiga por scored_at (RADAR_CIVICO_JANELA_H), que deixava
+        // backfill de anos atrás alertar como se fosse quente.
+        'alert_dias' => (int) env('RADAR_CIVICO_ALERT_DIAS', 7),
         // teto de linhas por mensagem (resto vira "… e mais X")
         'max_por_ciclo' => (int) env('RADAR_CIVICO_MAX_CICLO', 12),
     ],

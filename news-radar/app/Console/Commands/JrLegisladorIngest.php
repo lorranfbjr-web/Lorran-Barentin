@@ -73,7 +73,8 @@ class JrLegisladorIngest extends Command
                         'ementa' => $p['ementa'],
                         'autores' => $p['autores'],
                         'em_tramitacao' => $p['em_tramitacao'],
-                        'data_pub' => $p['data_pub'],
+                        // BLOCO 1: data furada (futura/implausível) vira NULL + flag
+                        ...\App\Services\Jr\Recencia::sanitizar($p['data_pub']),
                         'titulo' => $p['titulo'],
                         'url_fonte' => $p['url_fonte'],
                         'url_pdf' => $p['url_pdf'],

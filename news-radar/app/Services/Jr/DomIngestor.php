@@ -69,7 +69,8 @@ class DomIngestor
                     'objeto_limpo' => $ato['objeto_limpo'],
                     'valor' => $ato['valor'],
                     'fornecedor' => $ato['fornecedor'],
-                    'data_pub' => $ato['data_pub'],
+                    // BLOCO 1: data furada (futura/implausível) vira NULL + flag
+                    ...Recencia::sanitizar($ato['data_pub']),
                     'url_fonte' => $ato['url_fonte'],
                     'url_pdf' => $ato['url_pdf'],
                     'texto_bruto' => $ato['texto_bruto'],

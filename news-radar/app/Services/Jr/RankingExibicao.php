@@ -64,7 +64,9 @@ class RankingExibicao
             $sx = min($sx, (int) config('interesse.anti_generico.cap', 55)); // cap DEPOIS do bônus
         }
         $sx = max(0, min(100, $sx) - self::decay($dataPub));
-        $fresco = $dataPub && $dataPub >= now()->subDays((int) config('interesse.decay.carencia_dias', 1))->toDateString();
+        // BLOCO 1 (02/07): mesma verdade de recência do alerta (Recencia) —
+        // fresco = data_pub nos últimos frescos_dias (48h) e nunca futuro.
+        $fresco = Recencia::fresco($dataPub, (int) config('interesse.frescos_dias', 2));
 
         return ['tier' => $tier, 'vago' => $vago, 'fresco' => $fresco, 'score_x' => $sx];
     }

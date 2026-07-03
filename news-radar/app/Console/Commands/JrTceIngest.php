@@ -61,7 +61,8 @@ class JrTceIngest extends Command
                     'relator' => $e['relator'],
                     'decisao' => $e['decisao'],
                     'desfecho' => $e['desfecho'],
-                    'data_pub' => $e['data_pub'],
+                    // BLOCO 1: data furada (futura/implausível) vira NULL + flag
+                    ...\App\Services\Jr\Recencia::sanitizar($e['data_pub']),
                     'edicao' => $e['edicao'],
                     'url_fonte' => $e['url_fonte'],
                     'texto_bruto' => $e['texto_bruto'],
