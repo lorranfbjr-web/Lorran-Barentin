@@ -94,7 +94,40 @@ class RascunhoCivico
         ];
     }
 
-    /** Texto pronto pra WhatsApp (e pra mostrar na Mesa). */
+    /**
+     * BLOCO 8a — formato LIMPO canônico do grupo (AUTO e Mesa): SÓ conteúdo
+     * publicável (título forte + linha fina + corpo + crédito REAL da foto
+     * quando ela foi anexada) e, após o separador, UMA linha operacional.
+     * Metadados (gate/checklist/fonte) NUNCA entram aqui — moram no banco/Mesa.
+     *
+     * @param  ?array  $foto  saída do FotoOficial (ou null = fonte sem foto)
+     * @param  bool  $fotoAnexada  send-image confirmou? (crédito órfão nunca)
+     * @param  string  $origem  rótulo da linha operacional (auto-rascunho | rascunho da Mesa)
+     */
+    public function formatarLimpo(array $r, ?array $foto, bool $fotoAnexada, string $origem = 'auto-rascunho'): string
+    {
+        $blocos = ['*'.trim($r['titulo']).'*'];
+        if (trim((string) $r['lead']) !== '') {
+            $blocos[] = '_'.trim($r['lead']).'_';
+        }
+        if (trim((string) $r['corpo']) !== '') {
+            $blocos[] = trim($r['corpo']);
+        }
+        if ($foto !== null && $fotoAnexada) {
+            $blocos[] = 'Foto: '.$foto['credito'];
+        }
+
+        $operacional = "🤖 {$origem} · ✅ cria draft no WP · ❌ descarta";
+        if ($foto === null) {
+            $operacional .= ' · 📷 sem foto oficial';
+        } elseif (! $fotoAnexada) {
+            $operacional .= ' · 📷 foto vai no draft (falhou ao anexar aqui)';
+        }
+
+        return implode("\n\n", $blocos)."\n───\n".$operacional;
+    }
+
+    /** Texto ANOTADO da Mesa/fila (interno — nunca vai pro grupo). */
     public function formatar(array $r, array $ctx = []): string
     {
         $linhas = [];

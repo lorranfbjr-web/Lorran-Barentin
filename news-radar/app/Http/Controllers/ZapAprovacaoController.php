@@ -67,8 +67,25 @@ class ZapAprovacaoController extends Controller
             return response()->json(['ok' => true, 'skip' => 'aprovador']);
         }
 
-        $entrega = DB::table('jr_rascunho_entregas')->where('message_id', $refId)->first();
+        // casa pela mensagem de TEXTO ou pela FOTO (Bloco 8: o rascunho são
+        // duas mensagens — ✅ em qualquer uma vale; a foto chega primeiro e é
+        // o alvo natural da reação).
+        $entrega = DB::table('jr_rascunho_entregas')->where('message_id', $refId)->first()
+            ?? DB::table('jr_rascunho_entregas')
+                ->whereRaw("json_extract(payload, '$.foto_message_id') = ?", [$refId])
+                ->first();
         if (! $entrega) {
+            // ✅ em REPLY (gesto deliberado de aprovar) que não casa com nada:
+            // avisa em vez de morrer em silêncio — o aprovador acharia que
+            // aprovou. Reação solta em outra mensagem segue skip silencioso.
+            $foiReply = (string) ($p['referenceMessageId'] ?? '') === $refId;
+            if ($sinal === 'aprova' && $foiReply) {
+                $zapAviso = new ZapRascunhos;
+                if ($zapAviso->configurado() && $grupo !== '') {
+                    $zapAviso->texto('⚠️ Esse ✅ não casou com nenhum rascunho meu — responda (reply) em cima da mensagem do rascunho.', $grupo);
+                }
+            }
+
             return response()->json(['ok' => true, 'skip' => 'ref-desconhecida']);
         }
 

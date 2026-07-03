@@ -24,6 +24,9 @@ class FotoOficial
 
     private const MIN_BYTES = 30 * 1024;
 
+    /** Teto: acima disso o send-image base64 (payload ~+33%) e o WP recusam. */
+    private const MAX_BYTES = 5 * 1024 * 1024;
+
     private const MIN_DIM = 400;
 
     /** Padrões no caminho/nome que denunciam logo/brasão/enfeite, não foto. */
@@ -87,8 +90,8 @@ class FotoOficial
         }
 
         $bin = $r->body();
-        if (strlen($bin) < self::MIN_BYTES) {
-            return null; // logo/thumb — foto de release real passa fácil de 30KB
+        if (strlen($bin) < self::MIN_BYTES || strlen($bin) > self::MAX_BYTES) {
+            return null; // <30KB = logo/thumb; >5MB = foto de câmera que Z-API/WP recusam
         }
         $dim = @getimagesizefromstring($bin);
         if (! is_array($dim) || min((int) $dim[0], (int) $dim[1]) < self::MIN_DIM) {

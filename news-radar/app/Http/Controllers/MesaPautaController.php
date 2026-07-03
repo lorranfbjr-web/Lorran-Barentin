@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Jr\FotoOficial;
 use App\Services\Jr\RascunhoCivico;
 use App\Services\Jr\ZapRascunhos;
 use Illuminate\Http\Request;
@@ -89,7 +90,7 @@ class MesaPautaController extends Controller
     public function atualizar(Request $r, int $id)
     {
         $d = $r->validate([
-            'status' => ['nullable', 'string', 'in:' . implode(',', array_keys(self::STATUS))],
+            'status' => ['nullable', 'string', 'in:'.implode(',', array_keys(self::STATUS))],
             'nota' => ['nullable', 'string', 'max:4000'],
         ]);
 
@@ -131,19 +132,38 @@ class MesaPautaController extends Controller
             return response()->json(['ok' => false, 'erro' => 'o gerador não retornou rascunho — tente de novo'], 502);
         }
 
-        $texto = $gerador->formatar($r, $ato);
+        // versão ANOTADA (checklist/fonte/disclaimer) fica na FILA da Mesa —
+        // BLOCO 8a: o grupo recebe SÓ o formato limpo, igual ao caminho AUTO.
+        $interno = $gerador->formatar($r, $ato);
         $now = Carbon::now();
 
         DB::table('jr_pauta_fila')->where('id', $id)->update([
-            'rascunho' => $texto,
+            'rascunho' => $interno,
             'rascunho_at' => $now,
             'status' => 'rascunho-gerado',
             'updated_at' => $now,
         ]);
 
+        // BLOCO 8b: foto oficial só de página de órgão (prefeitura/câmara);
+        // DOM/MPSC/TCE não têm imagem — mensagem sai sem foto, avisada.
+        $foto = null;
+        $urlFonte = (string) ($ato['url_fonte'] ?? $p->url_fonte ?? '');
+        if ($urlFonte !== '' && in_array($ato['source'] ?? '', ['prefeitura', 'camara'], true)) {
+            $orgao = ($ato['source'] === 'camara' ? 'Câmara de ' : 'Prefeitura de ').(string) ($ato['municipio'] ?? $p->municipio ?? '');
+            $foto = app(FotoOficial::class)->buscar($urlFonte, $orgao);
+        }
+
         // entrega no WhatsApp, grupo RASCUNHOS (fail-closed se não configurado)
         $grupo = (string) config('radar_civico.canais.rascunhos');
-        $messageId = $grupo !== '' ? $zap->texto($texto, $grupo) : null;
+        $fotoMsgId = null;
+        $messageId = null;
+        if ($grupo !== '' && $zap->configurado()) {
+            if ($foto !== null) {
+                $fotoMsgId = $zap->imagemArquivo($foto['abs'], $r['titulo'], $grupo);
+            }
+            $texto = $gerador->formatarLimpo($r, $foto, $fotoMsgId !== null, 'rascunho da Mesa');
+            $messageId = $zap->texto($texto, $grupo) ?? $fotoMsgId; // texto falhou? a foto ancora o ✅
+        }
 
         // BLOCO 2 (03/07): registra a entrega → o ✅ (reply/reação) no grupo
         // casa o messageId aqui e cria o DRAFT no WP (ZapAprovacaoController).
@@ -152,7 +172,13 @@ class MesaPautaController extends Controller
                 ['ato_ref' => $p->ato_ref, 'tipo' => 'mesa'],
                 [
                     'message_id' => $messageId,
-                    'payload' => json_encode($r + ['municipio' => (string) ($p->municipio ?? ''), 'url_fonte' => (string) ($p->url_fonte ?? '')], JSON_UNESCAPED_UNICODE),
+                    'payload' => json_encode($r + [
+                        'municipio' => (string) ($p->municipio ?? ''),
+                        'url_fonte' => $urlFonte,
+                        'foto_path' => $foto['path'] ?? null,
+                        'foto_credito' => $foto['credito'] ?? null,
+                        'foto_message_id' => $fotoMsgId,
+                    ], JSON_UNESCAPED_UNICODE),
                     'updated_at' => $now,
                     'created_at' => $now,
                 ]
@@ -161,8 +187,9 @@ class MesaPautaController extends Controller
 
         return response()->json([
             'ok' => true,
-            'rascunho' => $texto,
+            'rascunho' => $interno,
             'enviado' => $messageId !== null,
+            'com_foto' => $fotoMsgId !== null,
             'destino_configurado' => $zap->configurado() && $grupo !== '',
             'status' => 'rascunho-gerado',
         ]);

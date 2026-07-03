@@ -40,7 +40,7 @@ use Illuminate\Support\Facades\DB;
  */
 class JrCivicoAutoRascunho extends Command
 {
-    protected $signature = 'jrcivico:auto-rascunho {--dry : avalia o gate e imprime, não gera nem envia} {--max= : teto extra deste run (nunca passa do cap diário)} {--reenviar= : reenvia entrega existente no formato limpo (ultimo | ato_ref)}';
+    protected $signature = 'jrcivico:auto-rascunho {--dry : avalia o gate e imprime, não gera nem envia} {--max= : teto extra deste run (nunca passa do cap diário)} {--reenviar= : reenvia entrega existente no formato limpo (ultimo | ato_ref)} {--regen : no reenviar, ignora o payload salvo e regenera via LLM}';
 
     protected $description = 'Auto-rascunho seletivo: release 🟢 de prefeitura que passa no gate risco×confiança vira rascunho [AUTO] no grupo RASCUNHOS. Cap diário, dedup, silêncio, fail-closed.';
 
@@ -126,13 +126,12 @@ class JrCivicoAutoRascunho extends Command
             $foto = app(FotoOficial::class)->buscar($c['url_fonte'], 'Prefeitura de '.$c['municipio']);
         }
 
-        $texto = $this->montarLimpo($r, $foto);
         $interno = $this->montarInterno($rc, $r, $c, $foto);
 
         // fail-closed: sem credencial/grupo o rascunho NÃO circula
         if (! $zap->configurado() || $grupo === '') {
             $this->warn('[SEM CREDENCIAL Z-API/grupo] Rascunho gerado mas NÃO enviado:');
-            $this->line(mb_substr($texto, 0, 600).'…');
+            $this->line(mb_substr($rc->formatarLimpo($r, $foto, false), 0, 600).'…');
 
             return null;
         }
@@ -145,11 +144,21 @@ class JrCivicoAutoRascunho extends Command
             }
         }
 
+        // texto montado DEPOIS do send-image: crédito de foto nunca fica órfão
+        // e a linha operacional avisa quando a foto só vai no draft.
+        $texto = $rc->formatarLimpo($r, $foto, $fotoMsgId !== null);
+
         $messageId = $zap->texto($texto, $grupo);
-        if ($messageId === null) {
+        if ($messageId === null && $fotoMsgId === null) {
             $this->error("Z-API recusou {$c['ato_ref']} — nada registrado, tenta no próximo ciclo.");
 
             return null;
+        }
+        if ($messageId === null) {
+            // foto saiu, texto não: registra COM o id da foto (o ✅ nela casa a
+            // entrega) — sem isso o próximo ciclo regeraria foto órfã duplicada.
+            $this->warn("texto falhou em {$c['ato_ref']} — entrega registrada pela FOTO ({$fotoMsgId}).");
+            $messageId = $fotoMsgId;
         }
 
         // payload estruturado = insumo do DRAFT WP quando vier o ✅ (Bloco 2/8c)
@@ -222,6 +231,9 @@ class JrCivicoAutoRascunho extends Command
 
         $rc = app(RascunhoCivico::class);
         $payload = $entrega->payload ? (array) json_decode($entrega->payload, true) : [];
+        if ($this->option('regen')) {
+            $payload['titulo'] = null; // força regenerar via LLM (prompt atual)
+        }
         if (! empty($payload['titulo'])) {
             $r = [
                 'titulo' => (string) $payload['titulo'],
@@ -345,32 +357,6 @@ class JrCivicoAutoRascunho extends Command
         // glibc translitera acento como marca separada ("í" → "'i") — remove
         // as marcas pra "matrículas" casar com o termo "matricula" do config.
         return str_replace(["'", '`', '^', '~', '"'], '', $t);
-    }
-
-    /**
-     * BLOCO 8a — mensagem do grupo 100% LIMPA (pronta pra copiar e colar):
-     * título forte + linha fina + corpo (o próprio texto já atribui "segundo a
-     * prefeitura…" — estilo, não etiqueta) + crédito REAL da foto como última
-     * linha do corpo. Depois do separador, UMA linha operacional. Nada de
-     * [AUTO], score, gate, checklist ou disclaimer — isso mora no banco/Mesa.
-     */
-    private function montarLimpo(array $r, ?array $foto): string
-    {
-        $blocos = ['*'.trim($r['titulo']).'*'];
-        if (trim($r['lead']) !== '') {
-            $blocos[] = '_'.trim($r['lead']).'_';
-        }
-        if (trim($r['corpo']) !== '') {
-            $blocos[] = trim($r['corpo']);
-        }
-        if ($foto !== null) {
-            $blocos[] = 'Foto: '.$foto['credito'];
-        }
-
-        $operacional = '🤖 auto-rascunho · ✅ cria draft no WP · ❌ descarta'
-            .($foto === null ? ' · 📷 sem foto oficial' : '');
-
-        return implode("\n\n", $blocos)."\n───\n".$operacional;
     }
 
     /**

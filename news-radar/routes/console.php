@@ -246,6 +246,15 @@ Schedule::command('jrcivico:auto-rascunho')
     ->cron('50 6,12,18,23 * * *')
     ->withoutOverlapping(1800);
 
+// ── BLOCO 5 (03/07) — KIT SOCIAL da matéria nova publicada ──
+// depois do publicados-sync (:00/:30): matéria nova em jr_publicado vira
+// [KIT] no grupo RASCUNHOS (formato limpo 8a). Tick :25/:55 = livre (:10/:40
+// é do assuntos, :15/:45 do segundo-olhar, :20/:50 do quente-fria). Dedup por
+// slug gravado só após envio OK; silêncio do Bloco 0b; fail-closed sem creds.
+Schedule::command('jrpauta:kit-social')
+    ->cron('25,55 * * * *')
+    ->withoutOverlapping(600);
+
 // ── BLOCO 4 (03/07) — TRIAGEM QUENTE/FRIA do fluxo julgado ──
 // Depois do juiz (:05/:35): compõe sinais existentes (temperatura_juiz +
 // score_editorial + recência + tier cidade), quente → digest no canal
@@ -253,7 +262,7 @@ Schedule::command('jrcivico:auto-rascunho')
 // jr_quente_fria; 1ª rodada (03/07) entregou digest único do backlog 24h —
 // os ciclos seguintes só triam o recém-julgado (sem flood por construção).
 Schedule::command('jrlink:quente-fria')
-    ->cron('15,45 * * * *')
+    ->cron('20,50 * * * *')   // :15/:45 colidia com jr:segundo-olhar-juiz no mesmo tick
     ->withoutOverlapping(600);
 
 // ── MESA DE PAUTA Fase 4 — ALERTA das pautas quentes no WHATSAPP ──

@@ -82,12 +82,21 @@ class JrLinkQuenteFria extends Command
         }
 
         $messageId = null;
+        $envioFalhou = false;
         if (! $seed && $quentes->isNotEmpty()) {
             $messageId = $this->entregar($quentes, $maxRun);
+            // Z-API caiu no meio? NÃO grava dedup dos quentes — eles voltam no
+            // próximo ciclo (mesmo padrão do kit social). Canal não configurado
+            // é fail-closed deliberado: aí grava (senão acumula pra sempre).
+            $envioFalhou = $messageId === null && (new ZapRascunhos)->configurado()
+                && (string) config('radar_civico.canais.sugestoes') !== '';
         }
 
         $agora = Carbon::now();
         foreach ($linhas as $l) {
+            if ($envioFalhou && $l['classe'] === 'quente') {
+                continue; // re-tenta no próximo ciclo
+            }
             DB::table('jr_quente_fria')->insertOrIgnore([
                 'extracao_id' => $l['id'],
                 'classe' => $l['classe'],
@@ -100,7 +109,11 @@ class JrLinkQuenteFria extends Command
         }
         $this->info($seed
             ? 'Seed: backlog gravado sem envio.'
-            : ($messageId ? "Digest quente entregue (messageId {$messageId})." : 'Nenhum quente pra entregar neste ciclo.'));
+            : ($messageId
+                ? "Digest quente entregue (messageId {$messageId})."
+                : ($envioFalhou
+                    ? 'Z-API FALHOU — quentes NÃO marcados, voltam no próximo ciclo.'
+                    : 'Nenhum quente pra entregar neste ciclo.')));
 
         return self::SUCCESS;
     }
@@ -121,11 +134,16 @@ class JrLinkQuenteFria extends Command
         $decayDia = (int) config('interesse.decay.por_dia', 4);
         $decayMax = (int) config('interesse.decay.max', 24);
 
+        // dedup por NOT EXISTS correlacionado — whereNotIn(pluck) materializa a
+        // tabela inteira em placeholders e estoura SQLITE_MAX_VARIABLE_NUMBER
+        // (32766 no php estático) quando jr_quente_fria crescer.
         $rows = DB::table('jr_link_extracao')
             ->whereNotNull('juiz_julgado_em')
             ->where('juiz_julgado_em', '>=', Carbon::now()->subHours($janelaH))
             ->where(fn ($q) => $q->where('cluster_rep', 1)->orWhereNull('cluster_id'))
-            ->whereNotIn('id', DB::table('jr_quente_fria')->pluck('extracao_id'))
+            ->whereNotExists(fn ($q) => $q->select(DB::raw(1))
+                ->from('jr_quente_fria')
+                ->whereColumn('jr_quente_fria.extracao_id', 'jr_link_extracao.id'))
             ->get(['id', 'titulo', 'url', 'host', 'origem', 'data_pub', 'created_at',
                 'cidade_llm', 'score_editorial', 'temperatura_juiz', 'tipo_gancho']);
 
