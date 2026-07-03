@@ -135,7 +135,12 @@ class PrefeituraNewsConector
         return $out;
     }
 
-    /** Atende.net v2 (Indaial): <consulta rotina="49348" ... dados="BASE64"> com JSON. */
+    /**
+     * Atende.net v2 (Indaial, Brusque): <consulta rotina="49348" ...
+     * dados="BASE64"> com JSON. Brusque às vezes serve o dados= como STUB com
+     * a URL ROTATIVA da listagem real (fluxo 2 passos) — quando não vier
+     * registros no 1º GET, segue a URL do stub e decodifica de lá.
+     */
     private function viaAtende64(array $fonte): array
     {
         $html = $this->curl($fonte['url'], $fonte);
@@ -160,6 +165,12 @@ class PrefeituraNewsConector
         if (! is_array($json)) {
             return [];
         }
+        if (empty($json['registros'])) { // stub sem registros → passo 2
+            $json = $this->segueUrlRotativa($json, $fonte);
+            if (! is_array($json)) {
+                return [];
+            }
+        }
 
         $out = [];
         foreach ((array) ($json['registros'] ?? []) as $r) {
@@ -180,6 +191,42 @@ class PrefeituraNewsConector
         }
 
         return $out;
+    }
+
+    /**
+     * Passo 2 do Atende.net "rotativo" (Brusque): o dados= inicial pode vir só
+     * como stub com a URL rotativa da listagem real. Segue a URL (educado, 1s
+     * entre hits) e devolve o JSON com registros — direto no corpo ou embutido
+     * em novo <consulta ... dados="BASE64">. Null se não achou.
+     */
+    private function segueUrlRotativa(array $stub, array $fonte): ?array
+    {
+        $url = trim((string) ($stub['url'] ?? $stub['link'] ?? ''));
+        if ($url === '' && preg_match('/https?:\\\\?\/[^"\s]+/', json_encode($stub) ?: '', $m)) {
+            $url = stripslashes($m[0]); // URL em qualquer campo do stub
+        }
+        if ($url === '') {
+            return null;
+        }
+        if (! str_starts_with($url, 'http')) {
+            $url = rtrim($fonte['base'] ?? '', '/') . '/' . ltrim($url, '/');
+        }
+        sleep(1); // educado: 1 req/s por host
+        $raw = $this->curl($url, $fonte);
+        if (! $raw) {
+            return null;
+        }
+        $json = json_decode($raw, true);
+        if (is_array($json) && ! empty($json['registros'])) {
+            return $json;
+        }
+        if (preg_match('/\bdados="([A-Za-z0-9+\/=]+)"/', $raw, $m)) {
+            $json = json_decode(base64_decode($m[1]) ?: '', true);
+
+            return is_array($json) ? $json : null;
+        }
+
+        return null;
     }
 
     // ───────────────────────── helpers ─────────────────────────
@@ -211,16 +258,22 @@ class PrefeituraNewsConector
         return $ts ? date('Y-m-d', $ts) : null;
     }
 
-    /** GET com UA honesto; cookie_gate = 2 passos (1º GET 403 seta cookie, 2º passa). */
+    /**
+     * GET com UA honesto; cookie_gate = 2 passos na MESMA url (1º GET 403 seta
+     * cookie, 2º passa); url_sessao = 2 passos com priming em OUTRA url (ex.:
+     * Blumenau — sessão PHP nasce na listagem, AJAX só responde com o cookie).
+     */
     private function curl(string $url, array $fonte): ?string
     {
         $args = ['curl', '-sL', '--max-time', '20', '-A', self::UA];
-        if (! empty($fonte['cookie_gate'])) {
+        $prime = $fonte['url_sessao'] ?? (! empty($fonte['cookie_gate']) ? $url : null);
+        if ($prime !== null) {
             $jar = tempnam(sys_get_temp_dir(), 'jrpref_');
             try {
-                Process::timeout(25)->run([...$args, '-c', $jar, '-o', '/dev/null', $url]);
+                Process::timeout(25)->run([...$args, '-c', $jar, '-o', '/dev/null', $prime]);
                 sleep(1); // educado com o gate
-                $r = Process::timeout(25)->run([...$args, '-b', $jar, $url]);
+                $ref = isset($fonte['url_sessao']) ? ['-e', $prime] : []; // referer só no priming cruzado
+                $r = Process::timeout(25)->run([...$args, '-b', $jar, ...$ref, $url]);
 
                 return $r->successful() && trim($r->output()) !== '' ? $r->output() : null;
             } finally {

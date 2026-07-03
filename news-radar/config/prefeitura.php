@@ -9,10 +9,13 @@
  *   regex    — listagem server-side, regex com grupos nomeados url/titulo/data
  *   atende64 — Atende.net v2: <consulta ... dados="BASE64"> com JSON embutido
  * cookie_gate=true → anti-bot nginx de cookie (1º GET 403 seta cookie, 2º passa).
+ * url_sessao=URL  → priming de sessão em OUTRA url antes do GET real (Blumenau:
+ * o AJAX pagina-busca.php só responde com cookie de sessão da listagem).
+ * Ligadas 03/07: Brusque (atende64 igual Indaial + fallback de URL rotativa em
+ * segueUrlRotativa) e Blumenau (regex no AJAX, data por card).
  * FORA (motivo real, decisão futura): Jaraguá do Sul e Florianópolis (firewall
- * dropa TCP do VPS, mesmo caso ALESC), São José (Cloudflare challenge),
- * Brusque (fragmento base64 com URL rotativa) e Blumenau (data em cabeçalho de
- * grupo por extenso) — prontas pra ligar depois, ativo=false.
+ * dropa TCP do VPS, mesmo caso ALESC), São José (Cloudflare challenge) —
+ * prontas pra ligar depois, ativo=false.
  */
 return [
     'scoring' => [
@@ -72,11 +75,17 @@ return [
         ['cidade' => 'Florianópolis', 'estrategia' => 'regex', 'ativo' => false,
             'url' => 'https://www.pmf.sc.gov.br/noticias/index.php',
             'obs' => 'firewall dropa TCP do VPS (bloqueio amplo de datacenter)'],
-        ['cidade' => 'Brusque', 'estrategia' => 'regex', 'ativo' => false,
+        // Atende.net v2 igual Indaial; quando o dados= vier como stub de URL
+        // rotativa, o conector segue a URL (2º passo em segueUrlRotativa).
+        ['cidade' => 'Brusque', 'estrategia' => 'atende64', 'ativo' => true,
             'url' => 'https://www.brusque.sc.gov.br/cidadao/noticia',
-            'obs' => 'Atende.net v2 com fragmento base64 de URL rotativa — fluxo 2 passos a implementar'],
-        ['cidade' => 'Blumenau', 'estrategia' => 'regex', 'ativo' => false,
-            'url' => 'https://www.blumenau.sc.gov.br/listagem/noticias',
-            'obs' => 'listagem ok, mas data em cabeçalho de grupo por extenso — parser dedicado a fazer'],
+            'base' => 'https://www.brusque.sc.gov.br', 'rotina' => '49348'],
+        // Listagem visível é casca: cards vêm por AJAX (pagina-busca.php) que
+        // só responde com cookie de sessão da listagem (url_sessao). No AJAX a
+        // data é POR CARD ("Sectur - 02/07/2026"), sem cabeçalho de grupo.
+        ['cidade' => 'Blumenau', 'estrategia' => 'regex', 'ativo' => true,
+            'url' => 'https://www.blumenau.sc.gov.br/controller/pagina-busca.php?pagina=1',
+            'url_sessao' => 'https://www.blumenau.sc.gov.br/listagem/noticias',
+            'pattern' => '/<a href="(?<url>https?:\/\/www\.blumenau\.sc\.gov\.br\/[^"]+)">[\s\S]{0,500}?<span class="descricao">(?<data>[^<]*)<\/span>\s*(?<titulo>[^<]+)<\/a>/u'],
     ],
 ];
