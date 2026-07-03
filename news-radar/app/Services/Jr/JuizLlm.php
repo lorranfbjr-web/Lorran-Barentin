@@ -108,23 +108,29 @@ class JuizLlm
     private function extrairLista(string $texto): array
     {
         $texto = trim($texto);
-        // 1) array nu no texto (claude-cli / gpt que embrulhou mas manteve o [...])
+        // 0) o texto INTEIRO é JSON válido? Decide pela estrutura REAL — o regex
+        //    [.*] abaixo pegava o array INTERNO de um objeto único (bug 02/07:
+        //    rascunho {"titulo":…,"checklist":["…"]} virava só o checklist).
+        $todo = json_decode($texto, true);
+        if (is_array($todo)) {
+            if (array_is_list($todo)) {
+                return $todo; // array nu [{...},...]
+            }
+            foreach ($todo as $v) {
+                // embrulho {"itens":[{...},…]} → 1ª propriedade-lista DE REGISTROS
+                if (is_array($v) && array_is_list($v) && isset($v[0]) && is_array($v[0])) {
+                    return $v;
+                }
+            }
+
+            return $todo === [] ? [] : [$todo]; // objeto único -> envolve
+        }
+        // 1) array nu embrulhado em prosa/fence (claude-cli e afins)
         if (preg_match('/\[.*\]/s', $texto, $m)) {
             $arr = json_decode($m[0], true);
             if (is_array($arr)) {
                 return $arr;
             }
-        }
-        // 2) objeto: {"chave":[...]} (pega a 1ª propriedade que é lista) ou registro único
-        $obj = json_decode($texto, true);
-        if (is_array($obj)) {
-            foreach ($obj as $v) {
-                if (is_array($v) && array_is_list($v)) {
-                    return $v;
-                }
-            }
-
-            return $obj === [] ? [] : [$obj]; // objeto único -> envolve
         }
 
         return [];
