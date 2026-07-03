@@ -7,6 +7,7 @@ use App\Services\Jr\JuizLlm;
 use App\Services\Jr\ZapRascunhos;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,7 +19,8 @@ use Illuminate\Support\Facades\DB;
  *
  * Insumo do LLM é SÓ o que jr_publicado tem (título + categoria + slug + data):
  * o prompt proíbe inventar fato — legenda informativa a partir do título, sem
- * enfeitar, terminando em "✏️ revisar antes de postar".
+ * enfeitar. BLOCO 8a: mensagem LIMPA — legenda final pronta pra colar, zero
+ * meta-nota no conteúdo; "revisar antes de postar" mora na linha operacional.
  *
  * GUARD-RAILS: dedup 1 kit por slug (jr_kit_social, gravado só após envio OK —
  * falha reaparece no próximo ciclo), janela de silêncio (Bloco 0b), fail-closed
@@ -30,9 +32,9 @@ use Illuminate\Support\Facades\DB;
 class JrPautaKitSocial extends Command
 {
     protected $signature = 'jrpauta:kit-social '
-        . '{--dry : gera e imprime o kit, não envia nem grava dedup} '
-        . '{--slug= : slug específico de jr_publicado} '
-        . '{--max=1 : máx de matérias recentes sem kit por run}';
+        .'{--dry : gera e imprime o kit, não envia nem grava dedup} '
+        .'{--slug= : slug específico de jr_publicado} '
+        .'{--max=1 : máx de matérias recentes sem kit por run}';
 
     protected $description = 'Gera [KIT] de divulgação (legenda IG + hashtags + card Gerador v3) da matéria nova publicada e entrega no grupo RASCUNHOS. Humano posta; cross-posting manual.';
 
@@ -55,8 +57,8 @@ class JrPautaKitSocial extends Command
             return self::SUCCESS;
         }
 
-        $juiz = new JuizLlm();
-        $zap = new ZapRascunhos();
+        $juiz = new JuizLlm;
+        $zap = new ZapRascunhos;
         $grupo = (string) config('radar_civico.canais.rascunhos');
         $modelo = (string) config('radar_civico.rascunho.modelo', 'claude-opus-4-8');
 
@@ -111,7 +113,7 @@ class JrPautaKitSocial extends Command
      * Matérias alvo: --slug força uma; default = mais recentes (publicado_em
      * desc) SEM kit em jr_kit_social, limitadas por --max. Dedup vale sempre.
      */
-    private function materias(): \Illuminate\Support\Collection
+    private function materias(): Collection
     {
         $base = DB::table('jr_publicado')
             ->leftJoin('jr_kit_social', 'jr_kit_social.slug', '=', 'jr_publicado.slug')
@@ -149,17 +151,15 @@ class JrPautaKitSocial extends Command
             return [];
         }
 
-        // legenda SEMPRE fecha com a marcação de revisão (cinto e suspensório)
-        $legenda = trim((string) $r['legenda']);
-        if (! str_contains($legenda, '✏️ revisar antes de postar')) {
-            $legenda .= "\n\n✏️ revisar antes de postar";
-        }
+        // BLOCO 8a: legenda FINAL limpa — meta-nota de revisão sai do conteúdo
+        // (vai pra linha operacional do montar), o humano copia e cola direto.
+        $legenda = trim(preg_replace('/\n*✏️\s*revisar antes de postar\s*$/u', '', trim((string) $r['legenda'])));
 
         // 3 hashtags, todas com # na frente, sem espaço interno
         $tags = array_values(array_filter(array_map(function ($t) {
             $t = preg_replace('/\s+/', '', trim((string) $t));
 
-            return $t === '' || $t === '#' ? null : (str_starts_with($t, '#') ? $t : '#' . $t);
+            return $t === '' || $t === '#' ? null : (str_starts_with($t, '#') ? $t : '#'.$t);
         }, (array) ($r['hashtags'] ?? []))));
         $tags = array_slice($tags ?: ['#Tijucas', '#SC', '#JornalRazao'], 0, 3);
 
@@ -172,26 +172,31 @@ class JrPautaKitSocial extends Command
         ];
     }
 
-    /** Mensagem do grupo RASCUNHOS. */
+    /**
+     * BLOCO 8a — mensagem LIMPA (pronta pra copiar e colar): legenda final +
+     * hashtags + link + card, e UMA linha operacional depois do separador.
+     * Zero meta-nota no conteúdo — [KIT]/avisos moram na linha operacional.
+     */
     private function montar(object $m, array $kit): string
     {
-        $link = self::SITE_BASE . '/' . $m->slug . '/';
+        $link = self::SITE_BASE.'/'.$m->slug.'/';
 
-        return implode("\n", [
-            '🎨 *[KIT]* ' . trim((string) $m->titulo),
-            '🔗 ' . $link,
-            '',
-            '📝 *Legenda IG (rascunho):*',
+        $linhas = [
             $kit['legenda'],
             '',
             implode(' ', $kit['hashtags']),
             '',
-            '🖼️ *Card (Gerador v3):*',
-            'Título: ' . $kit['card_titulo'],
-            'Subtítulo: ' . $kit['card_subtitulo'],
+            '🔗 '.$link,
             '',
-            '_humano posta — cross-posting manual_',
-        ]);
+            'Card: '.$kit['card_titulo'],
+        ];
+        if ($kit['card_subtitulo'] !== '') {
+            $linhas[] = $kit['card_subtitulo'];
+        }
+        $linhas[] = '───';
+        $linhas[] = '🤖 kit social · revisar antes de postar · humano posta';
+
+        return implode("\n", $linhas);
     }
 
     private function prompt(object $m): string
@@ -213,8 +218,8 @@ REGRAS (inegociáveis):
 - Tom sóbrio e informativo do JR: direto, sem sensacionalismo, sem caixa alta,
   sem excesso de emoji (no máximo 1, e só se couber bem). Português do Brasil.
 - Legenda IG: 2 a 4 frases curtas reafirmando o fato do título e convidando a
-  ler a matéria completa no site (link na bio). TERMINE exatamente com a linha:
-  ✏️ revisar antes de postar
+  ler a matéria completa no site (link na bio). Entregue a legenda FINAL, pronta
+  pra colar — NENHUMA nota interna, instrução ou aviso de revisão no texto.
 - Hashtags: EXATAMENTE 3, LOCAIS — a cidade se o título/slug indicar uma
   (ex.: #Tijucas, #PortoBelo, #NovaTrento, #CanelinhaSC, #SaoJoaoBatista,
   #Bombinhas), sempre #SC, e uma da editoria/tema (ex.: #Seguranca, #Transito,
@@ -229,7 +234,7 @@ Slug: {$m->slug}
 Publicada em: {$quando}
 
 Responda APENAS com um array JSON de UM objeto, sem comentários, exatamente assim:
-[{"legenda":"... (termina com a linha ✏️ revisar antes de postar)","hashtags":["#Cidade","#SC","#Tema"],"card_titulo":"... (<=60 chars)","card_subtitulo":"... (<=90 chars)"}]
+[{"legenda":"... (legenda final, sem nota interna)","hashtags":["#Cidade","#SC","#Tema"],"card_titulo":"... (<=60 chars)","card_subtitulo":"... (<=90 chars)"}]
 PROMPT;
     }
 }
