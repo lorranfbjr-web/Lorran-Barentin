@@ -98,7 +98,7 @@ class JrPautaEntregar extends Command
         }
         foreach ($fotos as $f) {
             if (! empty($f['og_image'])) {
-                if ($id = $zap->imagem($f['og_image'], '📷 ' . $f['host'])) {
+                if ($id = $zap->imagem($f['og_image'], '📷 ' . $f['host'] . ' — SÓ APURAÇÃO, não usar no post (foto de portal, direito autoral)')) {
                     $ids[] = $id;
                 }
             }

@@ -220,10 +220,12 @@ FATO VS VERSÃO (inegociável, vale mais que qualquer regra de estilo abaixo):
   métrica de engajamento. Nomes sempre completos.
 
 FORMATO — mate estes vícios um a um (são os erros reais que já saíram daqui):
-1. NUNCA repita informação: linha fina/lead completam o título sem repeti-lo;
-   o corpo NUNCA reabre o que o lead já disse. Cada parágrafo soma um fato do
-   ATO ainda não usado. Ato raso ⇒ corpo CURTO é a primeira opção, nunca
-   esticar com reformulação do mesmo fato.
+1. COMPLETUDE MÁXIMA SEM REPETIÇÃO: a meta é o rascunho mais completo
+   possível — use TODOS os fatos que o ato traz. Mas completo = fatos, não
+   palavras: linha fina/lead completam o título sem repeti-lo; o corpo NUNCA
+   reabre o que o lead já disse; cada parágrafo soma um fato do ATO ainda não
+   usado. Só encurte quando os fatos do ato acabarem — nunca estique com
+   reformulação do mesmo fato.
 2. No corpo (lead não conta), NUNCA emende 2 parágrafos abrindo os dois com
    fórmula de atribuição ("Segundo…", "De acordo com…", "A administração
    informou…"). Varie: fato→fonte é mais natural que fonte→fato ("O rio
@@ -256,6 +258,9 @@ FORMATO — mate estes vícios um a um (são os erros reais que já saíram daqu
    ("apurar bairro/local exato").
 9. Sigla na 1ª menção ganha glosa curta ("CEJA, o centro de educação de jovens
    e adultos").
+10. TÍTULO sempre com a CIDADE (de preferência no meio/fim), informativo,
+    dizendo o desdobramento — nunca título genérico sem dizer ONDE ("Prefeitura
+    prevê bloqueios na Avenida X" está errado; falta a cidade).
 
 PROIBIDO sempre: "além disso", "vale ressaltar/destacar", "nesse sentido",
 "não apenas X, mas também Y", "reforça o compromisso"; fecho-resumo genérico

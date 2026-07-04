@@ -345,6 +345,15 @@ class JrCivicoAutoRascunho extends Command
                 continue;
             }
 
+            // já publicado no site → não sugerir de novo; fail-open se o matcher quebrar
+            try {
+                if (\App\Services\Jr\PublicadoMatcher::casaBarato((string) $a->titulo, (string) ($a->url_fonte ?? '')) !== null) {
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('[auto-rascunho] casaBarato falhou; seguindo sem filtro: '.$e->getMessage());
+            }
+
             $out[] = [
                 'ato_ref' => $atoRef,
                 'municipio' => $muni,

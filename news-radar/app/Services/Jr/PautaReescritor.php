@@ -149,19 +149,20 @@ REGRAS DE OURO (inquebráveis):
 - Cidade de SC correta: use exatamente a que as fontes indicam (sugestão: "{$cidadeTxt}"). Nunca invente município.
 
 FORMATO — mate estes vícios (erros reais já vistos neste tipo de reescrita):
-- Não repita o mesmo fato entre linha_fina e o 1º parágrafo; cada parágrafo soma um fato/ângulo novo cruzado entre as fontes. Assunto raso (poucas fontes, pouco fato novo) ⇒ matéria mais curta é a primeira opção, não esticar.
+- COMPLETUDE MÁXIMA SEM REPETIÇÃO: use TODOS os fatos e ângulos que as fontes trazem — a matéria mais completa possível é a meta. Não repita o mesmo fato entre linha_fina e o 1º parágrafo; cada parágrafo soma um fato/ângulo novo cruzado entre as fontes. Só encurte quando os fatos acabarem — nunca estique com reformulação.
 - Nunca emende 2 parágrafos abrindo os dois com fórmula de atribuição; varie fato→fonte / fonte→fato sem nunca remover a atribuição.
 - Parágrafos de tamanho variado, nunca clichê que só reafirma o título. Voz ativa com sujeito concreto.
 - Cada frase passa no teste "o leitor sabe algo novo depois dela?" — corte abstração vaga e frase-enchimento.
 - Nunca fale SOBRE a cobertura dos portais ("os veículos noticiaram que…") — narre o FATO apurado.
 - Dado concreto presente em qualquer uma das fontes (endereço, telefone, nome, horário, número) vai na matéria; "lacunas" é só pro que não aparece em NENHUMA fonte ou pro que as fontes divergem.
+- NUNCA escreva "não foi informado", "não detalha", "não divulgou" nem variação disso DENTRO da matéria — o que falta vive só no campo "lacunas".
 - Data: 1ª menção = dia da semana + dia entre parênteses (ex. "sexta-feira (3)"), só se pelo menos uma fonte ancorar a data com segurança — nunca converta dêixis relativa sem data explícita; se nenhuma fonte ancorar, mantenha o formato das fontes e jogue "confirmar a data" em lacunas. Título sem dêixis relativa.
 - Sigla na 1ª menção ganha glosa curta.
 
 PROIBIDO sempre: "além disso", "vale ressaltar/destacar", "nesse sentido", fecho-resumo genérico, travessão (—) estilístico, ponto final no título, tradução de inglês, qualquer invenção pra "dar vida" ao texto.
 
 - materia: PROSA CORRIDA em parágrafos de tamanho variado conforme o fato (4 a 7), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde). Os blocos (lead, contexto, atribuição, desdobramento, status) são CHECKLIST INTERNO — não escreva rótulos no texto. Sem markdown, sem subtítulos. Separe parágrafos com \\n\\n.
-- titulos: 12 opções de título na VOZ JR — sentence case (só 1ª maiúscula + nomes próprios), informativo, sem ALL CAPS, sem ponto final, sem clickbait raso.
+- titulos: 12 opções de título na VOZ JR — sentence case (só 1ª maiúscula + nomes próprios), SEMPRE com a cidade (de preferência meio/fim), informativo, sem ALL CAPS, sem ponto final, sem clickbait raso.
 - linha_fina: 1 frase (máx ~200 caracteres) que complementa o título principal sem repeti-lo.
 - tags: exatamente 8 termos relevantes (cidade, tema, entidades citadas), minúsculas.
 - editoria: UMA destas: seguranca, politica, economia, saude, educacao, transito, infraestrutura, meioambiente, cultura, esporte, entretenimento, turismo, tecnologia, geral.
@@ -208,9 +209,10 @@ SIMÉTRICA: toda afirmação não confirmada por conta própria precisa de
 atribuição no mesmo parágrafo OU futuro do pretérito — nunca solta.
 
 FORMATO — mate estes vícios (são erros reais já vistos em textos deste tipo):
-- Não repita o mesmo fato entre linha_fina e o 1º parágrafo da matéria; cada
-  parágrafo soma informação nova do release. Release raso ⇒ matéria curta é
-  a primeira opção — não estique com reformulação do mesmo fato.
+- COMPLETUDE MÁXIMA SEM REPETIÇÃO: use TODOS os fatos do release — a matéria
+  mais completa possível é a meta. Não repita o mesmo fato entre linha_fina e
+  o 1º parágrafo; cada parágrafo soma informação nova do release. Só encurte
+  quando os fatos do release acabarem — nunca estique com reformulação.
 - Nunca emende 2 parágrafos abrindo os dois com fórmula de atribuição
   ("Segundo…", "De acordo com…"); varie fato→fonte / fonte→fato sem nunca
   remover a atribuição.
@@ -222,6 +224,8 @@ FORMATO — mate estes vícios (são erros reais já vistos em textos deste tipo
   diretamente, não o ato de divulgar.
 - Dado concreto que JÁ ESTÁ no release (endereço, telefone, nome, horário,
   número) vai na matéria. "Lacunas" é só pro que NÃO está no release.
+- NUNCA escreva "não foi informado", "não detalha", "não divulgou" nem
+  variação disso DENTRO da matéria — o que falta vive só no campo "lacunas".
 - Data: 1ª menção = dia da semana + dia entre parênteses (ex. "sexta-feira
   (3)"), consistente no texto todo, só se o release ancorar a data com
   segurança — NUNCA converta/chute dia da semana a partir de dêixis relativa
@@ -236,7 +240,7 @@ PROIBIDO sempre: "além disso", "vale ressaltar/destacar", "nesse sentido",
 fecho-resumo genérico, travessão (—) estilístico, ponto final no título,
 tradução de inglês, qualquer invenção pra "dar vida" ao texto.
 
-- Título em SENTENCE CASE em português (só a 1ª letra maiúscula + nomes próprios), informativo, sem ALL CAPS, sem ponto final, sem clickbait.
+- Título em SENTENCE CASE em português (só a 1ª letra maiúscula + nomes próprios), SEMPRE com a cidade (de preferência meio/fim), informativo, sem ALL CAPS, sem ponto final, sem clickbait.
 - linha_fina: 1 frase (máx ~200 caracteres) que complementa o título sem repeti-lo.
 - materia: prosa corrida em parágrafos de tamanho variado conforme o fato (3 a 6 parágrafos), lead jornalístico no 1º parágrafo (o quê/quem/quando/onde), tom factual e sóbrio. Sem markdown, sem títulos internos. Separe parágrafos com \\n\\n.
 - tags: 3 a 6 termos relevantes (cidade, tema, entidades citadas), minúsculas.
