@@ -49,7 +49,7 @@ class RascunhoCivico
 
         $a = (array) $row;
 
-        return [
+        $ato = [
             'source' => $source,
             'fonte_nome' => self::FONTE_NOME[$source] ?? $source,
             'municipio' => $a['municipio'] ?? null,
@@ -62,6 +62,51 @@ class RascunhoCivico
             'data_pub' => $a['data_pub'] ?? null,
             'url_fonte' => $a['url_fonte'] ?? null,
         ];
+
+        return $this->enriquecer($ato, $tabela, (int) $id);
+    }
+
+    /**
+     * Prefeitura em SPA entrega só título+resumo (~200 chars) — sem o corpo da
+     * página, o rascunho sai genérico (feedback Lorran 04/07: "cite QUAIS são
+     * as orientações"). Busca a página renderizada via Firecrawl (1 crédito;
+     * volume naturalmente limitado ao cap diário do auto-rascunho + Mesa) e
+     * grava o texto completo de volta na linha (cache natural: 2ª chamada nem
+     * busca). Fail-open: qualquer falha = segue com o texto curto.
+     */
+    private function enriquecer(array $ato, string $tabela, int $id): array
+    {
+        if (($ato['source'] ?? '') !== 'prefeitura'
+            || mb_strlen((string) $ato['texto_bruto']) >= 600
+            || empty($ato['url_fonte'])) {
+            return $ato;
+        }
+        try {
+            // 'ativo' forçado: o kill-switch JRCAM_FIRECRAWL_ATIVO governa o
+            // crawl de câmaras; aqui o limite é o cap do próprio rascunho.
+            $fc = new FirecrawlConector([
+                'firecrawl' => array_merge((array) config('camara.firecrawl'), ['ativo' => true]),
+                'pausa_seg' => 1,
+            ]);
+            if (! $fc->disponivel()) {
+                return $ato;
+            }
+            $md = $fc->scrapeSimples((string) $ato['url_fonte']);
+            if ($md === null) {
+                return $ato;
+            }
+            $md = trim((string) preg_replace('/!\[[^\]]*\]\([^)]*\)/', '', $md));
+            $md = mb_substr($md, 0, 6000);
+            if (mb_strlen($md) > mb_strlen((string) $ato['texto_bruto'])) {
+                DB::table($tabela)->where('id', $id)->update(['texto_bruto' => $md]);
+                $ato['texto_bruto'] = $md;
+                \Illuminate\Support\Facades\Log::info("[rascunho] texto enriquecido via firecrawl: {$tabela}#{$id} (".mb_strlen($md).' chars)');
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('[rascunho] enriquecer falhou; seguindo com texto curto: '.$e->getMessage());
+        }
+
+        return $ato;
     }
 
     /**

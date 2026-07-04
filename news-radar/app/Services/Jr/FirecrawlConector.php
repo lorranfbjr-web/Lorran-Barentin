@@ -145,6 +145,29 @@ class FirecrawlConector
         ];
     }
 
+    public const CUSTO_SCRAPE_SIMPLES = 1;
+
+    /**
+     * Scrape LEVE (sem stealth, 1 crédito) — página pública que só precisa de
+     * render JS (ex.: notícia de prefeitura em SPA). Devolve o markdown ou null.
+     */
+    public function scrapeSimples(string $url, int $waitMs = 8000): ?string
+    {
+        $r = $this->post('/v2/scrape', [
+            'url' => $url,
+            'formats' => ['markdown'],
+            'onlyMainContent' => true,
+            'waitFor' => $waitMs,
+        ], 90);
+        $this->creditosGastos += self::CUSTO_SCRAPE_SIMPLES;
+        if ($r === null) {
+            return null;
+        }
+        $md = trim((string) ($r['data']['markdown'] ?? ''));
+
+        return $md !== '' ? $md : null;
+    }
+
     /**
      * Passo 3 — parseia a página de detalhe (markdown) numa proposição no
      * formato de jr_camara_proposicoes. Devolve null se não achar tipo+nº/ano.
