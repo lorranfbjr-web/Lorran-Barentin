@@ -1,0 +1,5 @@
+assets/fonts/
+assets/*.onnx
+*.mp4
+*.wav
+__pycache__/
