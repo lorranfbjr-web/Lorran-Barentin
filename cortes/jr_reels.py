@@ -39,8 +39,8 @@ DEFAULT_LAYOUT = {
     "head_max_w": 1000,
     "logo_h": 66,
     "logo_gap": 22,
-    "cap_y": 1530,          # centro da legenda
-    "cap_size": 64,
+    "cap_y": 1500,          # centro da legenda
+    "cap_size": 66,
     "cap_max_w": 820,
     "face_y": 0.36,         # altura do rosto dentro da metade de baixo
     "bar_h": 8,
@@ -252,58 +252,54 @@ def build_cards(words, max_words=3, max_chars=18, gap_break=0.32):
         if len(c) >= 2 and clean_word(last["w"]).lower() in FUNC_WORDS and last["w"].strip()[-1:] not in ".!?,;:" \
                 and n[0]["s"] - last["e"] < 0.25 and len(n) < max_words:
             n.insert(0, c.pop())
-    return [c for c in cards if c]
+    cards = [c for c in cards if c]
+    # palavra funcional sozinha ("da", "para", "que") nunca pisca isolada: junta com o bloco seguinte
+    k = 0
+    while k < len(cards) - 1:
+        c = cards[k]
+        if len(c) == 1 and clean_word(c[0]["w"]).lower() in FUNC_WORDS and c[0]["w"].strip()[-1:] not in ".!?,;:" \
+                and cards[k + 1][0]["s"] - c[0]["e"] < 0.35:
+            cards[k + 1].insert(0, c[0])
+            cards.pop(k)
+            continue
+        k += 1
+    return cards
 
 class CaptionRenderer:
+    """Legenda no padrao das referencias do JR: branca, Montserrat ExtraBold, caixa mista como falado,
+    sem karaoke e sem palavra colorida; legibilidade por halo em camadas + sombra suave (sem contorno duro)."""
     def __init__(self, L, emphasis=()):
         self.L = L
         self.size = L["cap_size"]
-        self.emph = set(e.lower() for e in emphasis)
         self.cache = {}
 
-    def _font(self, size):
-        return font("Montserrat-800", size)
-
-    def sprite(self, card_words, active):
-        key = (tuple(w["w"] for w in card_words), active)
+    def sprite(self, card_words, active=None):
+        key = tuple(w["w"] for w in card_words)
         if key in self.cache:
             return self.cache[key]
         size = self.size
-        toks = [clean_word(w["w"]) for w in card_words]
-        f = self._font(size)
-        space = f.getlength(" ")
-        widths = [f.getlength(t) for t in toks]
-        total = sum(widths) + space * (len(toks) - 1)
-        while total > self.L["cap_max_w"] and size > 40:
-            size -= 2; f = self._font(size); space = f.getlength(" ")
-            widths = [f.getlength(t) for t in toks]; total = sum(widths) + space * (len(toks) - 1)
+        text = " ".join(clean_word(w["w"]) for w in card_words)
+        f = font("Montserrat-800", size)
+        while f.getlength(text) > self.L["cap_max_w"] and size > 40:
+            size -= 2; f = font("Montserrat-800", size)
         asc, desc = f.getmetrics()
-        padx, pady = 16, 8
-        m = 30
-        Wc = int(total + 2 * padx + 2 * m); Hc = int(asc + desc + 2 * pady + 2 * m)
+        m = 44
+        Wc = int(f.getlength(text)) + 2 * m; Hc = asc + desc + 2 * m
+        mask = Image.new("L", (Wc, Hc), 0)
+        ImageDraw.Draw(mask).text((m, m), text, font=f, fill=255)
+        def layer(dilate, blur, opacity, dy=0):
+            mk = mask.filter(ImageFilter.MaxFilter(dilate)) if dilate > 1 else mask
+            if dy:
+                mk = mk.transform(mk.size, Image.AFFINE, (1, 0, 0, 0, 1, -dy))
+            mk = mk.filter(ImageFilter.GaussianBlur(blur)).point(lambda v: int(v * opacity))
+            im = Image.new("RGBA", (Wc, Hc), (0, 0, 0, 255)); im.putalpha(mk)
+            return im
         img = Image.new("RGBA", (Wc, Hc), (0, 0, 0, 0))
-        # sombra do texto
-        sh = Image.new("RGBA", (Wc, Hc), (0, 0, 0, 0))
-        dsh = ImageDraw.Draw(sh)
-        x = m + padx
-        for t, wd in zip(toks, widths):
-            dsh.text((x, m + pady + 5), t, font=f, fill=(0, 0, 0, 200), stroke_width=5, stroke_fill=(0, 0, 0, 200))
-            x += wd + space
-        sh = sh.filter(ImageFilter.GaussianBlur(7))
-        img.alpha_composite(sh)
-        d = ImageDraw.Draw(img)
-        x = m + padx
-        for i, (t, wd) in enumerate(zip(toks, widths)):
-            is_emph = t.lower() in self.emph
-            if i == active:
-                bx0, by0 = x - 12, m + pady - 6
-                bx1, by1 = x + wd + 12, m + pady + asc + desc - 2
-                d.rounded_rectangle([bx0, by0, bx1, by1], radius=12, fill=(ORANGE if is_emph else BLUE) + (255,))
-                d.text((x, m + pady), t, font=f, fill=WHITE)
-            else:
-                d.text((x, m + pady), t, font=f, fill=(ORANGE if is_emph else WHITE),
-                       stroke_width=3, stroke_fill=(10, 14, 30, 235))
-            x += wd + space
+        img.alpha_composite(layer(21, 16, 0.30))          # halo ambiente: escurece de leve a area
+        img.alpha_composite(layer(7, 5, 0.55))            # halo de contato: abraca o desenho da letra
+        img.alpha_composite(layer(1, 4, 0.55, dy=4))      # sombra projetada (como na referencia)
+        white = Image.new("RGBA", (Wc, Hc), (255, 255, 255, 255)); white.putalpha(mask)
+        img.alpha_composite(white)
         sp = Sprite(img)
         self.cache[key] = sp
         return sp
@@ -413,8 +409,18 @@ def load_words(cfg, t0, t1):
                 i += len(vs)
             else:
                 i += 1
+    # simbolo solto (ex.: "82" + "%") gruda na palavra anterior
+    merged = []
+    for w in words:
+        t = w["w"].strip()
+        if merged and (re.fullmatch(r"[%º°ª]+[.,;:!?…]*", t) or
+                       (re.fullmatch(r"[.,]\d+[%.,;:!?…]*", t) and re.search(r"\d$", merged[-1]["w"].strip()))):
+            merged[-1]["w"] = merged[-1]["w"].strip() + t
+            merged[-1]["e"] = w["e"]
+            continue
+        merged.append(w)
     # remove palavras apagadas pela correcao
-    return [w for w in words if w["w"].strip() not in ("", "-")]
+    return [w for w in merged if w["w"].strip() not in ("", "-")]
 
 def build_edl(words, audio, t0, t1, fps, cfg):
     """Intervalos mantidos, em indices de frame relativos a t0."""
@@ -587,8 +593,12 @@ def choose_track(an, pick="largest"):
 
 # ------------------------------------------------------------------ foto de topo
 class TopPhoto:
-    def __init__(self, path, seam, focus=(0.5, 0.45), dur=60.0, kb=(1.0, 1.09), darken=0.0):
+    def __init__(self, path, seam, focus=(0.5, 0.45), dur=60.0, kb=(1.0, 1.09), darken=0.0, grade=None):
+        from PIL import ImageEnhance
         im = Image.open(path).convert("RGB")
+        if grade:
+            im = ImageEnhance.Contrast(im).enhance(grade[0])
+            im = ImageEnhance.Color(im).enhance(grade[1])
         self.seam = seam
         zw, zh = W, seam
         s = max(zw / im.width, zh / im.height) * kb[1] * 1.02
@@ -699,10 +709,18 @@ class Reel:
         bounds = set()
         for k in range(1, len(edl)):
             bounds.add(("jump", tm.cum[k]))
+        def same_camera(c):
+            """Corte na fonte com rosto do mesmo tamanho dos dois lados = emenda na mesma camera."""
+            before = [track[i][2] for i in tkeys if c - fps * 2 <= i < c]
+            after = [track[i][2] for i in tkeys if c <= i < c + fps * 2]
+            if not before or not after:
+                return False
+            r = np.median(after) / np.median(before)
+            return 0.8 < r < 1.25
         for c in cam_cuts:
             for k, (a, b) in enumerate(edl):
                 if a < c < b:
-                    bounds.add(("cam", tm.cum[k] + (c - a)))
+                    bounds.add(("jump" if same_camera(c) else "cam", tm.cum[k] + (c - a)))
         for tt in cfg.get("force_cuts", []):      # quebras manuais (tempo de saida, s)
             bounds.add(("jump", int(round(tt * fps))))
         sent_ends = [int(round(w["e"] * fps)) for w in ow if w["w"].strip()[-1:] in ".!?"]
@@ -755,7 +773,7 @@ class Reel:
         seam = L["seam"]
         photo = cfg.get("photo")
         self.top = TopPhoto(photo, seam, tuple(cfg.get("photo_focus", (0.5, 0.45))), self.dur,
-                            darken=cfg.get("photo_darken", 0.0)) if photo else TopPanel(seam, self.dur)
+                            darken=cfg.get("photo_darken", 0.0), grade=cfg.get("photo_grade")) if photo else TopPanel(seam, self.dur)
         ga = np.zeros((seam, W), np.float32)
         yy = np.arange(seam, dtype=np.float32)
         ga[:] = (np.clip((yy - seam * 0.38) / (seam * 0.62), 0, 1) ** 1.3 * cfg.get("grad", 0.62))[:, None]
@@ -850,7 +868,8 @@ class Reel:
         cw0 = min(sw, sh * ZW / ZH); ch0 = cw0 * ZH / ZW
         cw, ch = cw0 / z, ch0 / z
         fx, fy, fh = P["face"]
-        x0 = min(max(fx - cw / 2, 0), sw - cw); y0 = min(max(fy - L["face_y"] * ch, 0), sh - ch)
+        fyr = L.get("face_y_tight", L["face_y"] + 0.04) if P.get("lv") else L["face_y"]
+        x0 = min(max(fx - cw / 2, 0), sw - cw); y0 = min(max(fy - fyr * ch, 0), sh - ch)
         s = ZW / cw
         M = np.array([[s, 0, -x0 * s], [0, s, -y0 * s]], np.float32)
         return cv2.warpAffine(frame, M, (ZW, ZH), flags=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC,
@@ -898,13 +917,9 @@ class Reel:
             if t >= c[0]["s"] - 0.02:
                 nxt = self.cards[ci + 1][0]["s"] if ci + 1 < len(self.cards) else self.dur + 1
                 if t < min(nxt, c[-1]["e"] + 0.6):
-                    act = 0
-                    for j, w in enumerate(c):
-                        if t >= w["s"] - 0.02:
-                            act = j
-                    sp = self.caprender.sprite(c, act)
-                    pp = (t - c[0]["s"]) / 0.12
-                    sc_ = 0.86 + 0.14 * ease_out_back(pp) if pp < 1 else 1.0
+                    sp = self.caprender.sprite(c)
+                    pp = (t - c[0]["s"]) / 0.10
+                    sc_ = 0.92 + 0.08 * ease_out_cubic(pp) if pp < 1 else 1.0
                     sp2 = sp.scaled(sc_) if sc_ != 1.0 else sp
                     blit(canvas, sp2, (W - sp2.w) / 2, L["cap_y"] - sp2.h / 2, min(1.0, max(0.0, pp * 1.6)))
         return canvas
